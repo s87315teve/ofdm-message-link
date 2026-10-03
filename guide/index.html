@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OFDM message link 導覽</title>
+<meta name="description" content="ofdm-message-link 的互動導覽：模組化的工作流、packet lab、程式結構與啟動步驟。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="page">
+  <div class="wrap">
+    <p class="crumb"><code>ofdm-message-link</code> · 導覽</p>
+    <h1>單向 OFDM message link</h1>
+    <p class="lede">你在 TX window 打一則 message。RX window 從 OFDM waveform 解出這則 message。這一頁說明中間的每一步。</p>
+    <details class="limits">
+      <summary>這個範例的限制</summary>
+      <ul>
+        <li>這個範例是 demo。它不是 acceptance test。</li>
+        <li>Link 只有一個方向。它沒有 ACK、ARQ 與 TDD。</li>
+        <li>Link 不會重送遺失的 packet。</li>
+        <li>請不要用這個範例的數字證明 throughput、reliability 或 RF 效能。</li>
+      </ul>
+    </details>
+  </div>
+</header>
+
+<div class="bar">
+  <div class="wrap bar-inner">
+    <div class="tabs" role="tablist" aria-label="分頁">
+      <button role="tab" id="tab-flow" aria-controls="view-flow" aria-selected="true"><span class="n">1</span>工作流</button>
+      <button role="tab" id="tab-lab" aria-controls="view-lab" aria-selected="false" tabindex="-1"><span class="n">2</span>Packet lab</button>
+      <button role="tab" id="tab-code" aria-controls="view-code" aria-selected="false" tabindex="-1"><span class="n">3</span>程式結構</button>
+      <button role="tab" id="tab-run" aria-controls="view-run" aria-selected="false" tabindex="-1"><span class="n">4</span>執行</button>
+    </div>
+    <div class="seg" role="group" aria-label="Sample transport" id="transport-seg">
+      <button type="button" data-transport="sim" aria-pressed="true">Simulation</button>
+      <button type="button" data-transport="uhd" aria-pressed="false">USRP</button>
+      <button type="button" data-transport="pluto" aria-pressed="false">Pluto</button>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+
+<!-- ============ 1. Workflow ============ -->
+<section id="view-flow" role="tabpanel" aria-labelledby="tab-flow">
+  <p class="intro">上排是 TX chain，右邊是 channel，下排是 RX chain。Simulation 與硬體只有 sample transport 與 channel 不同。請點一個 block，查看它的說明。</p>
+
+  <div class="card">
+    <div class="toolbar">
+      <div class="player">
+        <button type="button" class="btn primary" id="play">▶ 跟著一則 message 走</button>
+        <button type="button" class="btn" id="prev" aria-label="上一步">◀</button>
+        <button type="button" class="btn" id="next" aria-label="下一步">▶</button>
+        <span class="stepno" id="stepno"></span>
+      </div>
+      <div class="legend" aria-label="圖例">
+        <span><i class="swatch tx"></i>TX chain</span>
+        <span><i class="swatch rx"></i>RX chain</span>
+        <span><i class="swatch ch"></i>Channel</span>
+        <span><i class="swatch ins"></i>GUI instrument</span>
+        <span><svg viewBox="0 0 34 10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" class="flow"/></svg>Data</span>
+        <span><svg viewBox="0 0 34 10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" class="ctlp"/></svg>Control</span>
+        <span><svg viewBox="0 0 34 10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" class="tap"/></svg>Measurement</span>
+      </div>
+    </div>
+
+    <div class="scroller" id="chain" data-mode="sim">
+    <svg id="chain-svg" viewBox="0 0 1640 690" role="img" aria-labelledby="chain-title chain-desc">
+      <title id="chain-title">單向 OFDM message link 的 block diagram</title>
+      <desc id="chain-desc">TX chain, left to right: ingress, datagram, PHY frame, FEC encoder, symbol mapper, OFDM modulator, burst assembly, peak normalize, sample sink. After the channel, RX chain, right to left: sample source, acquisition, header decode, equalizer, demapper, FEC decoder, frame check, reassembly, egress.</desc>
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+        <marker id="ah-ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-ch"/></marker>
+        <marker id="ah-ctl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-ctl"/></marker>
+        <marker id="ah-tap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-tap"/></marker>
+      </defs>
+
+      <!-- process boundaries -->
+      <rect class="proc" x="158" y="146" width="1300" height="156" rx="14"/>
+      <text class="t-group" x="176" y="170">tx_app · process 1（TX window）</text>
+      <rect class="proc" x="158" y="366" width="1300" height="300" rx="14"/>
+      <text class="t-group" x="176" y="390">rx_app · process 2（RX window）</text>
+
+      <!-- layer labels -->
+      <text class="t-group" x="232" y="134" text-anchor="middle">Application</text>
+      <text class="t-group" x="448" y="134" text-anchor="middle">Link（datagram / frame）</text>
+      <text class="t-group" x="1024" y="134" text-anchor="middle">PHY</text>
+      <text class="t-group" x="1384" y="134" text-anchor="middle">Sample transport</text>
+
+      <!-- MCS control -->
+      <g class="blk ctl" data-id="mcs" tabindex="0" role="button">
+        <rect x="608" y="44" width="256" height="58" rx="10"/>
+        <text class="t-title" x="736" y="68" text-anchor="middle">MCS selector（0–7）</text>
+        <text class="t-sub" x="736" y="88" text-anchor="middle">從下一則 message 開始生效</text>
+      </g>
+      <path class="ctlp" d="M664,102 V194" marker-end="url(#ah-ctl)"/>
+      <path class="ctlp" d="M808,102 V194" marker-end="url(#ah-ctl)"/>
+      <path class="ctlp" d="M864,73 H1096 V194" marker-end="url(#ah-ctl)"/>
+      <text class="t-ctl" x="980" y="66" text-anchor="middle">寫進 burst header</text>
+
+      <!-- external producer / consumer -->
+      <g class="blk ext" data-id="ext-in" tabindex="0" role="button">
+        <rect x="12" y="196" width="118" height="88" rx="10"/>
+        <text class="t-title" x="71" y="228" text-anchor="middle">你的程式</text>
+        <text class="t-sub" x="71" y="248" text-anchor="middle">udp_send</text>
+        <text class="t-sub" x="71" y="264" text-anchor="middle">ffmpeg · socket</text>
+      </g>
+      <path class="flow" d="M130,240 H168" marker-end="url(#ah)"/>
+      <text class="t-edge" x="149" y="232" text-anchor="middle">52001</text>
+
+      <g class="blk ext" data-id="ext-out" tabindex="0" role="button">
+        <rect x="12" y="416" width="118" height="88" rx="10"/>
+        <text class="t-title" x="71" y="448" text-anchor="middle">你的程式</text>
+        <text class="t-sub" x="71" y="468" text-anchor="middle">udp_recv</text>
+        <text class="t-sub" x="71" y="484" text-anchor="middle">ffplay · socket</text>
+      </g>
+      <path class="flow" d="M170,460 H132" marker-end="url(#ah)"/>
+      <text class="t-edge" x="151" y="452" text-anchor="middle">52002</text>
+
+      <!-- TX chain: x = 176 + 144*i -->
+      <g class="blk tx" data-id="tx-in" tabindex="0" role="button">
+        <rect x="170" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="232" y="226" text-anchor="middle">Ingress</text>
+        <text class="t-sub" x="232" y="248" text-anchor="middle">GUI input box</text>
+        <text class="t-sub" x="232" y="264" text-anchor="middle">UDP ingress</text>
+      </g>
+      <g class="blk tx" data-id="tx-dgram" tabindex="0" role="button">
+        <rect x="314" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="376" y="226" text-anchor="middle">Datagram</text>
+        <text class="t-sub" x="376" y="248" text-anchor="middle">28 B header</text>
+        <text class="t-sub" x="376" y="264" text-anchor="middle">fragment ≤ 968 B</text>
+      </g>
+      <g class="blk tx" data-id="tx-frame" tabindex="0" role="button">
+        <rect x="458" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="520" y="226" text-anchor="middle">PHY frame</text>
+        <text class="t-sub" x="520" y="248" text-anchor="middle">16-bit sequence</text>
+        <text class="t-sub" x="520" y="264" text-anchor="middle">+ CRC-32</text>
+      </g>
+      <g class="blk tx" data-id="tx-fec" tabindex="0" role="button">
+        <rect x="602" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="664" y="226" text-anchor="middle">FEC encoder</text>
+        <text class="t-sub" x="664" y="248" text-anchor="middle">Turbo / Conv.</text>
+        <text class="t-sub" x="664" y="264" text-anchor="middle">r = 1/3, 1/2, 1</text>
+      </g>
+      <g class="blk tx" data-id="tx-map" tabindex="0" role="button">
+        <rect x="746" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="808" y="226" text-anchor="middle">Symbol mapper</text>
+        <text class="t-sub" x="808" y="248" text-anchor="middle">QPSK / 16QAM</text>
+        <text class="t-sub" x="808" y="264" text-anchor="middle">2 / 4 bits/symbol</text>
+      </g>
+      <g class="blk tx" data-id="tx-ofdm" tabindex="0" role="button">
+        <rect x="890" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="952" y="226" text-anchor="middle">OFDM modulator</text>
+        <text class="t-sub" x="952" y="248" text-anchor="middle">IFFT 64 + CP 16</text>
+        <text class="t-sub" x="952" y="264" text-anchor="middle">48 data, 4 pilots</text>
+      </g>
+      <g class="blk tx" data-id="tx-burst" tabindex="0" role="button">
+        <rect x="1034" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="1096" y="226" text-anchor="middle">Burst assembly</text>
+        <text class="t-sub" x="1096" y="248" text-anchor="middle">preamble, training,</text>
+        <text class="t-sub" x="1096" y="264" text-anchor="middle">header, payload</text>
+      </g>
+      <g class="blk tx" data-id="tx-peak" tabindex="0" role="button">
+        <rect x="1178" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="1240" y="226" text-anchor="middle">Peak normalize</text>
+        <text class="t-sub" x="1240" y="248" text-anchor="middle">PAPR ≈ 15 dB</text>
+        <text class="t-sub" x="1240" y="264" text-anchor="middle">peak → 0.7</text>
+      </g>
+      <g class="blk tx" data-id="tx-sink" tabindex="0" role="button">
+        <rect x="1322" y="196" width="124" height="88" rx="10"/>
+        <text class="t-title" x="1384" y="226" text-anchor="middle">Sample sink</text>
+        <text class="t-sub only-sim" x="1384" y="248" text-anchor="middle">UDP sink</text>
+        <text class="t-sub only-sim" x="1384" y="264" text-anchor="middle">127.0.0.1:52101</text>
+        <text class="t-sub only-uhd" x="1384" y="248" text-anchor="middle">UHD sink</text>
+        <text class="t-sub only-uhd" x="1384" y="264" text-anchor="middle">timed (tx_time)</text>
+        <text class="t-sub only-pluto" x="1384" y="248" text-anchor="middle">Pluto sink</text>
+        <text class="t-sub only-pluto" x="1384" y="264" text-anchor="middle">libiio, untimed</text>
+      </g>
+      <path class="flow" d="M294,240 H312" marker-end="url(#ah)"/>
+      <path class="flow" d="M438,240 H456" marker-end="url(#ah)"/>
+      <path class="flow" d="M582,240 H600" marker-end="url(#ah)"/>
+      <path class="flow" d="M726,240 H744" marker-end="url(#ah)"/>
+      <path class="flow" d="M870,240 H888" marker-end="url(#ah)"/>
+      <path class="flow" d="M1014,240 H1032" marker-end="url(#ah)"/>
+      <path class="flow" d="M1158,240 H1176" marker-end="url(#ah)"/>
+      <path class="flow" d="M1302,240 H1320" marker-end="url(#ah)"/>
+      <text class="t-edge" x="304" y="300" text-anchor="middle">bytes</text>
+      <text class="t-edge" x="448" y="300" text-anchor="middle">≤996 B</text>
+      <text class="t-edge" x="592" y="300" text-anchor="middle">bits</text>
+      <text class="t-edge" x="736" y="300" text-anchor="middle">coded</text>
+      <text class="t-edge" x="880" y="300" text-anchor="middle">symbols</text>
+      <text class="t-edge" x="1024" y="300" text-anchor="middle">IQ</text>
+      <text class="t-edge" x="1168" y="300" text-anchor="middle">burst</text>
+      <text class="t-edge" x="1312" y="300" text-anchor="middle">c64</text>
+
+      <!-- channel -->
+      <g class="blk ch" data-id="channel" tabindex="0" role="button">
+        <rect x="1490" y="196" width="138" height="308" rx="12"/>
+        <text class="t-title" x="1559" y="318" text-anchor="middle">Channel</text>
+        <text class="t-sub only-sim" x="1559" y="344" text-anchor="middle">localhost UDP</text>
+        <text class="t-sub only-sim" x="1559" y="362" text-anchor="middle">+ AWGN</text>
+        <text class="t-mono only-sim" x="1559" y="380" text-anchor="middle">--snr-db</text>
+        <text class="t-sub only-ota" x="1559" y="344" text-anchor="middle">Over-the-air RF</text>
+        <text class="t-sub only-ota" x="1559" y="362" text-anchor="middle">2.45 GHz default</text>
+        <text class="t-mono only-ota" x="1559" y="380" text-anchor="middle">5 MS/s</text>
+      </g>
+      <path class="flow-ch" d="M1446,240 H1488" marker-end="url(#ah-ch)"/>
+      <path class="flow-ch" d="M1490,460 H1448" marker-end="url(#ah-ch)"/>
+      <text class="t-edge only-uhd" x="1467" y="228" text-anchor="middle">USRP</text>
+      <text class="t-edge only-uhd" x="1467" y="448" text-anchor="middle">USRP</text>
+      <text class="t-edge only-pluto" x="1467" y="228" text-anchor="middle">Pluto</text>
+      <text class="t-edge only-pluto" x="1467" y="448" text-anchor="middle">Pluto</text>
+
+      <!-- RX chain: right to left -->
+      <g class="blk rx" data-id="rx-src" tabindex="0" role="button">
+        <rect x="1322" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="1384" y="446" text-anchor="middle">Sample source</text>
+        <text class="t-sub only-sim" x="1384" y="468" text-anchor="middle">UDP source</text>
+        <text class="t-sub only-sim" x="1384" y="484" text-anchor="middle">idle: zeros / AWGN</text>
+        <text class="t-sub only-uhd" x="1384" y="468" text-anchor="middle">UHD source</text>
+        <text class="t-sub only-uhd" x="1384" y="484" text-anchor="middle">free-running</text>
+        <text class="t-sub only-pluto" x="1384" y="468" text-anchor="middle">Pluto source</text>
+        <text class="t-sub only-pluto" x="1384" y="484" text-anchor="middle">libiio, free-running</text>
+      </g>
+      <g class="blk rx" data-id="rx-acq" tabindex="0" role="button">
+        <rect x="1178" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="1240" y="446" text-anchor="middle">Acquisition</text>
+        <text class="t-sub" x="1240" y="468" text-anchor="middle">Schmidl–Cox</text>
+        <text class="t-sub" x="1240" y="484" text-anchor="middle">CFO + gain</text>
+      </g>
+      <g class="blk rx" data-id="rx-header" tabindex="0" role="button">
+        <rect x="1034" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="1096" y="446" text-anchor="middle">Header decode</text>
+        <text class="t-sub" x="1096" y="468" text-anchor="middle">channel estimate</text>
+        <text class="t-sub" x="1096" y="484" text-anchor="middle">3× repeat + CRC</text>
+      </g>
+      <g class="blk rx" data-id="rx-eq" tabindex="0" role="button">
+        <rect x="890" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="952" y="446" text-anchor="middle">Equalizer</text>
+        <text class="t-sub" x="952" y="468" text-anchor="middle">FFT + pilot EQ</text>
+        <text class="t-sub" x="952" y="484" text-anchor="middle">SFO tracking</text>
+      </g>
+      <g class="blk rx" data-id="rx-demap" tabindex="0" role="button">
+        <rect x="746" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="808" y="446" text-anchor="middle">Demapper</text>
+        <text class="t-sub" x="808" y="468" text-anchor="middle">Turbo: soft LLR</text>
+        <text class="t-sub" x="808" y="484" text-anchor="middle">QPSK / 16QAM</text>
+      </g>
+      <g class="blk rx" data-id="rx-fec" tabindex="0" role="button">
+        <rect x="602" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="664" y="446" text-anchor="middle">FEC decoder</text>
+        <text class="t-sub" x="664" y="468" text-anchor="middle">Turbo / Conv.</text>
+        <text class="t-sub" x="664" y="484" text-anchor="middle">4 worker processes</text>
+      </g>
+      <g class="blk rx" data-id="rx-frame" tabindex="0" role="button">
+        <rect x="458" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="520" y="446" text-anchor="middle">Frame check</text>
+        <text class="t-sub" x="520" y="468" text-anchor="middle">CRC-32</text>
+        <text class="t-sub" x="520" y="484" text-anchor="middle">sequence gap = loss</text>
+      </g>
+      <g class="blk rx" data-id="rx-dgram" tabindex="0" role="button">
+        <rect x="314" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="376" y="446" text-anchor="middle">Reassembly</text>
+        <text class="t-sub" x="376" y="468" text-anchor="middle">by message_id</text>
+        <text class="t-sub" x="376" y="484" text-anchor="middle">drop incomplete</text>
+      </g>
+      <g class="blk rx" data-id="rx-out" tabindex="0" role="button">
+        <rect x="170" y="416" width="124" height="88" rx="10"/>
+        <text class="t-title" x="232" y="446" text-anchor="middle">Egress</text>
+        <text class="t-sub" x="232" y="468" text-anchor="middle">GUI message list</text>
+        <text class="t-sub" x="232" y="484" text-anchor="middle">UDP egress</text>
+      </g>
+      <path class="flow" d="M1322,460 H1304" marker-end="url(#ah)"/>
+      <path class="flow" d="M1178,460 H1160" marker-end="url(#ah)"/>
+      <path class="flow" d="M1034,460 H1016" marker-end="url(#ah)"/>
+      <path class="flow" d="M890,460 H872" marker-end="url(#ah)"/>
+      <path class="flow" d="M746,460 H728" marker-end="url(#ah)"/>
+      <path class="flow" d="M602,460 H584" marker-end="url(#ah)"/>
+      <path class="flow" d="M458,460 H440" marker-end="url(#ah)"/>
+      <path class="flow" d="M314,460 H296" marker-end="url(#ah)"/>
+
+      <!-- RX control: the header selects demapper and decoder -->
+      <path class="ctlp" d="M1096,416 V398 H808 V414" marker-end="url(#ah-ctl)"/>
+      <path class="ctlp" d="M808,398 H664 V414" marker-end="url(#ah-ctl)"/>
+      <text class="t-ctl" x="952" y="392" text-anchor="middle">header → MCS、wire version、length</text>
+
+      <!-- GUI instruments -->
+      <g class="blk ins" data-id="gui-spectrum" tabindex="0" role="button">
+        <rect x="1300" y="586" width="168" height="62" rx="10"/>
+        <text class="t-title" x="1384" y="612" text-anchor="middle">Spectrum · RX level</text>
+        <text class="t-sub" x="1384" y="632" text-anchor="middle">沒有 decode 成功時也更新</text>
+      </g>
+      <g class="blk ins" data-id="gui-const" tabindex="0" role="button">
+        <rect x="868" y="586" width="168" height="62" rx="10"/>
+        <text class="t-title" x="952" y="612" text-anchor="middle">Constellation · EVM</text>
+        <text class="t-sub" x="952" y="632" text-anchor="middle">只顯示 decode 成功的 burst</text>
+      </g>
+      <g class="blk ins" data-id="gui-stats" tabindex="0" role="button">
+        <rect x="436" y="586" width="168" height="62" rx="10"/>
+        <text class="t-title" x="520" y="612" text-anchor="middle">Stats · Link light</text>
+        <text class="t-sub" x="520" y="632" text-anchor="middle">Goodput / Loss / SNR</text>
+      </g>
+      <path class="tap" d="M1384,504 V584" marker-end="url(#ah-tap)"/>
+      <path class="tap" d="M952,504 V584" marker-end="url(#ah-tap)"/>
+      <path class="tap" d="M520,504 V584" marker-end="url(#ah-tap)"/>
+    </svg>
+    </div>
+    <p class="hint">窄螢幕可以左右捲動這張圖。你也可以用 Tab 鍵移動，用 Enter 選擇 block。</p>
+
+    <div class="shape" id="shape" aria-live="polite"></div>
+  </div>
+
+  <div class="card detail" id="detail" aria-live="polite"></div>
+</section>
+
+<!-- ============ 2. Packet lab ============ -->
+<section id="view-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
+  <p class="intro">請改變 message 大小與 MCS。頁面用這個範例的 encoder 產生的資料計算 burst。</p>
+
+  <div class="card controls">
+    <label class="field">
+      <span>Message 大小 <output id="size-out"></output></span>
+      <input type="range" id="size" min="1" max="6000" value="1500" step="1">
+    </label>
+    <label class="field">
+      <span>這則 message 的 MCS</span>
+      <select id="mcs"></select>
+    </label>
+    <label class="field">
+      <span>Sample rate</span>
+      <select id="rate">
+        <option value="5000000">5 MS/s（預設）</option>
+        <option value="10000000">10 MS/s</option>
+        <option value="20000000">20 MS/s</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <h2>步驟 1：Message 變成 fragments</h2>
+    <p class="note">一個 fragment 最多 968 bytes。每個 fragment 變成一個 burst。</p>
+    <div class="frags" id="frags"></div>
+    <p class="hint" id="frag-hint"></p>
+  </div>
+
+  <div class="card">
+    <h2>步驟 2：每一層加上 header</h2>
+    <p class="note">這些長條顯示你選擇的 fragment。寬度不是按比例畫的。</p>
+    <div class="stack" id="stack"></div>
+  </div>
+
+  <div class="card">
+    <h2>步驟 3：Frame 變成一個 burst</h2>
+    <p class="note">這個長條是按比例畫的。一個 OFDM symbol 有 80 samples：IFFT 的 64 個，加上 cyclic prefix 的 16 個。</p>
+    <div class="burst" id="burst"></div>
+    <ul class="burst-legend" id="burst-legend"></ul>
+    <p class="hint" id="burst-total"></p>
+    <details class="more">
+      <summary>比較 8 種 MCS</summary>
+      <p class="note">這張表使用你選擇的 fragment。Airtime 包含 preamble、training 與 header，不包含前後的 guard。請點一列來選擇那種 MCS。</p>
+      <div class="table-scroll"><table id="mcs-table"></table></div>
+    </details>
+    <details class="more">
+      <summary>一個 OFDM symbol 裡面有什麼？</summary>
+      <p class="note">64-point FFT 使用 52 個 subcarriers：48 個放 data，4 個放 pilot。DC subcarrier 與兩側是空的。所以 occupied bandwidth 是 52/64 × sample rate。</p>
+      <div class="legend">
+        <span><i class="sw d"></i>Data（48）</span>
+        <span><i class="sw pl"></i>Pilot（±7、±21）</span>
+        <span><i class="sw dc"></i>DC（0）</span>
+        <span><i class="sw n"></i>Null（guard band）</span>
+      </div>
+      <div class="sc" id="sc" role="img" aria-label="Subcarriers -32 到 31。-26 到 -1 與 1 到 26 有使用。Pilots 在 ±7 與 ±21。"></div>
+      <div class="sc-axis" id="sc-axis" aria-hidden="true"></div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>步驟 4：Noise 與 link light</h2>
+    <p class="note">這是示意圖。它在理想的 constellation points 上加 AWGN。它沒有執行 PHY。</p>
+    <div class="snr">
+      <div class="snr-plot"><canvas id="const" width="320" height="320" aria-label="含 noise 的 constellation"></canvas></div>
+      <div class="snr-side">
+        <label class="field">
+          <span>RX 的 SNR <output id="snr-out"></output></span>
+          <input type="range" id="snr" min="0" max="30" value="15" step="0.5">
+        </label>
+        <div class="light" id="light"></div>
+        <p class="hint" id="light-note"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. Code structure ============ -->
+<section id="view-code" role="tabpanel" aria-labelledby="tab-code" hidden>
+  <p class="intro">TX 與 RX 是兩個獨立的程式。它們只共用 sample transport。所以 RX 顯示的內容一定來自 waveform。</p>
+
+  <div class="card">
+    <h2>Process layout</h2>
+    <p class="note">兩個程式預設使用 <code>--engine process</code>。Qt window 在 main process。Radio 與 encode/decode 在 child process。GUI 太忙時，程式丟棄 display event。它不會丟棄 samples。</p>
+    <div class="procs">
+      <div class="proc-card">
+        <h3>tx_app</h3>
+        <div class="box gui"><b>Main process：Qt window</b>
+          <ul><li>Cards、60 秒 trend、Send / Signal / Hardware / Log tabs</li><li>Radio panel：選擇 device、antenna、gain</li></ul></div>
+        <div class="plink">⇅ bounded queue：commands 往下，events 往上</div>
+        <div class="box tx"><b>Engine child process</b>
+          <ul>
+            <li><code>IngressListener</code>：在 UDP :52001 接收 bytes</li>
+            <li><code>TransmitWorker</code> → <code>MessageTransmitter</code>：fragment、encode、組成 burst</li>
+            <li data-sink></li>
+          </ul></div>
+      </div>
+      <div class="proc-card">
+        <h3>rx_app</h3>
+        <div class="box gui"><b>Main process：Qt window</b>
+          <ul><li>Cards、link light、Signal / Decode / Hardware / Log tabs</li><li>Constellation 與 spectrum 以 15 Hz 重畫（<code>--ui-fps</code>）</li></ul></div>
+        <div class="plink">⇅ bounded queue：滿的時候丟棄 display event</div>
+        <div class="box rx"><b>Engine child process</b>
+          <ul>
+            <li data-source></li>
+            <li><code>ReceiveWorker</code> → <code>MessageReceiver</code>：一個 owner 依序處理 acquisition 與 header</li>
+            <li><code>EgressForwarder</code>：把 message 送到 UDP :52002</li>
+          </ul>
+          <div class="plink">⇅ 每個 burst 是一個獨立的 segment。結果依照 stream 的順序回來。</div>
+          <div class="workers"><div>decode 1</div><div>decode 2</div><div>decode 3</div><div>decode 4</div></div>
+          <p class="hint">4 個 worker processes 平行執行 payload 的 FEC decode（<code>--decode-workers</code>）。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>檔案對照</h2>
+    <p class="note">上表的檔案在 <code>src/ofdm_message_link/</code>。PHY 本身（FEC、OFDM、synchronization、equalization）在 <code>src/ofdm_link/phy/</code>。</p>
+    <div class="table-scroll"><table id="files"></table></div>
+  </div>
+</section>
+
+<!-- ============ 4. Run it ============ -->
+<section id="view-run" role="tabpanel" aria-labelledby="tab-run" hidden>
+  <p class="intro">請在頁面上方選擇 sample transport。然後在 repository root 執行這些步驟。</p>
+  <div class="card">
+    <h2 id="run-title"></h2>
+    <ol class="steps" id="steps"></ol>
+  </div>
+  <div class="card">
+    <h2>RX 沒有顯示 message？</h2>
+    <p class="note">請選擇你看到的症狀。</p>
+    <div class="symptoms" id="symptoms"></div>
+    <div class="fix" id="fix" aria-live="polite"></div>
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap">
+  完整說明：<a href="https://github.com/s87315teve/ofdm-message-link#readme">README</a>。
+  數字來自 <code>data.js</code>。PHY 改變後，請執行 <code>python -m guide.build_data</code> 重新產生它。
+  這一頁是輔助說明。它不是 acceptance 證據。
+</footer>
+
+<script src="data.js"></script>
+<script src="content.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
