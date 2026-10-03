@@ -1,0 +1,88 @@
+# Base configuration.  A profile under configs/profiles/ is layered on top of it
+# (--overlay); by default that is ota_2p45ghz.yaml.
+#
+# What the one-way message link reads: phy, radio and acceleration.  The
+# simulation section feeds the channel model the PHY tests use.  The node,
+# network and mac sections are required by the configuration schema
+# (src/ofdm_link/config.py) but a one-way link has no IP interface, no TDD and
+# no ARQ, so their values are not used.
+schema_version: 1
+
+node:
+  role: coordinator
+  node_id: 1
+
+network:
+  interface_name: ofdm0
+  address: 10.77.0.1/30
+  mtu: 1280
+
+phy:
+  sample_rate: 10000000
+  fft_len: 64
+  cyclic_prefix_len: 16
+  mcs: qpsk
+  center_frequency: 2450000000
+  fec:
+    scheme: turbo
+    code_rate: "1/3"
+    decision_mode: turbo
+    max_iterations: 8
+
+mac:
+  duplex: tdd
+  arq_window: 32
+  max_retries: 8
+  max_fragment_payload: 1024
+  max_pending_sdus: 64
+  retransmission_timeout_s: 0.100
+  tdd:
+    link_id: 1
+    beacon_duration_s: 0.001
+    downlink_duration_s: 0.015
+    guard_duration_s: 0.001
+    uplink_duration_s: 0.015
+    beacon_timeout_s: 0.132
+
+radio:
+  adapter: simulation
+  rf_enabled: false
+  device_args: ""
+  rx_gain: 20.0
+  tx_gain: 0.0
+  bandwidth: 10000000
+  rx_antenna: RX2
+  tx_antenna: TX/RX
+  clock_source: internal
+
+simulation:
+  profile: nominal
+  snr_db: 15.0
+  cfo_subcarrier_fraction: 0.2
+  sample_rate_offset_ppm: 20.0
+  amplitude_min: 0.5
+  amplitude_max: 2.0
+  taps:
+    - [1.0, 0.0]
+    - [0.18, 0.08]
+    - [0.06, -0.04]
+
+gui:
+  enabled: false
+
+acceleration:
+  backend: native
+  device: cpu
+  # Worker processes for the per-burst receive path. 1 keeps everything inline
+  # with no process and no IPC, N > 1 fixes the count, and 0 asks which CPUs
+  # this process may actually run on. The output never depends on this value.
+  decode_workers: 1
+  # How many CPU cores one endpoint may occupy. N > 0 is taken literally and 0
+  # asks which CPUs this process may actually run on. It caps every numeric
+  # library's thread pool: NumPy's BLAS otherwise sizes its pool from the
+  # machine and spins those threads between calls, which cost 15.6 of 20 cores
+  # and a third of the link's throughput on a 20-core host. The budget is a
+  # cap on waste, not a throughput dial -- one endpoint process is limited by
+  # one interpreter lock to roughly 1.2 cores until per-burst decode moves into
+  # worker processes. The output never depends on this value.
+  cpu_cores: 4

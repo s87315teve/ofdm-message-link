@@ -1,0 +1,17 @@
+name: ofdm-message-link
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.13
+  # GNU Radio brings UHD (USRP), libiio (ADALM-Pluto), PyQt5 and pmt with it.
+  - gnuradio=3.10.12
+  - numpy>=2.2.6,<3
+  - pyyaml>=6,<7
+  - pytest>=8,<9
+  # Builds the native Turbo/Viterbi decoder (src/ofdm_link/phy/turbo_native.cpp).
+  - cxx-compiler
+  # Only for the webcam streaming demo.
+  - ffmpeg
+  - pip>=25,<27
+  - setuptools>=77

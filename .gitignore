@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Local environments and generated artifacts
+.conda/
+.venv/
+build/
+dist/
+*.so
+
+# Run output: logs, measurement results, captures
+*.log
+runs/
+results/
+artifacts/
+
+# Qt runtime files
+.qt/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*~
+.DS_Store

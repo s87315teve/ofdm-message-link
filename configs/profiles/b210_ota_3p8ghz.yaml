@@ -1,0 +1,29 @@
+# Optional profile: 3.8 GHz, 5 MS/s, for a B210 / NI USRP-2901 pair.  Not the
+# default; pass it to BOTH apps with --overlay configs/profiles/b210_ota_3p8ghz.yaml.
+#
+# The gains below are high.  Use this profile only where you are allowed to
+# transmit in this band, or over a cable with an attenuator.  It does not arm
+# the transmitter: every RF run still requires --enable-rf and its explicit
+# acknowledgement.
+phy:
+  sample_rate: 5000000
+  center_frequency: 3800000000
+  mcs: qpsk
+  fec:
+    scheme: turbo
+    code_rate: "1/3"
+    decision_mode: turbo
+    max_iterations: 8
+  sync:
+    detection_threshold: 0.40
+    correlation_threshold: 0.40
+
+radio:
+  adapter: uhd
+  rf_enabled: false
+  bandwidth: 5000000
+  rx_gain: 40.0
+  tx_gain: 85.0
+  rx_antenna: TX/RX
+  tx_antenna: TX/RX
+  clock_source: internal

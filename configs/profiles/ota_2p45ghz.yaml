@@ -1,0 +1,38 @@
+# Default profile for a real radio (--transport uhd or --transport pluto):
+# 2.45 GHz, 5 MS/s, QPSK Turbo 1/3.
+#
+# 2.45 GHz sits in the 2.4 GHz ISM band, which a B210/2901, an N210 with a CBX
+# daughterboard and an ADALM-Pluto can all tune to.  That band is shared with
+# Wi-Fi and Bluetooth, so expect interference; it is also not a licence to
+# transmit at any power.  Connect the two radios with a cable and an
+# attenuator first, and check with your supervisor which bands and power
+# levels your lab may use before putting an antenna on the transmitter.
+#
+# This default has not been measured over the air.  The measured operating
+# points are usrp_ota_1p2ghz.yaml and b210_ota_3p8ghz.yaml; see
+# docs/08-measurements.md.
+#
+# The profile does not arm the transmitter: every RF run still requires
+# --enable-rf and its explicit acknowledgement on the command line.
+phy:
+  sample_rate: 5000000
+  center_frequency: 2450000000
+  mcs: qpsk
+  fec:
+    scheme: turbo
+    code_rate: "1/3"
+    decision_mode: turbo
+    max_iterations: 8
+  sync:
+    detection_threshold: 0.40
+    correlation_threshold: 0.40
+
+radio:
+  adapter: uhd
+  rf_enabled: false
+  bandwidth: 5000000
+  rx_gain: 15.0
+  tx_gain: 0.0
+  rx_antenna: TX/RX
+  tx_antenna: TX/RX
+  clock_source: internal

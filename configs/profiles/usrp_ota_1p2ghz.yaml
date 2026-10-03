@@ -1,0 +1,34 @@
+# Optional profile: 1.2 GHz, 5 MS/s.  Not the default; pass it to BOTH apps with
+# --overlay configs/profiles/usrp_ota_1p2ghz.yaml.
+#
+# It exists for an N210 with a CBX daughterboard (1.2-6 GHz) paired with
+# antennas cut for about 900 MHz: 1.2 GHz is the supported frequency closest to
+# their band.  915 MHz is not reachable with a CBX; UHD clamps the request to
+# 1180 MHz.
+#
+# 1164-1300 MHz is allocated to satellite navigation (GNSS).  Use this profile
+# only where you are allowed to, at low power and short range, or over a cable.
+# It does not arm the transmitter: every RF run still requires --enable-rf and
+# its explicit acknowledgement.
+phy:
+  sample_rate: 5000000
+  center_frequency: 1200000000
+  mcs: qpsk
+  fec:
+    scheme: turbo
+    code_rate: "1/3"
+    decision_mode: turbo
+    max_iterations: 8
+  sync:
+    detection_threshold: 0.40
+    correlation_threshold: 0.40
+
+radio:
+  adapter: uhd
+  rf_enabled: false
+  bandwidth: 5000000
+  rx_gain: 15.0
+  tx_gain: 5.0
+  rx_antenna: TX/RX
+  tx_antenna: TX/RX
+  clock_source: internal
