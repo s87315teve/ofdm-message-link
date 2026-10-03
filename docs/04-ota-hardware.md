@@ -10,7 +10,7 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
 
 請照這個順序做，不要跳步：
 
-1. **先用模擬跑通**（[README 的五分鐘上手](../README.md#五分鐘上手不需要硬體)）。確認程式與環境沒問題。
+1. **先用模擬跑通**（[README 的三步上手](../README.md#三步上手不需要硬體)）。確認程式與環境沒問題。
 2. **用 cable 加 attenuator 直連。** 用 SMA cable 把 TX 的 port 接到 RX 的 port，中間串一個
    **30 dB 以上的 attenuator**。這樣沒有任何訊號輻射出去，channel 也最乾淨，最適合第一次除錯。
    **不要沒接 attenuator 就把 TX 直接接到 RX**：TX 的輸出功率可能超過 RX 輸入端的最大額定值而
@@ -33,8 +33,9 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
 
 - 2.45 GHz 在 2.4 GHz ISM 頻段內，B210／2901、N210（CBX daughterboard）與 ADALM-Pluto 都調得到。
 - 這個頻段和 Wi-Fi、Bluetooth 共用，所以用 antenna 時會有干擾，constellation 不會像 cable 那麼乾淨。
-- **這個預設值沒有經過 OTA 實測。** 實測過的條件是另外兩個選用的 profile（1.2 GHz 與 3.8 GHz），
-  見[實測紀錄](08-measurements.md)。那兩個頻段都不是 ISM 頻段，只有在你確定可以使用時才用。
+- **這個預設值只有 Pluto 對 Pluto 的短時間 OTA 實測**（見[實測紀錄 8.5](08-measurements.md#85-adalm-pluto--adalm-pluto245-ghz預設-profile)），
+  USRP 沒有在這個頻率量過。其他實測用的是另外兩個選用的 profile（1.2 GHz 與 3.8 GHz）；
+  那兩個頻段都不是 ISM 頻段，只有在你確定可以使用時才用。
 
 要換頻率或 sample rate，自己寫一個 profile（複製 `ota_2p45ghz.yaml` 來改），然後**兩端**都加
 `--overlay 你的檔案.yaml`。也可以直接在 Radio panel 改 `Centre (MHz)`。
@@ -165,7 +166,7 @@ python -m ofdm_message_link.rx_app \
 
 # 發送端
 python -m ofdm_message_link.tx_app \
-    --transport pluto --serial <TX_PLUTO_SERIAL> --gain -15 --auto-start \
+    --transport pluto --serial <TX_PLUTO_SERIAL> --gain -5 --auto-start \
     --enable-rf --acknowledgement 'I acknowledge that this process will transmit RF'
 ```
 
@@ -186,8 +187,9 @@ python -m ofdm_message_link.tx_app \
 | 一台一個 process | 走 USB 時，同一台 Pluto 同時只能被一個 process 開啟；收發請各用一台 |
 | 調頻時的 carrier | TX 第一次調到新 frequency 時，量到約 33 ms、接近滿輸出的未調變 carrier，**不受 gain 設定控制**（研判是 AD936x 的 TX calibration）。**這是用 cable 加 attenuator 的另一個理由** |
 
-**④ 建議起點：TX −15 dB／RX 15 dB**（兩台放在同一張桌上、各接原廠 antenna 的實測值）。
-RX gain 太高（30 dB）加上較強的 signal，接收端的 acquisition 會跟不上而掉包；先降 RX gain 再調 TX。
+**④ 建議起點：TX −5 dB／RX 15 dB**（預設的 2.45 GHz、兩台放在同一張桌上、各接原廠 antenna 的
+實測值；同樣的擺放在 1.2 GHz 只需要 TX −15 dB）。SNR 不夠時先調 TX；RX gain 太高加上較強的
+signal，接收端的 acquisition 可能會跟不上而掉包。
 
 Pluto 和 USRP 可以各在一端（每個 process 自己選 `--transport`），但**這個組合還沒有實測過**。
 

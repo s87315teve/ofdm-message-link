@@ -152,4 +152,4 @@ EOF
 檔案預設到 16 MiB 就輪替成 `PATH.1`（`--stats-log-max-mb`、`--stats-log-backups` 可調）。
 計數欄位是從視窗開啟起累計，所以最新一行永遠是總數。
 
-下一篇：[接上你自己的程式](03-your-own-app.md)。
+下一篇：[用 UDP 傳資料與傳影像](03-your-own-app.md)。

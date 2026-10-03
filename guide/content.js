@@ -390,7 +390,7 @@ window.GUIDE_CONTENT = (function () {
         { caution: CAUTION },
         { text: "安裝 ADI 的 udev rule。只需要做一次。然後重新插拔 Pluto。詳細步驟在 <code>docs/04-ota-hardware.md</code>。" },
         { text: "Terminal 1：先啟動 RX。", cmd: "python -m ofdm_message_link.rx_app \\\n    --transport pluto --serial RX_PLUTO_SERIAL --gain 15 --auto-start" },
-        { text: "Terminal 2：啟動 TX，並帶上 RF acknowledgement。", cmd: "python -m ofdm_message_link.tx_app \\\n    --transport pluto --serial TX_PLUTO_SERIAL --gain -15 --auto-start \\\n    " + ACK },
+        { text: "Terminal 2：啟動 TX，並帶上 RF acknowledgement。", cmd: "python -m ofdm_message_link.tx_app \\\n    --transport pluto --serial TX_PLUTO_SERIAL --gain -5 --auto-start \\\n    " + ACK },
         { text: "Pluto 的 TX gain 是 attenuator：0 dB 是最大輸出。TX 與 RX 請各用一台 Pluto。" }
       ]
     }

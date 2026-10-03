@@ -3,11 +3,11 @@
 這個專案在實機上跑過的結果。除了當作「這條路徑真的會動」的證據，也可以當作你自己做實驗時
 記錄方式的參考：寫清楚設備、設定、量到什麼、**以及沒有量到什麼**。
 
-> **量測條件。** 以下都是同一張桌上的短距離、低功率量測。使用的 1.2 GHz 與 3.8 GHz 是當時設備
-> 組合下選的頻率，**不是這個專案現在的預設值（2.45 GHz）**，也都不是 ISM 頻段。重現前請先確認你
+> **量測條件。** 以下都是同一張桌上的短距離、低功率量測。8.1–8.4 使用的 1.2 GHz 與 3.8 GHz 是當時
+> 設備組合下選的頻率，**不是這個專案現在的預設值（2.45 GHz）**，也都不是 ISM 頻段。重現前請先確認你
 > 所在場所可用的頻段與功率；不確定時改用 cable 加 attenuator（見[發射前必讀](04-ota-hardware.md#41-發射前必讀)）。
 >
-> 預設的 2.45 GHz profile **沒有** OTA 實測紀錄。
+> 預設的 2.45 GHz profile 只有 8.5 的 Pluto 對 Pluto 短時間量測。
 
 這些都是 demo 等級的觀察：單一擺放位置、時間短、沒有重複多次。不能當作 throughput 或 reliability
 的正式結論。
@@ -138,11 +138,44 @@ Antenna 是約 900 MHz 的 antenna，距離沒有量測。
   送出的 832 kbit/s，30 秒內 4 個 burst 遺失、0 overflow。
 - 最長 90 秒、單一擺放位置。
 
-## 8.5 沒有實測過的東西
+## 8.5 ADALM-Pluto → ADALM-Pluto，2.45 GHz（預設 profile）
+
+兩台 PlutoSDR Rev.B（韌體 v0.39，USB backend），各接原廠 antenna、放在同一張桌上，預設的
+`configs/profiles/ota_2p45ghz.yaml`、5 MS/s、MCS 0。
+
+訊息：1000 個 900-byte datagram，每秒 100 個。
+
+| TX／RX gain | 送達 | Burst loss | `SNR (2 s)` | RX overflow |
+|---|---:|---:|---:|---:|
+| −15／15 dB | 898／1,000 | **10.2%** | 7.1–8.2 dB | 0 |
+| **−5／15 dB** | 1,000／1,000 | 0 | 15.2–16.6 dB | 0 |
+| −5／30 dB | 1,000／1,000 | 0 | 22.8–23.7 dB | 0 |
+
+- 1.2 GHz 時夠用的 TX −15 dB，在 2.45 GHz 只剩約 7–8 dB 的 SNR，低於 MCS 0 需要的 8 dB，所以掉了一成。
+  遺失的 burst 幾乎都是 header 解不出來（99 個）。頻率越高路徑損耗越大是原因之一；antenna 與
+  干擾的影響沒有另外量測。**換頻率之後 gain 要重新找。**
+- TX 調高 10 dB，SNR 也大約升 8–9 dB，遺失歸零。
+
+影像：`scripts/run_ota_video_demo.sh --transport pluto --auto-start`，TX −5／RX 15 dB，MCS 0，
+750 kbit/s，1280×720 15 fps webcam，30 秒。
+
+| 項目 | 結果 |
+|---|---|
+| 送達 burst / 遺失 | 4,253 / **0** |
+| 即時 goodput 中位數 / 最大 | 0.835 / 0.860 Mbit/s |
+| `SNR (2 s)` 範圍 | 15.8 – 16.6 dB |
+| RX overflow | 0 |
+| ffplay 的 `corrupt` 訊息 | 0 |
+| Link light | 全程 `GOOD` |
+
+每個設定只跑了一次，最長 30 秒，單一擺放位置。
+
+## 8.6 沒有實測過的東西
 
 誠實列出來，免得被誤認為已經驗證：
 
-- **預設的 2.45 GHz profile**，不論 OTA 或 cable。
+- **USRP 在預設的 2.45 GHz profile**，不論 OTA 或 cable（8.5 只量了 Pluto）。
+- **任何 cable 加 attenuator 的量測。** 上面全部是 antenna。
 - Pluto 與 USRP 各在一端的組合。
 - 20 MS/s。
 - MCS 1、2、3、5、6、7 的影像 demo（throughput 報告有它們的 UDP 掃描結果）。

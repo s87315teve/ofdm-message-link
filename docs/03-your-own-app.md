@@ -1,12 +1,13 @@
-# 3. 接上你自己的程式
+# 3. 用 UDP 傳資料與傳影像
 
 這條 link 對應用程式來說就是兩個 UDP port：把 bytes 送進 TX 的 `:52001`，從 RX 的 `:52002` 拿出來。
-你的程式不需要知道底下有 OFDM。
+你的程式不需要知道底下有 OFDM。影像串流只是其中一種用法：ffmpeg 把影像切成 UDP datagram 送進去，
+ffplay 從另一端收。
 
-## 3.1 最小範例
+## 3.1 用 UDP 傳資料：最小範例
 
 發送端一直開著 UDP ingress（預設 `127.0.0.1:52001`），接收端一直把解出來的訊息轉發到
-`127.0.0.1:52002`。先照 [README](../README.md#五分鐘上手不需要硬體) 把 `rx_app` 與 `tx_app` 開起來，
+`127.0.0.1:52002`。先照 [README](../README.md#三步上手不需要硬體) 把 `rx_app` 與 `tx_app` 開起來，
 再開兩個終端機：
 
 ```bash
@@ -73,6 +74,9 @@ ffmpeg -nostdin -f v4l2 -input_format mjpeg -video_size 1280x720 -framerate 15 -
 
 停止順序：ffmpeg → TX app → RX app → ffplay，各按 Ctrl-C。
 
+ffmpeg 剛啟動的半秒會一次送出一批 datagram，模擬 transport 來不及收，通常會掉幾十個 burst、
+畫面開頭破一下。之後應該是 0 遺失（看 RX 的 `Loss (10 s)`）。
+
 沒有 webcam 的話，把 `-f v4l2 ... -i /dev/video0` 換成 `-re -f lavfi -i testsrc=size=1280x720:rate=15`
 就會送出測試圖樣。`v4l2-ctl --list-formats-ext` 可以查你的攝影機支援哪些格式。
 
@@ -113,7 +117,7 @@ scripts/run_ota_video_demo.sh --enable-rf --layout none    # 不排列視窗
 # 兩台 ADALM-Pluto（serial 必填；gain 是 Pluto 的範圍）：
 scripts/run_ota_video_demo.sh --enable-rf --transport pluto --auto-start \
     --tx-serial <TX_PLUTO_SERIAL> --rx-serial <RX_PLUTO_SERIAL> \
-    --tx-gain -10 --rx-gain 15 --mcs-index 0 --video-kbps 750
+    --tx-gain -5 --rx-gain 15 --mcs-index 0 --video-kbps 750
 ```
 
 腳本做的事：
@@ -151,6 +155,10 @@ scripts/run_ota_video_demo.sh --enable-rf --transport pluto --auto-start \
 | `none` | 不指定位置與大小，由視窗管理員決定 |
 
 座標由 [`window_layout.py`](../src/ofdm_message_link/window_layout.py) 計算。
+
+`dual` 的實際畫面（兩個螢幕並排；左邊是 TX，右邊上方是 ffplay、下方是 tab 已收起的 RX）：
+
+![Dual-monitor layout during the OTA video demo: the transmitter fills monitor 1, ffplay fills the top two thirds of monitor 2 and the receiver with its tabs folded away fills the bottom third](images/ofdm-ota-video-layout-dual.png)
 
 ### Log 的上限與清理
 

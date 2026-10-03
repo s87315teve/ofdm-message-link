@@ -8,9 +8,9 @@
 # attenuator first, and check with your supervisor which bands and power
 # levels your lab may use before putting an antenna on the transmitter.
 #
-# This default has not been measured over the air.  The measured operating
-# points are usrp_ota_1p2ghz.yaml and b210_ota_3p8ghz.yaml; see
-# docs/08-measurements.md.
+# Over the air this default has only a short Pluto-to-Pluto measurement; no
+# USRP has been measured at it.  The other measured operating points are
+# usrp_ota_1p2ghz.yaml and b210_ota_3p8ghz.yaml; see docs/08-measurements.md.
 #
 # The profile does not arm the transmitter: every RF run still requires
 # --enable-rf and its explicit acknowledgement on the command line.
