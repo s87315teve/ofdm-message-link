@@ -17,9 +17,9 @@
 | `python -m ofdm_message_link.rx_app` 說 `No module named ofdm_message_link` | 沒有啟用環境，或沒有安裝 | `conda activate ofdm-message-link`，然後 `pip install -e .` |
 | `configuration file not found: configs/default.yaml` | 不是從 repository root 執行 | `cd` 到 clone 下來的資料夾再執行 |
 | `ImportError` 提到 `_turbo_native` | C++ decoder 沒有編譯 | 在環境裡重新 `pip install -e .`，看編譯有沒有錯誤訊息 |
-| 訊息時有時無，或完全沒到新開的 RX | 上一個 RX 還在跑。兩個 process 可以同時 bind 同一個 UDP port，不會報錯 | `pgrep -af ofdm_message_link` 找出舊的 process 並關掉 |
+| Message 時有時無，或完全沒到新開的 RX | 上一個 RX 還在跑。兩個 process 可以同時 bind 同一個 UDP port，不會報錯 | `pgrep -af ofdm_message_link` 找出舊的 process 並關掉 |
 | TX 送了但 RX 沒反應 | RX 比 TX 晚開，或兩邊的 `--udp-port` 不同 | 先開 RX；兩邊用同一個 port |
-| 視窗開不起來，訊息提到 `xcb` 或 display | 沒有圖形桌面（例如純 SSH） | 在有桌面的機器上執行，或用 `ssh -X` |
+| 視窗開不起來，錯誤訊息提到 `xcb` 或 display | 沒有圖形桌面（例如純 SSH） | 在有桌面的機器上執行，或用 `ssh -X` |
 | `Warning: Ignoring XDG_SESSION_TYPE=wayland` | Qt 在 Wayland 上改用 XWayland | 無害，可忽略 |
 
 ## 6.3 真的 radio
@@ -32,20 +32,20 @@
 | 2 | RX spectrum 有東西但解不出來，`rx level` 的 `spread` 很小 | **RX antenna 接錯 port**（例如線接在 `TX/RX` 卻選了 `RX2`） | 換 antenna port 比調高 gain 有用得多 |
 | 3 | 啟動時錯誤訊息寫出兩個不同的 frequency | Frequency 超出裝置範圍（UHD 會默默改到邊界） | 改用兩台都支援的 frequency，見 [N210 注意事項](04-ota-hardware.md#usrp-n210-注意事項) |
 | 4 | 完全對不上，連 preamble 都偵測不到 | **兩端 sample rate 不同** | 兩端用同一個 `--overlay`，或在兩個 Radio panel 選同一個 sample rate |
-| 5 | `No UHD Devices Found`，或訊息提到 `Could not find path for image` | 沒有下載 FPGA images | `uhd_images_downloader -t b2xx` |
+| 5 | `No UHD Devices Found`，或錯誤訊息提到 `Could not find path for image` | 沒有下載 FPGA images | `uhd_images_downloader -t b2xx` |
 | 6 | Device 清單沒有 N210 | 網卡沒有同網段 IP | `sudo ip addr add 192.168.10.1/24 dev <你的網卡名稱>`，再按 Refresh |
 | 7 | Probe 失敗、Radio panel 說裝置被佔用 | 另一個 process 已經開著這台 | 確認兩端 `--serial` 不同；清掉殘留 process（見 [3.3 節最後](03-your-own-app.md#影像-demo-的排錯)） |
-| 8 | 高速率時大量掉包，但 SNR 看起來很高 | RX gain 太高、signal 太強，acquisition 跟不上 | RX 降到 15 dB 左右 |
+| 8 | 高速率時大量遺失 burst，但 SNR 看起來很高 | RX gain 太高、signal 太強，burst 偵測跟不上 | RX 降到 15 dB 左右 |
 | 9 | `Hardware` tab 的 overflow 一直增加 | USB bandwidth 或 CPU 不夠 | 兩台 USRP 分開 USB3 controller；維持 `--engine process`；關掉其他重負載程式 |
-| 10 | Pluto：probe 失敗，訊息說 `is Pluto …, not …` | 兩台 Pluto 都在出廠位址 `192.168.2.1`，而且沒有 USB 存取權 | 裝 udev rule 後重新插拔，見 [ADALM-Pluto](04-ota-hardware.md#43-adalm-pluto) |
+| 10 | Pluto：probe 失敗，錯誤訊息說 `is Pluto …, not …` | 兩台 Pluto 都在出廠位址 `192.168.2.1`，而且沒有 USB 存取權 | 裝 udev rule 後重新插拔，見 [ADALM-Pluto](04-ota-hardware.md#43-adalm-pluto) |
 | 11 | Pluto：Device 清單是空的 | USB 沒列舉到（`lsusb` 看不到 `0456:b673`） | 重新插拔、換線或換 port；Pluto 開機約 20 秒 |
-| 12 | Pluto：`rx_overflow_events` 一直增加、大量掉包 | RX gain 太高，或同一台 Pluto 同時收發 | RX 降到 15 dB 左右；收發各用一台 |
+| 12 | Pluto：`rx_overflow_events` 一直增加、大量遺失 burst | RX gain 太高，或同一台 Pluto 同時收發 | RX 降到 15 dB 左右；收發各用一台 |
 
 ## 6.4 TX gain 為什麼預設是最低值
 
 `Gain (dB)` 預設是裝置範圍的最低值（B210 是 0 dB），這是刻意的安全設計：啟動 radio 不應該用
 一個任意的功率去驅動 power amplifier。代價是第一次跑會**看起來像壞掉，其實只是很安靜**。
-這個狀態下送出訊息時，發送端視窗底部會出現：
+這個狀態下送出 message 時，發送端視窗底部會出現：
 
 ```
 TX gain is 0 dB, the minimum for this device. Bursts are going out but the

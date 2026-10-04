@@ -6,7 +6,7 @@
 
 | 檔案 | 功能 |
 |---|---|
-| `index.html` | 頁面結構：四個分頁（工作流、Packet lab、程式結構、執行） |
+| `index.html` | 頁面結構：四個分頁（工作流、Burst lab、程式結構、執行） |
 | `style.css` | 版面與顏色（light 與 dark） |
 | `content.js` | 全部的說明文字：模組、blocks、導覽步驟、指令、症狀、檔案對照 |
 | `app.js` | 互動邏輯 |
@@ -29,3 +29,21 @@ python -m guide.build_data
 - 使用主動語態：寫「這個 block 加上 header」，不寫「header 被加上」。
 - 同一個東西只用同一個詞（例如固定寫 message，不混用「訊息」「封包」）。
 - 專有名詞保留英文，並和程式裡的寫法相同（preamble、cyclic prefix、MCS、burst）。
+- 英文用美式拼法（center、color、behavior）。
+- 名詞的定義集中在 [`docs/00-prerequisites.md`](../docs/00-prerequisites.md) 的名詞表。改名詞時，README、
+  `docs/`、`guide/` 與 `experiments/` 要一起改。
+
+這份教學固定使用的寫法：
+
+| 使用 | 不使用 |
+|---|---|
+| message（應用程式的一段資料） | 訊息、封包 |
+| datagram（只指 UDP datagram） | 用 datagram 指 fragment |
+| fragment、fragment header（28 B） | Datagram layer、datagram header |
+| burst 遺失、遺失 burst | 掉包、丟包、掉 packet |
+| burst 偵測 | acquisition |
+| FEC 種類 | wire version（只在說明程式名稱時出現一次） |
+| decode stages | decode funnel |
+| 終端機 | terminal |
+| 確認文字（`--acknowledgement` 的內容） | acknowledgement |
+| 錯誤訊息（程式印出的文字） | 訊息 |

@@ -6,7 +6,7 @@ ffplay 從另一端收。
 
 ## 3.1 用 UDP 傳資料：最小範例
 
-發送端一直開著 UDP ingress（預設 `127.0.0.1:52001`），接收端一直把解出來的訊息轉發到
+發送端一直開著 UDP ingress（預設 `127.0.0.1:52001`），接收端一直把解出來的 message 轉發到
 `127.0.0.1:52002`。先照 [README](../README.md#三步上手不需要硬體) 把 `rx_app` 與 `tx_app` 開起來，
 再開兩個終端機：
 
@@ -35,9 +35,9 @@ socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b"hi", ("127.0.0.1", 520
 1. **一個 UDP datagram 是一則 message。** 大於單一 frame payload（預設 968 bytes）的 message 會自動
    fragment 成多個 burst，並在接收端 reassemble。所以文字、JSON、二進位檔都走同一條路徑。
 2. **不完整的 message 會被丟棄並計數，不會截斷後交付。** 單向 link 沒有辦法去要回缺掉的 fragment。
-   Message 越大、fragment 越多，任何一個 burst 掉了整則就沒了。對 loss 敏感的資料請盡量讓每則
+   Message 越大、fragment 越多，任何一個 burst 遺失，整則就沒了。對 loss 敏感的資料請盡量讓每則
    message 小於 968 bytes。
-3. **發送端不會告訴你丟包。** 送得比 link 能承載的還快時，多出來的 datagram 會在 TX 的 ingress
+3. **發送端不會告訴你 message 被丟掉。** 送得比 link 能承載的還快時，多出來的 datagram 會在 TX 的 ingress
    queue（256 格）被默默丟掉，只能從接收端的序號缺口看出來。請在你的程式裡自己限速。每種 MCS
    的上限見 [throughput 實驗報告](../experiments/ota_udp_throughput/README.md)。
 
@@ -47,14 +47,14 @@ socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b"hi", ("127.0.0.1", 520
 webcam → ffmpeg ─UDP :52001→ tx_app ─channel→ rx_app ─UDP :52012→ ffplay
 ```
 
-影像是很好的 demo：掉一個 packet 畫面就破一塊，link 品質一眼就看得出來。
+影像是很好的 demo：遺失一個 burst 畫面就破一塊，link 品質一眼就看得出來。
 
 ### 先用模擬跑（不需要 SDR）
 
 開四個終端機，每個都先 `conda activate ofdm-message-link`。
 
 ```bash
-# 終端機 1：接收端（先開）；解出的 datagram 轉發到 52012
+# 終端機 1：接收端（先開）；解出的 message 轉發到 52012
 python -m ofdm_message_link.rx_app --snr-db 20 --egress-port 52012
 
 # 終端機 2：發送端
@@ -89,7 +89,7 @@ ffmpeg 剛啟動的半秒會一次送出一批 datagram，模擬 transport 來�
 - **`intra-refresh=1`**：把 I-frame 攤到每張 frame 上。否則每次 I-frame 會一次湧入幾十個 burst。
   破圖之後畫面也會在約 2 秒內自行恢復。
 - **`-nostdin`**：一定要加。在背景執行時 ffmpeg 若讀終端機會被暫停（`ps` 狀態 `T`），看起來在跑，
-  其實一個 packet 都不送。
+  其實一個 datagram 都不送。
 - **`52012`**：`52002` 是 `udp_recv` 範例的預設 port；影片改用 `52012` 就不會和它搶。
 
 ### 選 MCS 與 bitrate
@@ -106,7 +106,7 @@ SNR 低於 11 dB 請退回 `--mcs-index 0`（Link light 會提示 `try MCS 0`）
 
 ### 用真的 SDR：一鍵腳本
 
-> ⚠️ 這會讓 SDR 發射。請先讀完[用真的 SDR 發射](04-ota-hardware.md)，並且已經用訊息 demo 確認過
+> ⚠️ 這會讓 SDR 發射。請先讀完[用真的 SDR 發射](04-ota-hardware.md)，並且已經用 message demo 確認過
 > 兩台 radio 之間的 link 是通的。
 
 ```bash

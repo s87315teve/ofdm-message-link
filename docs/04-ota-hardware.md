@@ -20,7 +20,7 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
 
 程式裡對應的保護機制：
 
-- **RF 發射預設是關閉的。** 發送端必須明確帶 `--enable-rf` 與一字不差的 `--acknowledgement`。
+- **RF 發射預設是關閉的。** 發送端必須明確帶 `--enable-rf`，並用 `--acknowledgement` 輸入一字不差的確認文字。
   少了任何一個，程式會在**視窗建立之前**就拒絕執行。一個沒有被授權發射的 process，不可能靠
   點按鈕變成有授權。接收端不發射，不需要這兩個參數。
 - **TX gain 預設是裝置的最低值。** 提高功率是你的明確動作，不是按 Start 就發生的預設值。
@@ -38,7 +38,7 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
   那兩個頻段都不是 ISM 頻段，只有在你確定可以使用時才用。
 
 要換頻率或 sample rate，自己寫一個 profile（複製 `ota_2p45ghz.yaml` 來改），然後**兩端**都加
-`--overlay 你的檔案.yaml`。也可以直接在 Radio panel 改 `Centre (MHz)`。
+`--overlay 你的檔案.yaml`。也可以直接在 Radio panel 改 `Center (MHz)`。
 
 ## 4.2 USRP（B210、NI USRP-2901、N210）
 
@@ -85,7 +85,7 @@ python -m ofdm_message_link.tx_app --transport uhd \
 | **Front end** | 選到裝置後實際開啟它讀回的 channels。B210／2901 是 `RF A (ch 0)` 與 `RF B (ch 1)`；N210 是 `Slot A (ch 0)` |
 | **Antenna** | 該 channel 該方向實際回報的 port。RX 有 `TX/RX` 與 `RX2`，**TX 只有 `TX/RX`**（N210 front panel 上是 RF1／RF2） |
 | **Gain (dB)** | 上下限直接取自裝置（B210 為 RX 0–76、TX 0–89.75；N210 + CBX 為 0–31.5）。**Radio 執行中仍可調整**，立即套用 |
-| **Centre (MHz)** / **Sample rate** | Center frequency 與 sample rate；sample rate 限於 5／10／20 MS/s |
+| **Center (MHz)** / **Sample rate** | Center frequency 與 sample rate；sample rate 限於 5／10／20 MS/s |
 | **Start radio** | 按下去才會建立 UHD flowgraph。在此之前不會有任何 RF 輸出 |
 
 設計上的幾個重點：
@@ -181,7 +181,7 @@ python -m ofdm_message_link.tx_app \
 | RX gain | Manual gain，範圍由裝置回報（隨 frequency 不同，約 −3 到 71 dB） |
 | **Sample rate 只有 5 MS/s** | USB 2.0 的上限：要求 10 MS/s 時實收只有 5.5 MS/s。Panel 選 10／20 MS/s 會在 Start 前被拒絕 |
 | 沒有 timed TX | Pluto 沒有 device clock，burst 一送到 FPGA 就發射；所以沒有 late／underflow 計數，`Hardware` tab 顯示 `UHD faults: n/a for this transport` |
-| RX 掉 sample | FPGA 只給一個 overflow flag。`rx_overflow_events` 是「輪詢到 flag 的次數」，是下限，也不知道每次掉多少 sample |
+| RX 遺失 samples | FPGA 只給一個 overflow flag。`rx_overflow_events` 是「輪詢到 flag 的次數」，是下限，也不知道每次遺失多少 samples |
 | Frequency 範圍 | 由裝置回報。原廠 AD9363 是 325–3800 MHz；調不到要求的 frequency 時拒絕啟動 |
 | 停止 radio | TX attenuator 會被設回 −89.75 dB。Pluto 的 TX chain 只要板子有電就開著，所以停止時主動降到最小 |
 | 一台一個 process | 走 USB 時，同一台 Pluto 同時只能被一個 process 開啟；收發請各用一台 |
@@ -189,7 +189,7 @@ python -m ofdm_message_link.tx_app \
 
 **④ 建議起點：TX −5 dB／RX 15 dB**（預設的 2.45 GHz、兩台放在同一張桌上、各接原廠 antenna 的
 實測值；同樣的擺放在 1.2 GHz 只需要 TX −15 dB）。SNR 不夠時先調 TX；RX gain 太高加上較強的
-signal，接收端的 acquisition 可能會跟不上而掉包。
+signal，接收端的 burst 偵測可能會跟不上而遺失 burst。
 
 Pluto 和 USRP 可以各在一端（每個 process 自己選 `--transport`），但**這個組合還沒有實測過**。
 

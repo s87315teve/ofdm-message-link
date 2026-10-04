@@ -253,7 +253,7 @@ if [ "$AUTO_START" -eq 1 ]; then
     wait_ready TX "$TX_READY" "$TX_PID" "$AUTO_START_TIMEOUT"
 else
     echo "      In each window's Hardware tab choose Device, Front end, Antenna and Gain,"
-    echo "      then press Start radio (RX first).  Centre and Sample rate must match in"
+    echo "      then press Start radio (RX first).  Center and Sample rate must match in"
     echo "      both windows.  Video starts once both radios are on; Ctrl-C cancels."
     wait_ready RX "$RX_READY" "$RX_PID"
     wait_ready TX "$TX_READY" "$TX_PID"

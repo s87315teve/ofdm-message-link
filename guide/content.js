@@ -39,10 +39,10 @@ window.GUIDE_CONTENT = (function () {
       sum: "Link layer 切分 message，並加上 RX 組回與檢查所需的資料。",
       blocks: [
         {
-          name: "Datagram",
-          does: ["這個 block 把 message 切成 fragments。每個 fragment 最多 968 bytes。", "它在每個 fragment 前面加 28-byte header。",
+          name: "Fragmentation",
+          does: ["這個 block 把 message 切成 fragments。每個 fragment 最多帶 968 bytes 的資料。", "它在每個 fragment 前面加 28-byte fragment header。",
             "Header 內有 message ID、fragment index、fragment count 與 TX timestamp。"],
-          input: "一則 message", output: "Datagrams（每個最多 996 bytes）",
+          input: "一則 message", output: "Fragments（含 header，每個最多 996 bytes）",
           code: ["<code>datagram.py</code>：<code>fragment()</code>、<code>Datagram.encode()</code>"],
           opts: ["<code>--frame-payload-bytes</code>（預設 996）"],
           gui: "—"
@@ -51,7 +51,7 @@ window.GUIDE_CONTENT = (function () {
           name: "PHY frame",
           does: ["這個 block 加上 7-byte frame header 與 CRC-32。", "Header 內有 16-bit sequence number。",
             "RX 用 sequence number 計算遺失的 burst 數量。RX 用 CRC 找出 decode 錯誤。"],
-          input: "一個 datagram", output: "一個 PHY frame（最多 1007 bytes）",
+          input: "一個 fragment", output: "一個 PHY frame（最多 1007 bytes）",
           code: ["<code>link.py</code>：<code>MessageTransmitter.encode_message()</code>", "<code>ofdm_link.phy.codec</code>：<code>Frame</code>"],
           opts: ["—"], gui: "—"
         }
@@ -67,7 +67,7 @@ window.GUIDE_CONTENT = (function () {
           does: ["這個 block 加入 redundant bits。", "RX 用這些 bits 修正 noise 造成的錯誤。",
             "預設是 Turbo，rate 1/3。MCS 3 與 MCS 7 沒有 FEC，只有 CRC。"],
           input: "Frame bits", output: "Coded bits",
-          code: ["<code>ofdm_link.phy.codec</code>（由 wire version 選擇 Turbo、convolutional 或 uncoded）"],
+          code: ["<code>ofdm_link.phy.codec</code>（依 FEC 種類選擇 Turbo、convolutional 或 uncoded）"],
           opts: ["由 MCS 決定"],
           gui: "你選擇 uncoded MCS 時，TX 的 <code>Send</code> tab 顯示警告。"
         },
@@ -91,9 +91,9 @@ window.GUIDE_CONTENT = (function () {
         },
         {
           name: "Burst assembly",
-          does: ["這個 block 依序接上四個部分：preamble、training symbol、3 個 header symbols、payload。",
-            "Header symbols 固定使用 QPSK。Header 內有 MCS、wire version 與 length。",
-            "Link 在 burst 的前面與後面各加 256 個 zero samples。"],
+          does: ["這個 block 依序接上四個部分：preamble、training symbol、header（3 個 OFDM symbols）、payload。",
+            "Header 固定使用 QPSK。Header 內有 modulation、FEC 種類與 length。Modulation 加上 FEC 種類就是 MCS。",
+            "Link 在 burst 的前面與後面各加 256 個 guard samples（值為 0）。"],
           input: "OFDM symbols", output: "一個 burst",
           code: ["<code>ofdm_link.phy.burst</code>：<code>encode_burst</code>", "<code>link.py</code>：加上 guard samples"],
           opts: ["—"],
@@ -109,7 +109,7 @@ window.GUIDE_CONTENT = (function () {
       blocks: [
         {
           name: "Peak normalize",
-          does: ["OFDM burst 的 PAPR 大約是 15 dB。Peak 常常大於 1.0。", "Radio 會 clip 大於 1.0 的 samples。",
+          does: ["OFDM burst 的 PAPR（peak 功率與平均功率的比）大約是 15 dB。Peak 常常大於 1.0。", "Radio 會 clip 大於 1.0 的 samples。",
             "所以這個 block 把每個 burst 的 peak 縮放到 0.7。"],
           input: "一個 burst", output: "Peak 為 0.7 的 burst",
           code: ["<code>transport.py</code>：<code>scale_to_peak</code>"],
@@ -121,9 +121,9 @@ window.GUIDE_CONTENT = (function () {
             sim: ["這個 block 把每個 burst 切成 UDP datagrams。", "它把 datagrams 送到同一台電腦的 port。"],
             uhd: ["這個 block 經過 GNU Radio 的 UHD sink 發射每個 burst。", "每個 burst 帶 <code>tx_time</code>。<code>tx_time</code> 比 device time 晚 50 ms。",
               "它在每個 burst 前面加 250 µs 的 zero samples。這段時間讓 front end 穩定。",
-              "沒有 <code>--enable-rf</code> 與完整的 acknowledgement 時，這個 block 不會啟動。"],
+              "沒有 <code>--enable-rf</code> 與完整的確認文字時，這個 block 不會啟動。"],
             pluto: ["這個 block 經過 libiio 把每個 burst 送到 Pluto。", "Pluto 沒有 device clock。Burst 一到 FPGA 就發射。",
-              "沒有 <code>--enable-rf</code> 與完整的 acknowledgement 時，這個 block 不會啟動。"]
+              "沒有 <code>--enable-rf</code> 與完整的確認文字時，這個 block 不會啟動。"]
           },
           input: "Complex samples", output: { sim: "UDP datagrams", uhd: "RF signal", pluto: "RF signal" },
           code: {
@@ -169,7 +169,7 @@ window.GUIDE_CONTENT = (function () {
       blocks: [{
         name: "Sample source",
         does: {
-          sim: ["這個 block 接收 UDP datagrams，然後組成連續的 stream。", "在 burst 之間，它補上 idle samples。有 <code>--snr-db</code> 時是 AWGN，沒有時是 zeros。",
+          sim: ["這個 block 接收 UDP datagrams，然後組成連續的 stream。", "在 burst 之間，它補上 idle samples。有 <code>--snr-db</code> 時是 AWGN，沒有時是 0。",
             "所以 decoder 連續搜尋 preamble。這和硬體的情況相同。"],
           uhd: ["這個 block 連續接收 USRP 的 samples。", "它計算 overflow 的次數。"],
           pluto: ["這個 block 連續接收 Pluto 的 samples。", "Pluto 只提供一個 overflow flag。所以 overflow 次數是下限。"]
@@ -186,19 +186,19 @@ window.GUIDE_CONTENT = (function () {
       sum: "PHY 在 stream 裡找到每個 burst，然後 decode。Burst header 告訴 RX 要用哪一種 MCS。",
       blocks: [
         {
-          name: "Acquisition",
-          does: ["這個 block 用 Schmidl–Cox metric 找 preamble。", "Preamble 在 time domain 有兩個相同的 halves。",
-            "這個 block 同時估計 fractional CFO 與 gain。"],
+          name: "Burst 偵測",
+          does: ["這個 block 用 Schmidl–Cox 方法找 preamble。", "Preamble 在 time domain 有前後兩半，兩半完全相同。",
+            "這個 block 同時估計 CFO（兩台 radio 的頻率差）與 gain。"],
           input: "Sample stream", output: "Burst 起點、CFO、gain",
           code: ["<code>ofdm_link.phy.sync</code>：<code>acquire_preamble</code>", "<code>ofdm_link.phy.streaming</code>：<code>StreamingBurstDecoder</code>"],
           opts: ["Profile 的 <code>sync.detection_threshold</code>、<code>correlation_threshold</code>"],
-          gui: "RX 的 <code>Decode</code> tab：decode funnel。"
+          gui: "RX 的 <code>Decode</code> tab：decode stages。"
         },
         {
           name: "Header decode",
-          does: ["這個 block 用 training symbol 做 channel estimation。", "然後它用 3× repetition 的 majority vote 與 CRC 解出 3 個 header symbols。",
-            "CRC 失敗時，它改用 soft combining 再試一次。",
-            "Header 提供 MCS、wire version 與 length。所以你不需要在 RX 設定 MCS。"],
+          does: ["這個 block 用 training symbol 做 channel estimation。", "Header 的每個 bit 送了 3 次。這個 block 用多數決（majority vote）決定每個 bit，然後檢查 CRC。",
+            "CRC 失敗時，它改用每個 bit 的可靠程度（soft 值）再試一次。",
+            "Header 提供 modulation、FEC 種類與 length。所以你不需要在 RX 設定 MCS。"],
           input: "Training 與 header symbols", output: "Channel estimate、MCS、length",
           code: ["<code>ofdm_link.phy.channel</code>：<code>estimate_channel</code>", "<code>ofdm_link.phy.burst_header</code>：<code>decode_burst_header</code>、<code>decode_burst_header_soft</code>"],
           opts: ["—"],
@@ -207,7 +207,7 @@ window.GUIDE_CONTENT = (function () {
         {
           name: "Equalizer",
           does: ["這個 block 移除 cyclic prefix，然後做 FFT。", "它用 channel estimate 與 4 個 pilots 修正 amplitude 與 phase。",
-            "它也追蹤 sample clock offset。"],
+            "它也追蹤 sample clock offset（兩台 radio 取樣速度的微小差異）。"],
           input: "Payload OFDM symbols", output: "Equalized data symbols",
           code: ["<code>ofdm_link.phy.channel</code>：<code>equalize_with_pilots</code>", "<code>ofdm_link.phy.burst</code>：sample clock tracking"],
           opts: ["—"],
@@ -215,8 +215,8 @@ window.GUIDE_CONTENT = (function () {
         },
         {
           name: "Demapper",
-          does: ["這個 block 把 symbols 變回 bits。", "Turbo（MCS 0 與 MCS 4）使用 soft demapping：它計算每個 bit 的 LLR。",
-            "Header 的 wire version 決定使用哪一種 demapper。"],
+          does: ["這個 block 把 symbols 變回 bits。", "Turbo（MCS 0 與 MCS 4）使用 soft demapping：它不直接判斷 0 或 1，而是計算每個 bit 的 LLR（這個 bit 偏向 0 或 1 的程度）。",
+            "Header 的 FEC 種類決定使用哪一種 demapper。"],
           input: "Equalized symbols", output: "Bits 或 LLRs",
           code: ["<code>ofdm_link.phy.soft</code>：<code>soft_demap_symbols</code>", "<code>ofdm_link.runtime.factory</code>：<code>select_frame_decoder</code>"],
           opts: ["由 header 的 MCS 決定"], gui: "—"
@@ -241,7 +241,7 @@ window.GUIDE_CONTENT = (function () {
           name: "Frame check",
           does: ["CRC-32 正確時，frame 才算 decode 成功。", "Sequence number 跳號時，表示有 burst 遺失。",
             "RX 無法分辨「沒找到 preamble」與「CRC 失敗」。RX 把兩種情況都算成 loss。"],
-          input: "Frame bits", output: "一個 datagram",
+          input: "Frame bits", output: "一個 fragment",
           code: ["<code>link.py</code>：<code>MessageReceiver</code>、<code>_SequenceTracker</code>"],
           opts: ["—"],
           gui: "RX 的 <code>Loss (10 s)</code> card 與 link light。"
@@ -250,7 +250,7 @@ window.GUIDE_CONTENT = (function () {
           name: "Reassembly",
           does: ["這個 block 把 message ID 相同的 fragments 組在一起。", "缺少一個 fragment 時，它丟棄整則 message。",
             "它不會交付不完整的 message。"],
-          input: "Datagrams", output: "一則完整的 message",
+          input: "Fragments", output: "一則完整的 message",
           code: ["<code>datagram.py</code>：<code>Reassembler</code>"],
           opts: ["—"],
           gui: "RX 的 <code>Decode</code> tab：<code>incomplete messages</code>。"
@@ -346,16 +346,16 @@ window.GUIDE_CONTENT = (function () {
     { mod: "ext-in", cap: "程式或 input box 提供 message。", shape: [["s-p", "message bytes"]] },
     { mod: "tx-app", cap: "TX 程式把 message 放進 send queue。", shape: [["s-p", "message bytes"]] },
     { mod: "tx-link", cap: "Link layer 切分 message，並加上兩個 header 與一個 CRC。",
-      shape: [["s-h", "frame header 7 B"], ["s-h", "datagram header 28 B"], ["s-p", "fragment ≤ 968 B"], ["s-c", "CRC-32"]] },
+      shape: [["s-h", "frame header 7 B"], ["s-h", "fragment header 28 B"], ["s-p", "資料 ≤ 968 B"], ["s-c", "CRC-32"]] },
     { mod: "tx-phy", cap: "PHY 把 frame encode，然後組成一個 OFDM burst。",
-      shape: [["s-h", "preamble"], ["s-h", "training"], ["s-c", "header × 3"], ["s-p", "payload × N OFDM symbols"]] },
+      shape: [["s-h", "preamble"], ["s-h", "training"], ["s-c", "header（3 OFDM symbols）"], ["s-p", "payload × N OFDM symbols"]] },
     { mod: "tx-tr", cap: "Transport 縮放 burst，然後送出 samples。",
-      shape: [["s-z", "256 zeros"], ["s-p", "burst samples，peak 0.7"], ["s-z", "256 zeros"]] },
+      shape: [["s-z", "256 guard（0）"], ["s-p", "burst samples，peak 0.7"], ["s-z", "256 guard（0）"]] },
     { mod: "channel", cap: "Channel 在 samples 上加 noise。", shape: [["s-z", "noise"], ["s-p", "burst + noise"], ["s-z", "noise"]] },
     { mod: "rx-tr", cap: "RX 收到連續的 stream。Burst 在 stream 裡的某個位置。",
       shape: [["s-z", "idle samples"], ["s-p", "burst + noise"], ["s-z", "idle samples"]] },
     { mod: "rx-phy", cap: "PHY 找到 burst，讀出 header，然後 decode payload。",
-      shape: [["s-h", "frame header 7 B"], ["s-h", "datagram header 28 B"], ["s-p", "fragment ≤ 968 B"], ["s-c", "CRC-32"]] },
+      shape: [["s-h", "frame header 7 B"], ["s-h", "fragment header 28 B"], ["s-p", "資料 ≤ 968 B"], ["s-c", "CRC-32"]] },
     { mod: "rx-link", cap: "Link layer 檢查 CRC，然後把 fragments 組回 message。", shape: [["s-p", "message bytes"]] },
     { mod: "rx-app", cap: "RX window 顯示 message，並把它送到 UDP port 52002。", shape: [["s-p", "message bytes"]] },
     { mod: "ext-out", cap: "你的程式收到的 bytes 與來源送出的 bytes 相同。", shape: [["s-p", "message bytes"]] }
@@ -367,9 +367,9 @@ window.GUIDE_CONTENT = (function () {
     sim: {
       title: "Simulation：不需要硬體",
       steps: [
-        { text: "開兩個 terminal。在每個 terminal 啟用環境。", cmd: "conda activate ofdm-message-link" },
-        { text: "Terminal 1：先啟動 RX。RX 必須先開啟 sample port。", cmd: "python -m ofdm_message_link.rx_app --snr-db 15" },
-        { text: "Terminal 2：啟動 TX。", cmd: "python -m ofdm_message_link.tx_app" },
+        { text: "開兩個終端機。在每個終端機啟用環境。", cmd: "conda activate ofdm-message-link" },
+        { text: "終端機 1：先啟動 RX。RX 必須先開啟 sample port。", cmd: "python -m ofdm_message_link.rx_app --snr-db 15" },
+        { text: "終端機 2：啟動 TX。", cmd: "python -m ofdm_message_link.tx_app" },
         { text: "在 TX 的 input box 打字，然後按 Enter。RX window 顯示這則 message。" },
         { text: "選用：用其他程式當來源與目的地。", cmd: "python -m ofdm_message_link.udp_recv\npython -m ofdm_message_link.udp_send \"Hello\"" }
       ]
@@ -378,8 +378,8 @@ window.GUIDE_CONTENT = (function () {
       title: "USRP：over the air",
       steps: [
         { caution: CAUTION },
-        { text: "Terminal 1：先啟動 RX。RX 不發射。", cmd: "python -m ofdm_message_link.rx_app --transport uhd" },
-        { text: "Terminal 2：啟動 TX，並帶上 RF acknowledgement。", cmd: "python -m ofdm_message_link.tx_app --transport uhd \\\n    " + ACK },
+        { text: "終端機 1：先啟動 RX。RX 不發射。", cmd: "python -m ofdm_message_link.rx_app --transport uhd" },
+        { text: "終端機 2：啟動 TX，並帶上 RF 確認文字。", cmd: "python -m ofdm_message_link.tx_app --transport uhd \\\n    " + ACK },
         { text: "在兩個 window 開啟 Hardware tab。選擇 device、antenna 與 gain。然後按 Start radio。" },
         { text: "TX gain 預設是 0 dB，也就是最小值。請調高 Gain (dB)，直到 RX light 顯示 GOOD。" }
       ]
@@ -389,8 +389,8 @@ window.GUIDE_CONTENT = (function () {
       steps: [
         { caution: CAUTION },
         { text: "安裝 ADI 的 udev rule。只需要做一次。然後重新插拔 Pluto。詳細步驟在 <code>docs/04-ota-hardware.md</code>。" },
-        { text: "Terminal 1：先啟動 RX。", cmd: "python -m ofdm_message_link.rx_app \\\n    --transport pluto --serial RX_PLUTO_SERIAL --gain 15 --auto-start" },
-        { text: "Terminal 2：啟動 TX，並帶上 RF acknowledgement。", cmd: "python -m ofdm_message_link.tx_app \\\n    --transport pluto --serial TX_PLUTO_SERIAL --gain -5 --auto-start \\\n    " + ACK },
+        { text: "終端機 1：先啟動 RX。", cmd: "python -m ofdm_message_link.rx_app \\\n    --transport pluto --serial RX_PLUTO_SERIAL --gain 15 --auto-start" },
+        { text: "終端機 2：啟動 TX，並帶上 RF 確認文字。", cmd: "python -m ofdm_message_link.tx_app \\\n    --transport pluto --serial TX_PLUTO_SERIAL --gain -5 --auto-start \\\n    " + ACK },
         { text: "Pluto 的 TX gain 是 attenuator：0 dB 是最大輸出。TX 與 RX 請各用一台 Pluto。" }
       ]
     }
@@ -400,7 +400,7 @@ window.GUIDE_CONTENT = (function () {
     { q: "TX 的 log 一直增加，但是 RX 沒有顯示", cause: "TX gain 在最小值。", fix: "在 TX 的 <code>Hardware</code> tab 調高 <code>Gain (dB)</code>。新的 gain 立即生效。" },
     { q: "Spectrum 有變化，但是沒有 burst decode 成功", cause: "RX antenna 接到錯誤的 port。<code>rx level</code> 的 <code>spread</code> 很小。", fix: "選擇另一個 antenna port。這比調高 gain 更有效。" },
     { q: "RX 完全找不到 preamble", cause: "TX 與 RX 的 sample rate 不同。", fix: "TX 與 RX 使用相同的 <code>--overlay</code>。" },
-    { q: "高速率時遺失很多 packet", cause: "RX gain 太高，signal 太強。", fix: "把 RX gain 降到大約 15 dB。" },
+    { q: "高速率時遺失很多 burst", cause: "RX gain 太高，signal 太強。", fix: "把 RX gain 降到大約 15 dB。" },
     { q: "Overflow 次數一直增加", cause: "USB bandwidth 或 CPU 不夠。", fix: "把兩台 radio 接到不同的 USB 3 controller。保持 <code>--engine process</code>。" },
     { q: "Probe 失敗：device 被佔用", cause: "另一個 process 已經開啟這台 radio。", fix: "確認 TX 與 RX 的 <code>--serial</code> 不同。停止舊的 process。" },
     { q: "Pluto：device 清單是空的", cause: "電腦沒有在 USB 上找到 Pluto。", fix: "重新插拔 Pluto。Pluto 開機大約需要 20 秒。" }
@@ -410,7 +410,7 @@ window.GUIDE_CONTENT = (function () {
   var FILES = [
     ["tx_app.py", "Ingress", "TX window、UDP ingress、send thread"],
     ["rx_app.py", "Egress、GUI instruments", "RX window、UDP egress、<code>--stats-log</code>"],
-    ["datagram.py", "Datagram、Reassembly", "28-byte header、fragmentation、reassembly"],
+    ["datagram.py", "Fragmentation、Reassembly", "28-byte fragment header、fragmentation、reassembly"],
     ["link.py", "PHY frame、Frame check", "Bytes 與 burst 的轉換、sequence gap、EVM 與 SNR 量測"],
     ["transport.py", "Sample sink、Sample source", "UDP 與 UHD 的 sample transport、peak normalization、timed TX burst"],
     ["pluto.py", "Sample sink、Sample source", "ADALM-Pluto：經過 libiio 的 discover、probe、sink 與 source"],

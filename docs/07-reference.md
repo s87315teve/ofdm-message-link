@@ -31,13 +31,13 @@
 |---|---|
 | `--ingress-port` | 接受 application bytes 的 UDP port，預設 52001 |
 | `--peak-amplitude` | 每個 burst 發射前正規化到的 peak，預設 0.7 |
-| `--enable-rf` / `--acknowledgement` | RF 發射授權，`--transport uhd` 與 `--transport pluto` 必要。Acknowledgement 的文字是 `I acknowledge that this process will transmit RF`，必須一字不差 |
+| `--enable-rf` / `--acknowledgement` | RF 發射授權，`--transport uhd` 與 `--transport pluto` 必要。`--acknowledgement` 後面的確認文字是 `I acknowledge that this process will transmit RF`，必須一字不差 |
 
 ### 只有接收端
 
 | 選項 | 說明 |
 |---|---|
-| `--egress-host` / `--egress-port` | 轉發已交付訊息的目的地，預設 `127.0.0.1:52002` |
+| `--egress-host` / `--egress-port` | 轉發已交付 message 的目的地，預設 `127.0.0.1:52002` |
 | `--snr-db` | 只適用 `udp`，加上 AWGN。對真實 channel 無效，帶了會被拒絕 |
 | `--decode-workers` | Payload decode 的 process 數，預設 4；1 = 單 thread inline decoder |
 | `--rx-recv-frames` | UHD `num_recv_frames`，預設每 5 MS/s 256 個（約 0.1 s）；0 = UHD 預設 |
@@ -91,14 +91,14 @@
 
 ### 為什麼 RX 不必知道 MCS、但 sample rate 必須一致
 
-Burst header 固定使用 QPSK。它的 12 bytes 帶 magic、wire version、payload modulation 與 length，
-再經 3 次 bit repetition 的多數決與 CRC 保護。RX 先解 header，再依其中的 modulation 與 wire version
+Burst header 固定使用 QPSK。它的 12 bytes 帶識別碼（magic）、FEC 種類、payload modulation、length 與 CRC。
+每個 bit 重複送 3 次，RX 用多數決解出每個 bit 再檢查 CRC。RX 先解 header，再依其中的 modulation 與 FEC 種類
 選 payload demapper 與 FEC decoder。
 
 Sample rate 不在 header 裡。兩端不同，等於對「一個 sample 代表多少時間」有不同解讀，連 preamble
 都對不上。
 
-Wire version 是 FEC 種類的編號：v1 = convolutional r1/2、v2 = Turbo r1/3、v3 = convolutional r1/3、
+FEC 種類在程式裡叫 wire version，是一個編號：v1 = convolutional r1/2、v2 = Turbo r1/3、v3 = convolutional r1/3、
 v4 = uncoded。它和 modulation 一起決定 MCS index。
 
 ## 7.4 Analog bandwidth 與 OFDM signal 寬度
@@ -127,8 +127,8 @@ GNU Radio 內建一組 OFDM blocks。這個專案沒有用它們，而是用 `of
 - **看得到每一步。** `encode_burst` 與 `decode_burst` 是一般的 Python 函式，輸入輸出都是 NumPy
   array，可以單獨呼叫、單獨測試、在任何一步把中間結果印出來或畫出來。Flowgraph 裡的 block
   很難這樣拆開來看。
-- **FEC 與 header 是一起設計的。** Turbo decoder（C++）、pilot-based channel estimation、burst
-  acquisition、CFO／sample clock offset 補償，以及受保護的 header 都在同一套 wire format 裡。
+- **FEC 與 header 是一起設計的。** Turbo decoder（C++）、用 pilot 的 channel estimation、burst
+  偵測、CFO／sample clock offset 補償，以及受保護的 header 都在同一套格式裡一起設計。
 - **PHY 只處理 bytes。** 上層不需要知道 GNU Radio 的 tag 或 PDU。
 
 GNU Radio 在這裡的角色是 **radio 的介面**（UHD source／sink、timed burst）以及 rate-1/2
@@ -153,11 +153,11 @@ preamble 偵測、channel estimation、burst header，以及完整 burst 在有 
 
 `tests/app/`：
 
-- Datagram framing、fragmentation 與 reassembly，以及不完整 message 的丟棄。
+- Fragment header、fragmentation 與 reassembly，以及不完整 message 的丟棄。
 - Sequence gap、16-bit wraparound、out-of-order 的判定。
 - 完整 waveform 往返，以及**連續 noise stream 中的 burst 偵測**（刻意用非對齊的 chunk 餵入）。
 - Peak normalization 的不 clipping 保證。
-- RF 授權閘門：缺 `--enable-rf` 或 acknowledgement 不符時必須拒絕。
+- RF 授權閘門：缺 `--enable-rf` 或確認文字不符時必須拒絕。
 - Pluto 與 USRP 的列舉、probe 與設定轉換（用假的裝置物件驅動，不需要硬體）。
 - Link light 的每一條規則與邊界值。
 - 多 worker 的 payload decode 與單 worker 的結果逐 byte 相同。

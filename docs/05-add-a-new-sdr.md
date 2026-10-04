@@ -40,9 +40,9 @@ class SampleSource(Protocol):
 
 | Method | 約定 |
 |---|---|
-| `start()` | 開啟裝置、調頻、設 gain。失敗時 raise `TransportError`，訊息要寫出原因。**在這之前不可以有任何 RF 輸出** |
-| `sink.send(samples)` | 送出**一整個 burst**。先呼叫 `scale_to_peak(samples, peak_amplitude)` 避免 clipping。成功回傳 `True`。這個呼叫可以 block 到裝置收下為止（這就是 back-pressure） |
-| `source.recv(timeout)` | 回傳下一段連續的 samples；`timeout` 秒內沒有就回傳 `None`。每次回傳的長度不限，但**不可以跳過或重排 samples**。掉 sample 時要在 `snapshot()` 裡計數 |
+| `start()` | 開啟裝置、調頻、設 gain。失敗時 raise `TransportError`，錯誤訊息要寫出原因。**在這之前不可以有任何 RF 輸出** |
+| `sink.send(samples)` | 送出**一整個 burst**。先呼叫 `scale_to_peak(samples, peak_amplitude)` 避免 clipping。成功回傳 `True`。這個呼叫可以 block 到裝置收下為止（這就是 back-pressure：下游忙不過來時，讓上游等待，而不是丟掉資料） |
+| `source.recv(timeout)` | 回傳下一段連續的 samples；`timeout` 秒內沒有就回傳 `None`。每次回傳的長度不限，但**不可以跳過或重排 samples**。遺失 samples 時要在 `snapshot()` 裡計數 |
 | `stop()` | 關閉裝置，並讓 TX 回到不發射的狀態。要能重複呼叫 |
 | `snapshot()` | 回傳一個 dict，內容會原樣列在 `Hardware` tab。放你想觀察的計數，例如送出的 burst 數、overflow 次數、裝置讀回的 frequency 與 gain |
 
@@ -173,7 +173,7 @@ python -m pytest tests/app -q
   邊界。`transport.require_tuned()` 示範了怎麼檢查。
 - **Host 介面的速率上限。** USB 2.0 的裝置通常撐不住 10 MS/s。實際量一次「要求的 sample rate」
   和「真的收到的 sample rate」，再決定 `max_sample_rate`。
-- **RX gain 不是越高越好。** Signal 太強時 acquisition 會變慢而掉包。先把 RX gain 放在中間偏低，
+- **RX gain 不是越高越好。** Signal 太強時 burst 偵測會變慢而遺失 burst。先把 RX gain 放在中間偏低，
   再調 TX。
 
 回到 [README](../README.md)。

@@ -30,7 +30,7 @@ TX gain 5 dB、RX gain 15 dB：
   實測的飽和值和預測值差距在 0.1% 以內。
 - 接收端的 effective SNR 不論 gain 怎麼調，都停在約 **17 dB**。MCS 3、5、6、7 在這個 SNR 下都有 CRC
   失敗，所以做不到無遺失。
-- 提高 TX gain 會**更糟**：TX 15 dB 時連 MCS 4 都掉 11.6%（RX overflow），詳見[第 5.3 節](#53-tx-gain-的影響)。
+- 提高 TX gain 會**更糟**：TX 15 dB 時連 MCS 4 都遺失 11.6%（RX overflow），詳見[第 5.3 節](#53-tx-gain-的影響)。
 - 超過上限時 link 不會崩潰：goodput 停在上限值。多出來的 datagram 會在 TX 的 ingress queue（256 格）
   **被默默丟掉**，latency 從約 60 ms 升到 0.7–1.3 秒。
 
@@ -41,7 +41,7 @@ TX gain 5 dB、RX gain 15 dB：
 - 所有結果都只來自**同一個 bench 幾何**。antenna 的位置和距離沒有量測，測試期間也沒有移動。
 - 1.2 GHz 落在 1164–1300 MHz 的 GNSS 分配頻段內，所以維持低功率（TX gain 最高只試到 15 dB，
   CBX 上限是 31.5 dB）。
-- 表中的 effective SNR 是 decision-directed 值，只計算成功解出的 burst（最近 64 個），接近失效門檻時會偏高。
+- 表中的 effective SNR 是把每個點當成最近的參考點來算誤差（decision-directed）得到的值，只計算成功解出的 burst（最近 64 個），接近失效門檻時會偏高。
   它只能當操作參考，不能當 link budget。
 
 ## 3. 測試設定與方法
@@ -58,7 +58,7 @@ TX gain 5 dB、RX gain 15 dB：
 | GUI | 用 `QT_QPA_PLATFORM=offscreen` 執行，視窗照常建立與刷新，只是不顯示在螢幕上 |
 | 主機 | 20 logical CPUs 的桌上型電腦，Linux |
 | 軟體 | Python 3.13.15、GNU Radio 3.10.12.0、UHD 4.10.0、NumPy 2.5.3 |
-| RF 授權 | 每次啟動 TX 都帶 `--enable-rf` 與完整 acknowledgement |
+| RF 授權 | 每次啟動 TX 都帶 `--enable-rf` 與完整的確認文字 |
 
 ### 3.2 量測路徑
 
@@ -206,8 +206,8 @@ UDP 上限     = service_rate × datagram_bytes × 8
 | 7 | 300 | 0.231 | 8,107 / 9,000 | 90.1%（89.4–90.7%） | 54 / 60 | 8,107 個 CRC 失敗 | 1.03 / 0.32 |
 
 - 這 8 個確認 run 都沒有 RX overflow、沒有 rx_samples_lost，TX 也沒有 underflow／late。
-- MCS 3、6 在 450/s 時雖然沒有 overflow，但 RX queue 的 back-pressure 約有 100 萬次，latency 也升到 230 ms。
-  這代表 **RX 的處理速度已經跟不上**：延遲來自 RX 積壓，不是 TX queue（TX queue 沒有丟包）。
+- MCS 3、6 在 450/s 時雖然沒有 overflow，但 RX queue 的 back-pressure（queue 滿了、上游只好等待）約有 100 萬次，latency 也升到 230 ms。
+  這代表 **RX 的處理速度已經跟不上**：延遲來自 RX 積壓，不是 TX queue（TX queue 沒有丟掉 datagram）。
 
 ### 5.3 TX gain 的影響
 
@@ -229,8 +229,8 @@ UDP 上限     = service_rate × datagram_bytes × 8
 
 - 把 TX gain 從 5 dB 調到 15 dB，mean effective SNR 只從約 16.8 dB 升到 17–18 dB，**沒有換到能讓 MCS 3／6／7
   過關的 margin**。
-- 代價是 RX 開始 overflow、丟掉 samples，連原本乾淨的 MCS 4 都在 50% 負載下掉了 11.6%。原因是 signal 太強時，
-  RX acquisition 變慢、跟不上即時 sample stream。所以 **TX 5 dB／RX 15 dB 仍然是最佳設定**。
+- 代價是 RX 開始 overflow、丟掉 samples，連原本乾淨的 MCS 4 都在 50% 負載下遺失 11.6%。原因是 signal 太強時，
+  RX 的 burst 偵測變慢、跟不上即時 sample stream。所以 **TX 5 dB／RX 15 dB 仍然是最佳設定**。
 - SNR 停在約 17 dB 的原因（例如 phase noise、IQ imbalance 或其他 EVM floor）**這次沒有查明**。
 
 ### 5.4 datagram 大小的影響
@@ -248,7 +248,7 @@ UDP 上限     = service_rate × datagram_bytes × 8
 - **小 datagram 會碰到 RX 的 burst 處理速率上限。** 200-byte 在 500 burst/s 時 RX 就已經 overflow，遠低於
   TX 的 1,054/s。在這個 bench 上，RX 每秒大約只能穩定處理 **450–500 個 burst**，burst 很短時更少。
   先前在 3.8 GHz 離線量到的 decode 能力是每秒 1,000 個以上的 burst。兩者的差距符合
-  「signal 越強，acquisition 越慢」的現象，但**這次沒有診斷**。
+  「signal 越強，burst 偵測越慢」的現象，但**這次沒有診斷**。
 
 ### 5.5 一次沒有解釋的異常
 
@@ -269,14 +269,14 @@ UDP 上限     = service_rate × datagram_bytes × 8
 | SNR 掉到約 11 dB 以下（例如 antenna 移遠） | 退回 **MCS 0**（≤ 1.65 Mbit/s）或 **MCS 2**（≤ 2.39 Mbit/s） |
 | 想要更高速率 | 目前**沒有可用的 MCS**：MCS 3／5／6 會持續遺失，MCS 7 不可用。要先解決 SNR 停在 17 dB 的問題，以及 RX 每秒 burst 數的上限 |
 | 單向影像串流 | 延續影像 demo 的做法，把 bitrate 設在上限的 50–60%，例如 MCS 4 用 1.3–1.8 Mbit/s |
-| 應用程式設計 | 發送端**不會回報丟包**：超過上限時，datagram 在 TX ingress queue（256 格）被默默丟掉，只能從接收端的序號缺口看出來。請在應用層自己限速 |
+| 應用程式設計 | 發送端**不會回報 datagram 被丟掉**：超過上限時，datagram 在 TX ingress queue（256 格）被默默丟掉，只能從接收端的序號缺口看出來。請在應用層自己限速 |
 
 ## 7. 沒有做或沒有驗證的事
 
 - 沒有量 10 MS/s、不同的 antenna 距離，也沒有改 RX gain（只調了 TX gain）。
 - SNR 天花板（約 17 dB）與 RX burst 處理速率上限（約 450–500/s）的根本原因都沒有診斷。
 - 60 秒確認只做了一輪，沒有做 5 分鐘以上的長時間測試。
-- 沒有修改任何程式，所以 guard／gap 的長度、ingress queue 會默默丟包這些行為，這次都只記錄、沒有處理。
+- 沒有修改任何程式，所以 guard／gap 的長度、ingress queue 會默默丟掉 datagram 這些行為，這次都只記錄、沒有處理。
 - 第 5.5 節的異常原因未查明。
 
 ## 8. 重現

@@ -118,7 +118,7 @@ class RadioPanel(QtWidgets.QGroupBox):
         self._gain.setToolTip("Adjustable while the radio runs; applied immediately.")
         self._gain.valueChanged.connect(self._on_gain_changed)
         layout.addWidget(self._gain, 2, 1)
-        layout.addWidget(QtWidgets.QLabel("Centre (MHz)"), 2, 2)
+        layout.addWidget(QtWidgets.QLabel("Center (MHz)"), 2, 2)
         self._frequency = QtWidgets.QDoubleSpinBox()
         self._frequency.setDecimals(3)
         self._frequency.setRange(1.0, 8000.0)

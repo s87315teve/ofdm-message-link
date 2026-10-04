@@ -15,7 +15,7 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 | 最上方一行 | 提醒這是單向 demo（完整文字在 tooltip） | 同左 |
 | 上層 cards | `Goodput (2 s)`、`Loss (10 s)`、`SNR (2 s)`、`MCS`、`Link` light | `Goodput (2 s)`、`Airtime (2 s)`、`Queue`、`MCS for next message` 下拉選單、`TX` light（`RF ON` 或 `SIMULATED`） |
 | 60 秒 trend | Goodput 與 SNR，有 burst 遺失的時段紅底 | Goodput 與 Airtime |
-| Tabs | `Signal`（constellation、spectrum、RX level）、`Decode`（decode funnel）、`Hardware`（Radio panel、UHD faults、engine 與 transport 資訊）、`Log` | `Send`（輸入框、Loss test、MCS 說明）、`Signal`、`Hardware`、`Log` |
+| Tabs | `Signal`（constellation、spectrum、RX level）、`Decode`（decode stages）、`Hardware`（Radio panel、UHD faults、engine 與 transport 資訊）、`Log` | `Send`（輸入框、Loss test、MCS 說明）、`Signal`、`Hardware`、`Log` |
 
 - Light 右側是 **Reset stats**：只把畫面歸零（以目前計數當新基準），不重啟 radio。
 - 打字聊天的流量只有每秒幾百 bytes，所以 `Goodput (2 s)` 顯示 `0.000`（單位是 Mbit/s）。
@@ -58,8 +58,8 @@ TX 不知道 RX 有沒有收到（單向），所以不顯示遺失或 SNR。
 |---|---|
 | `Goodput (2 s)` | 最近 2 秒送出去的 application bytes，應與 RX 相近 |
 | `Airtime (2 s)` | 最近 2 秒發射時間佔比 |
-| `Queue` | 等待發送的訊息數，應維持在個位數 |
-| `MCS for next message` | 下拉選單，可現場切換（下一則訊息起生效） |
+| `Queue` | 等待發送的 message 數，應維持在個位數 |
+| `MCS for next message` | 下拉選單，可現場切換（下一則 message 起生效） |
 | `TX` | 燈號，旁邊是 `RF ON`（真的 radio）或 `SIMULATED`（udp） |
 
 TX 燈號：灰 `OFF` = radio 尚未啟動；紅 `FAULT` = 最近 10 秒 UHD 的 `tx_time_error`、underflow 或
@@ -95,12 +95,12 @@ rx level now -64.7 dBFS   quietest -65.2 dBFS   loudest -43.9 dBFS   spread 21.3
 **`spread` 才是關鍵。** 沒接東西的 antenna port 會一直停在自己的 noise floor，spread 接近 0；
 有 signal 的 port 會隨發射開關明顯跳動。用法見[排錯清單](06-troubleshooting.md)。
 
-## 2.5 量測 packet loss（PER）
+## 2.5 量測 burst 遺失率（PER）
 
-發送端 `Send` tab 有 **Loss test**：填數量後按 **Send batch**，會連續送出編號訊息。接收端的
-`burst loss ratio`（在 `Decode` tab）就是 packet error rate，來源是 PHY frame sequence number 的缺口。
+發送端 `Send` tab 有 **Loss test**：填數量後按 **Send batch**，會連續送出編號的 message。接收端的
+`burst loss ratio`（在 `Decode` tab）就是 PER（packet error rate），來源是 PHY frame sequence number 的缺口。
 
-Send batch 不會因為 queue 塞滿而丟包。發送 thread 會等到有空位才送下一個 burst，所以統計上的
+Send batch 不會因為 queue 塞滿而丟掉 message。發送 thread 會等到有空位才送下一個 burst，所以統計上的
 遺失一定來自 link，不是來自介面。
 
 **一個可以做的小實驗：** 用模擬 transport，固定 MCS，把 `--snr-db` 從 20 每次降 1 dB，每個點用
@@ -116,7 +116,7 @@ SNR 附近突然從接近 0 升到接近 100%。換一個 MCS 再做一次，比
 | `bursts decoded` | 通過 CRC 的 burst 數 | — |
 | `bursts missing` | 由 PHY sequence gap 推得的遺失 burst | **無法區分**「preamble 沒偵測到」與「CRC 失敗」，單向 link 本來就分不出來 |
 | `burst loss ratio` | missing ÷ (decoded + missing) | 即 PER |
-| `incomplete messages` | 缺 fragment 而被丟棄的訊息 | 永遠無法修復 |
+| `incomplete messages` | 缺 fragment 而被丟棄的 message | 永遠無法修復 |
 | `foreign bursts` | CRC 有效但不是這個專案的格式 | 同一 channel 上的其他應用，不是 link 故障 |
 | `mean EVM` / `effective SNR` | Decision-directed：以最近的 constellation 點為參考算出的誤差 | Error rate 一高就**會飽和**。它描述「解得出來的 burst」，不是 link 的失效門檻 |
 | `mean one-way latency` | End-to-end latency | **只在收發同機時顯示**。跨主機沒有共同時間基準，所以直接顯示 `n/a` 而不是給假數字 |

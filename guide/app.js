@@ -168,7 +168,7 @@
   $("next").addEventListener("click", function () { stop(); goTo(state.step + 1); });
   $("prev").addEventListener("click", function () { stop(); goTo(state.step < 0 ? 0 : state.step - 1); });
 
-  /* ---------------- packet lab ---------------- */
+  /* ---------------- burst lab ---------------- */
   var mcsSelect = $("mcs");
   DATA.mcs.forEach(function (m) {
     var o = el("option", null, m.label);
@@ -230,22 +230,22 @@
       return '<div class="layer"><div class="name">' + name + "<small>" + sub + '</small></div><div class="segbar">' + bar + "</div></div>";
     }
     $("stack").innerHTML =
-      layer("Fragment " + (state.frag + 1), bytes + " B", seg("s-p", "1", "application bytes")) +
-      '<div class="down">↓ datagram.py 加上 reassembly 用的 header</div>' +
-      layer("Datagram", dgram + " B", seg("s-h", "0 0 30%", "header", "28 B") + seg("s-p", "1", "fragment", bytes + " B")) +
+      layer("資料 " + (state.frag + 1), bytes + " B", seg("s-p", "1", "application bytes")) +
+      '<div class="down">↓ datagram.py 加上 reassembly 用的 28 B fragment header</div>' +
+      layer("Fragment " + (state.frag + 1), dgram + " B", seg("s-h", "0 0 30%", "fragment header", "28 B") + seg("s-p", "1", "資料", bytes + " B")) +
       '<div class="down">↓ PHY frame codec 加上 sequence number 與 CRC</div>' +
       layer("PHY frame", frame + " B = " + fmt(frame * 8) + " bits",
-        seg("s-h", "0 0 16%", "header", "7 B") + seg("s-p", "1", "datagram", dgram + " B") + seg("s-c", "0 0 16%", "CRC-32", "4 B")) +
+        seg("s-h", "0 0 16%", "header", "7 B") + seg("s-p", "1", "fragment", dgram + " B") + seg("s-c", "0 0 16%", "CRC-32", "4 B")) +
       '<div class="down">↓ ' + mcs.label.replace(/^MCS \d+ — /, "") + "</div>" +
       layer("Payload", n + " OFDM symbols", seg("s-p", "1", n + " × 48 data subcarriers", "最後一個 OFDM symbol 可能含有 padding"));
 
     var parts = [
-      ["b-g", "Guard（zeros）", DATA.guardSamples],
-      ["b-pre", "Preamble：acquisition", symLen],
+      ["b-g", "Guard（值為 0）", DATA.guardSamples],
+      ["b-pre", "Preamble：burst 偵測", symLen],
       ["b-tr", "Training：channel estimation", symLen],
-      ["b-hd", "Header × 3：MCS 與 length", 3 * symLen],
+      ["b-hd", "Header（3 OFDM symbols）：MCS 與 length", 3 * symLen],
       ["b-pl", "Payload × " + n, n * symLen],
-      ["b-g", "Guard（zeros）", DATA.guardSamples]
+      ["b-g", "Guard（值為 0）", DATA.guardSamples]
     ];
     $("burst").innerHTML = parts.map(function (p) {
       return '<div class="' + p[0] + '" style="flex:' + p[2] + ' 1 0" title="' + p[1] + ": " + p[2] + ' samples"></div>';

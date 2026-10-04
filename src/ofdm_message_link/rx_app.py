@@ -586,7 +586,7 @@ class ReceiveWindow(QtWidgets.QWidget):
 
         rows = [
             f"{'':<22}{'last 10 s':>12}{'since reset':>14}",
-            "decode funnel:",
+            "decode stages:",
             row("  detected", "detected_burst_candidates"),
             row("  header OK", "header_decode_success"),
             row("  header failed", "header_decode_failure"),

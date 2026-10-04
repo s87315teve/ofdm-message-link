@@ -4,11 +4,11 @@
 
 這是一個用 GNU Radio 與 Python 寫的**教學用通訊系統範例**，讓你做兩件事：
 
-1. **傳影像**：webcam → ffmpeg → OFDM link → ffplay，掉 packet 時畫面會破，link 品質一眼就看得出來。
+1. **傳影像**：webcam → ffmpeg → OFDM link → ffplay，遺失 burst 時畫面會破，link 品質一眼就看得出來。
 2. **用 UDP 傳任何資料**：把 bytes 送進發送端的 UDP `:52001`，從接收端的 UDP `:52002` 拿出來。
    你的程式只要會開 socket，不需要懂底下的 OFDM。
 
-過程中的 spectrum、constellation、SNR 與 packet loss 都會即時畫出來。
+過程中的 spectrum、constellation、SNR 與 burst 遺失率都會即時畫出來。
 
 - **沒有硬體也能跑**：`--transport udp` 用本機 UDP 模擬 channel，不需要 SDR、root 或 GPU。
   下面的三個步驟全部可以在一台筆電上完成。
@@ -23,13 +23,13 @@ TX 和 RX 是**兩個各自啟動的 process**，彼此只透過 sample transpor
 
 > 👉 **互動導覽：<https://s87315teve.github.io/ofdm-message-link/guide/>**
 > 點任何一個模組，看它做什麼、對應哪一段程式、在 GUI 的哪裡看得到；也可以調 message 大小與 MCS，
-> 看 packet 怎麼一層層包起來。離線時用瀏覽器開 [`guide/index.html`](guide/index.html) 也一樣。
+> 看 message 怎麼一層層包成 burst。離線時用瀏覽器開 [`guide/index.html`](guide/index.html) 也一樣。
 
 ## 這個範例是什麼、不是什麼
 
 這是**單向** link：只有 TX → RX，沒有回傳路徑。所以：
 
-- **沒有 ACK、沒有重傳（ARQ）、沒有 TDD**。掉的 packet 就是掉了，不會自己回來。
+- **沒有 ACK、沒有重傳（ARQ）、沒有 TDD**。遺失的 burst 就是遺失了，不會自己回來。
 - 這讓你可以直接觀察「channel 變差時會發生什麼事」，不會被重傳機制蓋掉。
 - 畫面上的 throughput、loss、SNR 是觀察用的即時讀數，不是正式的系統效能量測。
 
@@ -71,8 +71,9 @@ python -m ofdm_message_link.rx_app --snr-db 20
 python -m ofdm_message_link.tx_app
 ```
 
-**③ 在發送端視窗的輸入框打字、按 Enter。** 接收端視窗會列出這則訊息、更新 constellation 與 spectrum，
-並累加統計。`--snr-db 20` 讓接收端加上 AWGN，constellation 才看得出 noise 擴散。
+**③ 在發送端視窗的輸入框打字、按 Enter。** 接收端視窗會列出這則 message、更新 constellation 與 spectrum，
+並累加統計。`--snr-db 20` 讓接收端加上 AWGN（一種隨機 noise），constellation 才看得出 noise 擴散。
+不熟 constellation、SNR、AWGN 這些名詞的話，請看[先備觀念與名詞表](docs/00-prerequisites.md)。
 
 | 發送端 | 接收端 |
 |---|---|
@@ -145,12 +146,14 @@ ffplay 的視窗會出現 webcam 的畫面。沒有 webcam 的話，把 `-f v4l2
 
 ## 接下來讀什麼
 
-要傳影像或資料，直接看第 3 篇。想弄懂原理，從第 1 篇開始。前三篇不需要硬體。
+要傳影像或資料，直接看第 3 篇。想弄懂原理，從第 0 篇開始，依序讀 0 → 1 → 2 → 3。前四篇不需要硬體。
+第 4、5、7 篇是進階內容，要用真的 SDR 或修改程式時再讀。
 
 | # | 文件 | 內容 |
 |---|---|---|
-| 1 | [系統架構](docs/01-architecture.md) | OFDM、FEC、MCS 各自解決什麼問題；每個 block 做什麼、在哪個檔案 |
-| 2 | [看懂 GUI](docs/02-gui.md) | Spectrum 與 constellation 怎麼讀、怎麼量 packet loss、每個統計數字的意義與限制 |
+| 0 | [先備觀念與名詞表](docs/00-prerequisites.md) | dB 與 SNR、I/Q、constellation、FFT 與 OFDM 的關係；全部名詞的定義 |
+| 1 | [系統架構](docs/01-architecture.md) | OFDM、FEC、MCS 各自解決什麼問題；一則 message 怎麼變成 burst；每個 block 做什麼、在哪個檔案 |
+| 2 | [看懂 GUI](docs/02-gui.md) | Spectrum 與 constellation 怎麼讀、怎麼量 burst 遺失率、每個統計數字的意義與限制 |
 | **3** | **[用 UDP 傳資料與傳影像](docs/03-your-own-app.md)** | **用 UDP socket 收送資料；webcam 影像串流的完整說明與一鍵腳本** |
 | 4 | [用真的 SDR 發射](docs/04-ota-hardware.md) | **發射前必讀的注意事項**；USRP 與 ADALM-Pluto 的設定 |
 | 5 | [新增一種 SDR](docs/05-add-a-new-sdr.md) | Sample transport 的介面，以及加一種新裝置要改哪幾個地方 |
@@ -163,7 +166,7 @@ ffplay 的視窗會出現 webcam 的畫面。沒有 webcam 的話，把 `-f v4l2
 ```
 ofdm-message-link/
 ├── src/
-│   ├── ofdm_message_link/   應用程式：兩個視窗、datagram、sample transport、GUI
+│   ├── ofdm_message_link/   應用程式：兩個視窗、fragment、sample transport、GUI
 │   └── ofdm_link/           PHY library：FEC、OFDM、synchronization、equalization，以及 USRP 介面
 ├── configs/                 設定檔：default.yaml 加上 profiles/ 裡的一個 profile
 ├── docs/                    上表的文件

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OFDM message link 導覽</title>
-<meta name="description" content="ofdm-message-link 的互動導覽：模組化的工作流、packet lab、程式結構與啟動步驟。">
+<meta name="description" content="ofdm-message-link 的互動導覽：模組化的工作流、burst lab、程式結構與啟動步驟。">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -19,7 +19,7 @@
       <ul>
         <li>這個範例是 demo。它不是 acceptance test。</li>
         <li>Link 只有一個方向。它沒有 ACK、ARQ 與 TDD。</li>
-        <li>Link 不會重送遺失的 packet。</li>
+        <li>Link 不會重送遺失的 burst。</li>
         <li>請不要用這個範例的數字證明 throughput、reliability 或 RF 效能。</li>
       </ul>
     </details>
@@ -30,7 +30,7 @@
   <div class="wrap bar-inner">
     <div class="tabs" role="tablist" aria-label="分頁">
       <button role="tab" id="tab-flow" aria-controls="view-flow" aria-selected="true"><span class="n">1</span>工作流</button>
-      <button role="tab" id="tab-lab" aria-controls="view-lab" aria-selected="false" tabindex="-1"><span class="n">2</span>Packet lab</button>
+      <button role="tab" id="tab-lab" aria-controls="view-lab" aria-selected="false" tabindex="-1"><span class="n">2</span>Burst lab</button>
       <button role="tab" id="tab-code" aria-controls="view-code" aria-selected="false" tabindex="-1"><span class="n">3</span>程式結構</button>
       <button role="tab" id="tab-run" aria-controls="view-run" aria-selected="false" tabindex="-1"><span class="n">4</span>執行</button>
     </div>
@@ -70,7 +70,7 @@
     <div class="scroller" id="chain" data-mode="sim">
     <svg id="chain-svg" viewBox="0 0 1640 690" role="img" aria-labelledby="chain-title chain-desc">
       <title id="chain-title">單向 OFDM message link 的 block diagram</title>
-      <desc id="chain-desc">TX chain, left to right: ingress, datagram, PHY frame, FEC encoder, symbol mapper, OFDM modulator, burst assembly, peak normalize, sample sink. After the channel, RX chain, right to left: sample source, acquisition, header decode, equalizer, demapper, FEC decoder, frame check, reassembly, egress.</desc>
+      <desc id="chain-desc">TX chain, left to right: ingress, fragmentation, PHY frame, FEC encoder, symbol mapper, OFDM modulator, burst assembly, peak normalize, sample sink. After the channel, RX chain, right to left: sample source, burst detection, header decode, equalizer, demapper, FEC decoder, frame check, reassembly, egress.</desc>
       <defs>
         <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
         <marker id="ah-ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-ch"/></marker>
@@ -86,7 +86,7 @@
 
       <!-- layer labels -->
       <text class="t-group" x="232" y="134" text-anchor="middle">Application</text>
-      <text class="t-group" x="448" y="134" text-anchor="middle">Link（datagram / frame）</text>
+      <text class="t-group" x="448" y="134" text-anchor="middle">Link（fragment / frame）</text>
       <text class="t-group" x="1024" y="134" text-anchor="middle">PHY</text>
       <text class="t-group" x="1384" y="134" text-anchor="middle">Sample transport</text>
 
@@ -129,9 +129,9 @@
       </g>
       <g class="blk tx" data-id="tx-dgram" tabindex="0" role="button">
         <rect x="314" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="376" y="226" text-anchor="middle">Datagram</text>
-        <text class="t-sub" x="376" y="248" text-anchor="middle">28 B header</text>
-        <text class="t-sub" x="376" y="264" text-anchor="middle">fragment ≤ 968 B</text>
+        <text class="t-title" x="376" y="226" text-anchor="middle">Fragmentation</text>
+        <text class="t-sub" x="376" y="248" text-anchor="middle">fragment ≤ 968 B</text>
+        <text class="t-sub" x="376" y="264" text-anchor="middle">+ 28 B header</text>
       </g>
       <g class="blk tx" data-id="tx-frame" tabindex="0" role="button">
         <rect x="458" y="196" width="124" height="88" rx="10"/>
@@ -194,7 +194,7 @@
       <text class="t-edge" x="880" y="300" text-anchor="middle">symbols</text>
       <text class="t-edge" x="1024" y="300" text-anchor="middle">IQ</text>
       <text class="t-edge" x="1168" y="300" text-anchor="middle">burst</text>
-      <text class="t-edge" x="1312" y="300" text-anchor="middle">c64</text>
+      <text class="t-edge" x="1312" y="300" text-anchor="middle">complex64</text>
 
       <!-- channel -->
       <g class="blk ch" data-id="channel" tabindex="0" role="button">
@@ -227,7 +227,7 @@
       </g>
       <g class="blk rx" data-id="rx-acq" tabindex="0" role="button">
         <rect x="1178" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="1240" y="446" text-anchor="middle">Acquisition</text>
+        <text class="t-title" x="1240" y="446" text-anchor="middle">Burst detection</text>
         <text class="t-sub" x="1240" y="468" text-anchor="middle">Schmidl–Cox</text>
         <text class="t-sub" x="1240" y="484" text-anchor="middle">CFO + gain</text>
       </g>
@@ -235,13 +235,13 @@
         <rect x="1034" y="416" width="124" height="88" rx="10"/>
         <text class="t-title" x="1096" y="446" text-anchor="middle">Header decode</text>
         <text class="t-sub" x="1096" y="468" text-anchor="middle">channel estimate</text>
-        <text class="t-sub" x="1096" y="484" text-anchor="middle">3× repeat + CRC</text>
+        <text class="t-sub" x="1096" y="484" text-anchor="middle">bit × 3 + CRC</text>
       </g>
       <g class="blk rx" data-id="rx-eq" tabindex="0" role="button">
         <rect x="890" y="416" width="124" height="88" rx="10"/>
         <text class="t-title" x="952" y="446" text-anchor="middle">Equalizer</text>
         <text class="t-sub" x="952" y="468" text-anchor="middle">FFT + pilot EQ</text>
-        <text class="t-sub" x="952" y="484" text-anchor="middle">SFO tracking</text>
+        <text class="t-sub" x="952" y="484" text-anchor="middle">sample clock tracking</text>
       </g>
       <g class="blk rx" data-id="rx-demap" tabindex="0" role="button">
         <rect x="746" y="416" width="124" height="88" rx="10"/>
@@ -285,7 +285,7 @@
       <!-- RX control: the header selects demapper and decoder -->
       <path class="ctlp" d="M1096,416 V398 H808 V414" marker-end="url(#ah-ctl)"/>
       <path class="ctlp" d="M808,398 H664 V414" marker-end="url(#ah-ctl)"/>
-      <text class="t-ctl" x="952" y="392" text-anchor="middle">header → MCS、wire version、length</text>
+      <text class="t-ctl" x="952" y="392" text-anchor="middle">header → modulation、FEC 種類、length</text>
 
       <!-- GUI instruments -->
       <g class="blk ins" data-id="gui-spectrum" tabindex="0" role="button">
@@ -316,7 +316,7 @@
   <div class="card detail" id="detail" aria-live="polite"></div>
 </section>
 
-<!-- ============ 2. Packet lab ============ -->
+<!-- ============ 2. Burst lab ============ -->
 <section id="view-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
   <p class="intro">請改變 message 大小與 MCS。頁面用這個範例的 encoder 產生的資料計算 burst。</p>
 
@@ -424,7 +424,7 @@
         <div class="box rx"><b>Engine child process</b>
           <ul>
             <li data-source></li>
-            <li><code>ReceiveWorker</code> → <code>MessageReceiver</code>：一個 owner 依序處理 acquisition 與 header</li>
+            <li><code>ReceiveWorker</code> → <code>MessageReceiver</code>：一個 owner 依序處理 burst 偵測與 header</li>
             <li><code>EgressForwarder</code>：把 message 送到 UDP :52002</li>
           </ul>
           <div class="plink">⇅ 每個 burst 是一個獨立的 segment。結果依照 stream 的順序回來。</div>
