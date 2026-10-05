@@ -88,6 +88,31 @@ Samples 的單位：`complex64`，滿刻度是 ±1.0。你的 sink 要負責轉�
 ),
 ```
 
+**Gain 的定義也在這裡宣告。** 這個專案裡畫面、`--gain` 與 log 上的 gain 一律是「數字越大越強」
+（發射是輸出越大，接收是放大越多），單位 dB。每個家族用 `GainControl` 說明自己的旋鈕：
+
+| 欄位 | 用途 |
+|---|---|
+| `name` | 這顆旋鈕在硬體上叫什麼。會顯示在 Radio panel 的 gain 欄位旁，例如 `Attenuator · max output at 0 dB`；上限的數字取自 `probe()`，不用自己寫 |
+| `detail` | 一兩句完整說明，放在 gain 欄位的 tooltip |
+| `device_sign` | 裝置 API 的方向。`1`（預設）：數字越大越強，原樣顯示。`-1`：裝置收的是「衰減量，越大越弱」，畫面會顯示成負數 |
+
+不填的話，TX 是 `Amplifier gain`、RX 是 `Receive gain`，方向都是 `1`，USRP 就是這樣。Pluto 的
+TX 是衰減器，但它的 API 本來就是 −89.75 到 0、越大越強，所以只換了名稱：
+
+```python
+tx_gain=GainControl(name="Attenuator", detail="0 dB is full output ..."),
+```
+
+如果你的裝置 API 是「attenuation 0 到 90，越大越弱」，加上 `device_sign=-1`，畫面就會是
+−90 到 0，和 Pluto 一樣；你的 transport 收到的仍然是裝置自己的正數。換算集中在兩個地方，
+寫 transport 時照著用就好：
+
+- `probe()` 回報範圍時用 `gain_control(driver, direction).shown_range(裝置回報的範圍)`。
+- 建立 settings 時用 `selection.device_gain_db(direction)`，不要直接拿 `selection.gain_db`。
+
+執行中調 gain 的換算由 Radio panel 處理，transport 的 `set_gain()` 收到的已經是裝置的值。
+
 然後在 `discover()` 與 `probe()` 裡各加一個分支，照 `pluto` 的寫法轉交給你的 module：
 
 ```python

@@ -386,7 +386,7 @@ class TransmitWindow(QtWidgets.QWidget):
         """Apply a gain the operator changed while the radio runs."""
 
         try:
-            self._worker.set_gain(gain_db)
+            self._worker.set_gain(self._panel.device_gain_db(gain_db))
         except Exception as error:
             self._panel.show_status(f"gain change failed: {error}", error=True)
             return

@@ -37,6 +37,9 @@ class _Probe:
     error: str | None
 
 
+_GAIN_TOOLTIP = "Adjustable while the radio runs; applied immediately."
+
+
 class _Worker(QtCore.QObject):
     discovered = QtCore.pyqtSignal(object)
     probed = QtCore.pyqtSignal(object)
@@ -115,9 +118,16 @@ class RadioPanel(QtWidgets.QGroupBox):
         # Typing "25" must not apply 2 dB on the way; arrows, Enter and
         # leaving the field still apply at once.
         self._gain.setKeyboardTracking(False)
-        self._gain.setToolTip("Adjustable while the radio runs; applied immediately.")
+        self._gain.setToolTip(_GAIN_TOOLTIP)
         self._gain.valueChanged.connect(self._on_gain_changed)
-        layout.addWidget(self._gain, 2, 1)
+        # What this device's gain is, in one line: families count it
+        # differently (devices.GainControl), so say so where it is set.
+        self._gain_hint = QtWidgets.QLabel("")
+        self._gain_hint.setStyleSheet("color:#9fb3c8;")
+        gain_row = QtWidgets.QHBoxLayout()
+        gain_row.addWidget(self._gain)
+        gain_row.addWidget(self._gain_hint, stretch=1)
+        layout.addLayout(gain_row, 2, 1)
         layout.addWidget(QtWidgets.QLabel("Centre (MHz)"), 2, 2)
         self._frequency = QtWidgets.QDoubleSpinBox()
         self._frequency.setDecimals(3)
@@ -195,6 +205,7 @@ class RadioPanel(QtWidgets.QGroupBox):
         self._channel.clear()
         self._antenna.clear()
         self._capabilities = None
+        self._describe_gain(None)
         self._set_busy(True, f"opening {device.serial} to read its front ends…")
 
         def run() -> None:
@@ -263,6 +274,7 @@ class RadioPanel(QtWidgets.QGroupBox):
 
         low, high = channel.gain_range_db(self._direction)
         self._gain.setRange(low, high)
+        self._describe_gain((low, high))
         if self._preferred_gain_db is not None:
             self._gain.setValue(min(max(self._preferred_gain_db, low), high))
             return
@@ -273,6 +285,24 @@ class RadioPanel(QtWidgets.QGroupBox):
     def _on_gain_changed(self, value: float) -> None:
         if self._running:
             self.gainChangeRequested.emit(float(value))
+
+    def _describe_gain(self, shown_range: tuple[float, float] | None) -> None:
+        device = self.selected_device()
+        if device is None or shown_range is None:
+            self._gain_hint.setText("")
+            self._gain.setToolTip(_GAIN_TOOLTIP)
+            return
+        control = devices.gain_control(device.driver, self._direction)
+        self._gain_hint.setText(devices.gain_label(device.driver, self._direction, shown_range))
+        self._gain.setToolTip(f"{control.detail}\n{_GAIN_TOOLTIP}".strip())
+
+    def device_gain_db(self, shown_db: float) -> float:
+        """A gain from this panel as the selected device's own API takes it."""
+
+        device = self.selected_device()
+        if device is None:
+            return float(shown_db)
+        return devices.gain_control(device.driver, self._direction).to_device(shown_db)
 
     # -- selection --------------------------------------------------------
 

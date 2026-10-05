@@ -64,6 +64,7 @@ from .devices import (
     DiscoveredDevice,
     RadioSelection,
     channel_label,
+    gain_control,
 )
 from .transport import DEFAULT_PEAK_AMPLITUDE, TransportError, scale_to_peak
 
@@ -403,9 +404,11 @@ def probe(
             label=channel_label(DRIVER, 0),
             rx_antennas=(RX_ANTENNA,),
             tx_antennas=(TX_ANTENNA,),
-            rx_gain_range_db=_span(context.read(_PHY, "voltage0", "hardwaregain_available")),
-            tx_gain_range_db=_span(
-                context.read(_PHY, "voltage0", "hardwaregain_available", output=True)
+            rx_gain_range_db=gain_control(DRIVER, "rx").shown_range(
+                _span(context.read(_PHY, "voltage0", "hardwaregain_available"))
+            ),
+            tx_gain_range_db=gain_control(DRIVER, "tx").shown_range(
+                _span(context.read(_PHY, "voltage0", "hardwaregain_available", output=True))
             ),
         )
         return DeviceCapabilities(
@@ -447,13 +450,13 @@ class PlutoSettings:
             raise ValueError("a Pluto's sample rate must be 5 MS/s")
 
 
-def settings_for(selection: RadioSelection) -> PlutoSettings:
+def settings_for(selection: RadioSelection, *, direction: str) -> PlutoSettings:
     return PlutoSettings(
         uri=selection.address,
         serial=selection.serial,
         sample_rate=int(selection.sample_rate),
         center_frequency=float(selection.center_frequency_hz),
-        gain_db=float(selection.gain_db),
+        gain_db=selection.device_gain_db(direction),
     )
 
 

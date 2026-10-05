@@ -2128,6 +2128,9 @@ def test_a_window_applies_a_live_gain_change_to_its_running_radio(
         def gain_range_db(self):
             return (0.0, 31.5)
 
+        def device_gain_db(self, shown_db):
+            return shown_db
+
     class _Radio:
         description = "fake radio"
 
@@ -2477,6 +2480,133 @@ def test_parallel_decode_bounds_in_flight_work_and_counts_the_waits(profile):
     assert snapshot.max_in_flight == 8
     assert snapshot.backpressure_waits > 0
     assert snapshot.in_flight == 0
+
+
+# -- gain controls ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("driver", ["b200", "usrp2", "pluto"])
+@pytest.mark.parametrize("direction", ["rx", "tx"])
+def test_listed_families_show_gain_as_the_device_reports_it(driver, direction):
+    from ofdm_message_link import devices
+
+    control = devices.gain_control(driver, direction)
+    assert control.to_device(-5.0) == -5.0
+    assert control.from_device(12.5) == 12.5
+    assert control.shown_range((-89.75, 0.0)) == (-89.75, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("driver", "direction", "shown_range", "expected"),
+    [
+        ("pluto", "tx", (-89.75, 0.0), "Attenuator \u00b7 max output at 0 dB"),
+        ("b200", "tx", (0.0, 89.75), "Amplifier gain \u00b7 max output at 89.75 dB"),
+        ("usrp2", "tx", (0.0, 31.5), "Amplifier gain \u00b7 max output at 31.5 dB"),
+        ("pluto", "rx", (-3.0, 71.0), "Receive gain \u00b7 -3 to 71 dB"),
+        ("b200", "rx", (0.0, 76.0), "Receive gain \u00b7 0 to 76 dB"),
+        ("x300", "tx", (0.0, 30.0), "Gain \u00b7 max output at 30 dB  [untested family]"),
+    ],
+)
+def test_gain_label_names_the_knob_and_where_full_output_is(
+    driver, direction, shown_range, expected
+):
+    from ofdm_message_link import devices
+
+    label = devices.gain_label(driver, direction, shown_range)
+    assert label == expected
+    assert len(label) <= 48  # one line beside the gain field
+
+
+def test_a_family_that_counts_attenuation_upward_is_shown_rising_with_level(monkeypatch):
+    """The extension point: a new vendor only declares its control."""
+
+    from ofdm_message_link import devices
+
+    family = devices.DeviceFamily(
+        driver="quiet",
+        description="A radio whose API takes attenuation, 0 (loudest) to 90 dB",
+        channel_labels=("RF",),
+        tx_gain=devices.GainControl(name="Attenuator", device_sign=-1),
+    )
+    monkeypatch.setitem(devices.DEVICE_FAMILIES, "quiet", family)
+
+    control = devices.gain_control("quiet", "tx")
+    assert control.shown_range((0.0, 90.0)) == (-90.0, 0.0)
+    assert devices.gain_label("quiet", "tx", (-90.0, 0.0)) == (
+        "Attenuator \u00b7 max output at 0 dB"
+    )
+    selection = devices.RadioSelection(
+        driver="quiet",
+        serial="Q1",
+        channel=0,
+        antenna="TX",
+        gain_db=-5.0,
+        center_frequency_hz=2.45e9,
+        sample_rate=5_000_000,
+    )
+    assert selection.device_gain_db("tx") == 5.0  # 5 dB of attenuation
+    assert selection.device_gain_db("rx") == -5.0  # its receive gain is ordinary
+    assert control.from_device(control.to_device(-12.25)) == -12.25
+
+
+def test_gain_control_rejects_a_sign_that_is_not_a_direction():
+    from ofdm_message_link import devices
+
+    with pytest.raises(ValueError):
+        devices.GainControl(name="Gain", device_sign=0)
+    with pytest.raises(devices.DeviceError):
+        devices.gain_control("pluto", "both")
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize(
+    ("driver", "direction", "expected"),
+    [
+        ("pluto", "tx", "Attenuator \u00b7 max output at 0 dB"),
+        ("usrp2", "tx", "Amplifier gain \u00b7 max output at 31.5 dB"),
+        ("usrp2", "rx", "Receive gain \u00b7 0 to 31.5 dB"),
+    ],
+)
+def test_radio_panel_says_what_the_selected_devices_gain_is(
+    offscreen_qt, monkeypatch, driver, direction, expected
+):
+    from ofdm_message_link import devices, radio_panel
+
+    device = devices.DiscoveredDevice(serial="S1", name="", product="", driver=driver)
+    gain_range = (-89.75, 0.0) if (driver, direction) == ("pluto", "tx") else (0.0, 31.5)
+    capabilities = devices.DeviceCapabilities(
+        device=device,
+        channels=(
+            devices.ChannelCapability(
+                index=0,
+                label="RF",
+                rx_antennas=("RX",),
+                tx_antennas=("TX",),
+                rx_gain_range_db=gain_range,
+                tx_gain_range_db=gain_range,
+            ),
+        ),
+        rx_freq_range_hz=(0.0, 0.0),
+        tx_freq_range_hz=(0.0, 0.0),
+        subdev_spec="A:0",
+    )
+    monkeypatch.setattr(devices, "discover", lambda **_: ())
+    panel = radio_panel.RadioPanel(
+        direction=direction, center_frequency_hz=2.45e9, sample_rate=5_000_000
+    )
+    try:
+        assert panel._gain_hint.text() == ""  # nothing chosen yet
+        panel._devices = (device,)
+        panel._device.blockSignals(True)
+        panel._device.addItem(device.describe(), device.serial)
+        panel._device.blockSignals(False)
+        panel._on_probed(radio_panel._Probe(device.serial, capabilities, None))
+
+        assert panel._gain_hint.text() == expected
+        assert panel.device_gain_db(panel._gain.value()) == panel._gain.value()
+        assert "immediately" in panel._gain.toolTip()
+    finally:
+        panel.close()
 
 
 def test_private_font_cache_only_lasts_while_fontconfig_loads(monkeypatch, tmp_path):

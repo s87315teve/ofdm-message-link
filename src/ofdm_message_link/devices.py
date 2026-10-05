@@ -42,8 +42,64 @@ class DeviceError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class GainControl:
+    """What one direction's gain knob is on a device family, and how it reads.
+
+    Every gain this example shows, takes on the command line or logs is in
+    *shown* dB, and shown dB always rise with level: more output when
+    transmitting, more sensitivity when receiving.  A USRP's gain and a
+    Pluto's attenuator (-89.75 to 0 dB) already count that way, so both are
+    shown as the device reports them and match the vendor's own tools.
+
+    ``device_sign`` is for a device whose API counts the other way, such as an
+    attenuation of 0 to 90 dB where larger is quieter: -1 shows it negated.
+    ``name`` is what the hardware calls the knob; it is the only text a new
+    family has to supply.
+    """
+
+    name: str
+    detail: str = ""
+    device_sign: int = 1
+
+    def __post_init__(self) -> None:
+        if self.device_sign not in (1, -1):
+            raise ValueError("device_sign must be 1 or -1")
+
+    def to_device(self, shown_db: float) -> float:
+        return self.device_sign * float(shown_db)
+
+    def from_device(self, device_db: float) -> float:
+        return self.device_sign * float(device_db)
+
+    def shown_range(self, device_range: tuple[float, float]) -> tuple[float, float]:
+        low, high = sorted(self.from_device(limit) for limit in device_range)
+        return (low, high)
+
+    def label(self, shown_range: tuple[float, float], *, direction: str) -> str:
+        """One short line for the Radio panel, beside the gain field."""
+
+        low, high = shown_range
+        if direction == "tx":
+            return f"{self.name} \u00b7 max output at {high:g} dB"
+        return f"{self.name} \u00b7 {low:g} to {high:g} dB"
+
+
+AMPLIFIER_GAIN = GainControl(
+    name="Amplifier gain",
+    detail="Transmit gain: a higher value is more output power.",
+)
+RECEIVE_GAIN = GainControl(
+    name="Receive gain",
+    detail="Receive gain: a higher value amplifies the received signal more.",
+)
+# What an unlisted family gets: its numbers as reported, and no claim about
+# what the knob is.
+GENERIC_GAIN = GainControl(name="Gain")
+
+
+@dataclass(frozen=True, slots=True)
 class DeviceFamily:
-    """Front-panel naming for one UHD driver type.
+    """Front-panel naming and gain controls for one driver type.
 
     ``channel_labels`` is indexed by UHD channel number.  For the B2xx family
     the device reports its subdevice specification as ``A:A A:B``, so channel 0
@@ -59,6 +115,8 @@ class DeviceFamily:
     # differently.  An N200/N210 brings the daughterboard's TX/RX and RX2 out
     # on bulkhead cables to the ports marked RF1 and RF2.
     antenna_labels: tuple[tuple[str, str], ...] = ()
+    tx_gain: GainControl = AMPLIFIER_GAIN
+    rx_gain: GainControl = RECEIVE_GAIN
 
 
 DEVICE_FAMILIES: dict[str, DeviceFamily] = {
@@ -82,6 +140,17 @@ DEVICE_FAMILIES: dict[str, DeviceFamily] = {
         driver="pluto",
         description="Analog Devices ADALM-Pluto",
         channel_labels=("RF",),
+        # The AD936x has no transmit gain stage to set, only an attenuator.
+        # GNU Radio's PlutoSDR Sink takes the same setting as a positive
+        # "Attenuation" where larger is quieter; here it is the device's own
+        # hardwaregain, so larger is louder like every other family.
+        tx_gain=GainControl(
+            name="Attenuator",
+            detail=(
+                "A Pluto's transmit gain is an attenuator: 0 dB is full output and "
+                "-89.75 dB is practically off. A higher value is more output power."
+            ),
+        ),
     ),
 }
 
@@ -94,6 +163,24 @@ def family_for(driver: str) -> DeviceFamily | None:
     """Return the known family for one UHD driver type, if it is listed."""
 
     return DEVICE_FAMILIES.get(driver)
+
+
+def gain_control(driver: str, direction: str) -> GainControl:
+    """The gain control of one direction of one device family."""
+
+    if direction not in {"rx", "tx"}:
+        raise DeviceError("direction must be rx or tx")
+    family = family_for(driver)
+    if family is None:
+        return GENERIC_GAIN
+    return family.tx_gain if direction == "tx" else family.rx_gain
+
+
+def gain_label(driver: str, direction: str, shown_range: tuple[float, float]) -> str:
+    """The Radio panel's one-line description of the selected device's gain."""
+
+    label = gain_control(driver, direction).label(shown_range, direction=direction)
+    return label if family_for(driver) is not None else f"{label}  [untested family]"
 
 
 def antenna_label(driver: str, antenna: str) -> str:
@@ -144,7 +231,11 @@ class DiscoveredDevice:
 
 @dataclass(frozen=True, slots=True)
 class ChannelCapability:
-    """What one physical front end reports it can do."""
+    """What one physical front end reports it can do.
+
+    Gain ranges are in shown dB (see GainControl), like every gain the
+    operator sees or chooses.
+    """
 
     index: int
     label: str
@@ -221,10 +312,11 @@ class RadioSelection:
     serial: str
     channel: int
     antenna: str
+    # Shown dB, as the Radio panel displays it; device_gain_db() converts.
     gain_db: float
     center_frequency_hz: float
     sample_rate: int
-    # UHD driver type of the selected device, for front-panel labels only.
+    # Driver type of the selected device: front-panel labels and gain control.
     driver: str = "b200"
     # How to reach a device UHD does not address by serial: a Pluto's IIO URI.
     address: str = ""
@@ -232,6 +324,11 @@ class RadioSelection:
     @property
     def device_args(self) -> str:
         return f"serial={self.serial}"
+
+    def device_gain_db(self, direction: str) -> float:
+        """The selected gain as this device's own API takes it."""
+
+        return gain_control(self.driver, direction).to_device(self.gain_db)
 
     def describe(self) -> str:
         return (
@@ -374,10 +471,10 @@ def probe(device: DiscoveredDevice, *, uhd_api: Any | None = None) -> DeviceCapa
                     label=channel_label(device.driver, index),
                     rx_antennas=_antennas(usrp, "rx", index) if index < rx_count else (),
                     tx_antennas=_antennas(usrp, "tx", index) if index < tx_count else (),
-                    rx_gain_range_db=(
+                    rx_gain_range_db=gain_control(device.driver, "rx").shown_range(
                         _range(usrp.get_rx_gain_range, index) if index < rx_count else (0.0, 0.0)
                     ),
-                    tx_gain_range_db=(
+                    tx_gain_range_db=gain_control(device.driver, "tx").shown_range(
                         _range(usrp.get_tx_gain_range, index) if index < tx_count else (0.0, 0.0)
                     ),
                 )

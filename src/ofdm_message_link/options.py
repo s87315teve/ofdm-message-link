@@ -301,8 +301,8 @@ def settings_for(
         device_args=selection.device_args,
         sample_rate=int(selection.sample_rate),
         center_frequency=float(selection.center_frequency_hz),
-        rx_gain=float(selection.gain_db) if direction == "rx" else radio.rx_gain,
-        tx_gain=float(selection.gain_db) if direction == "tx" else radio.tx_gain,
+        rx_gain=selection.device_gain_db("rx") if direction == "rx" else radio.rx_gain,
+        tx_gain=selection.device_gain_db("tx") if direction == "tx" else radio.tx_gain,
         bandwidth=bandwidth,
         rx_antenna=selection.antenna if direction == "rx" else radio.rx_antenna,
         tx_antenna=selection.antenna if direction == "tx" else radio.tx_antenna,
@@ -346,7 +346,7 @@ def build_sink(args: argparse.Namespace, options: ResolvedOptions, selection=Non
         from . import pluto
 
         return pluto.PlutoSampleSink(
-            pluto.settings_for(_selected(selection)), token, peak_amplitude=peak
+            pluto.settings_for(_selected(selection), direction="tx"), token, peak_amplitude=peak
         )
     if selection is None:
         from ofdm_link.radio import build_b210_settings
@@ -374,7 +374,7 @@ def build_source(args: argparse.Namespace, options: ResolvedOptions, selection=N
     if options.transport == "pluto":
         from . import pluto
 
-        return pluto.PlutoSampleSource(pluto.settings_for(_selected(selection)))
+        return pluto.PlutoSampleSource(pluto.settings_for(_selected(selection), direction="rx"))
 
     if selection is None:
         from ofdm_link.radio import build_b210_settings
