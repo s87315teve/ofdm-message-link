@@ -29,6 +29,8 @@ socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b"hi", ("127.0.0.1", 520
 
 [`udp_send.py`](../src/ofdm_message_link/udp_send.py) 與
 [`udp_recv.py`](../src/ofdm_message_link/udp_recv.py) 都很短，可以直接當你程式的起點。
+`udp_recv` 每收到一則就立刻輸出，所以可以直接接 pipe 或存檔：
+`python -m ofdm_message_link.udp_recv | tee received.txt`。
 
 ## 3.2 設計你的應用時要知道的三件事
 
@@ -133,14 +135,14 @@ scripts/run_ota_video_demo.sh --enable-rf --transport pluto --auto-start \
 | 選項 | 預設 | 用途 |
 |---|---|---|
 | `--enable-rf` | 必填 | 確認這會讓 SDR 發射；沒帶就拒絕執行 |
-| `--transport T` | `uhd` | `uhd`（USRP）或 `pluto`（ADALM-Pluto） |
+| `--transport T` | `uhd` | `uhd`（USRP）或 `pluto`（ADALM-Pluto）。兩端共用：一端 USRP、一端 Pluto 時不能用這支腳本，請照上面「先用模擬跑」的四個終端機做法，各自帶 `--transport` |
 | `--overlay PATH` | app 的預設 | 傳給兩個 app 的設定 profile，可重複 |
 | `--auto-start` | 關 | 不等你選，直接用 `--tx-serial`／`--rx-serial` 指定的裝置啟動 |
 | `--duration SEC` | 不限 | 影片開始後 SEC 秒自動停止 |
 | `--mcs-index N` | 4 | SNR 不夠時改 0。TX 視窗的 MCS 選單也能現場切換 |
 | `--video-kbps N` | 1300 | 影片 bitrate；MCS 0 請用 750 |
 | `--tx-serial` / `--rx-serial` | 無 | 視窗中預選的裝置 |
-| `--tx-gain` / `--rx-gain` | 裝置最低值 / 15 | 預選的 gain（dB），執行中仍可在視窗裡調整 |
+| `--tx-gain` / `--rx-gain` | 裝置最低值 / 15 | 預選的 gain（dB），執行中仍可在視窗裡調整。Pluto 的 TX 是 −89.75 到 0，見 [Gain 的定義](04-ota-hardware.md#gain-的定義) |
 | `--camera DEV` | `/dev/video0` | 攝影機裝置 |
 | `--layout MODE` | `auto` | 視窗排列：`auto`、`single`、`dual`、`none` |
 | `--out DIR` | `/tmp/ofdm_ota_video_demo/<時間>` | log 與 `rx_stats.jsonl` 存放位置 |
@@ -178,7 +180,8 @@ Demo 可以連續跑好幾個小時，所以每一種 log 都有上限，到了�
 | 症狀 | 原因 | 處理 |
 |---|---|---|
 | ffplay 視窗全黑，TX `Goodput (2 s)` 為 0 | ffmpeg 被暫停（狀態 `T`）或沒啟動 | `ps -o stat -C ffmpeg`；加 `-nostdin` 重跑 |
-| 畫面破圖，RX 燈號變黃或紅 | SNR 不夠或速率太高 | 看燈號原因後的 `try MCS N` 建議；改 `--mcs-index 0 --video-kbps 750` |
+| 畫面偶爾破一小塊、約 2 秒內自己恢復，RX 燈號黃 `LOSS` | OTA 的零星掉包，遺失率低於 1% | 正常，不用處理；想更乾淨就調高 TX gain（Pluto 往 0 dB） |
+| 畫面持續破圖，RX 燈號紅 `LOSSY` | SNR 不夠或速率太高 | 先調高 TX gain；再看燈號原因後的 `try MCS N` 建議，改 `--mcs-index 0 --video-kbps 750` |
 | TX `Queue` 一直增加、燈號黃 `BUSY` | 影片 bitrate 超過 link 容量 | 降低 `--video-kbps` |
 | 腳本說 `an earlier demo is still running` | 上一次的 process 沒清乾淨 | 見下方 |
 | 終端機停在 `Video starts once both radios are on` | 還有一個視窗沒按 Start radio，或啟動失敗 | 看該視窗 Radio panel 下方的紅字 |

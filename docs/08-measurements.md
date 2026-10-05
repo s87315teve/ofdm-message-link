@@ -7,7 +7,7 @@
 > 設備組合下選的頻率，**不是這個專案現在的預設值（2.45 GHz）**，也都不是 ISM 頻段。重現前請先確認你
 > 所在場所可用的頻段與功率；不確定時改用 cable 加 attenuator（見[發射前必讀](04-ota-hardware.md#41-發射前必讀)）。
 >
-> 預設的 2.45 GHz profile 只有 8.5 的 Pluto 對 Pluto 短時間量測。
+> 預設的 2.45 GHz profile 只有 8.5 的 Pluto 對 Pluto、與 8.6 的 N210 對 Pluto 短時間量測。
 
 這些都是 demo 等級的觀察：單一擺放位置、時間短、沒有重複多次。不能當作 throughput 或 reliability
 的正式結論。
@@ -170,13 +170,86 @@ Antenna 是約 900 MHz 的 antenna，距離沒有量測。
 
 每個設定只跑了一次，最長 30 秒，單一擺放位置。
 
-## 8.6 沒有實測過的東西
+### 2026-10-05 重跑：同樣的設定，結果沒有那麼乾淨
+
+同樣兩台 Pluto、同一張桌子、RX 15 dB，之後照文件重跑一次。訊息改成 500 個 900-byte datagram、
+每秒 50 個；影像各 60 秒。
+
+| 測試 | TX gain | 送達／遺失 | 遺失率 | `SNR (2 s)` | ffplay `corrupt` |
+|---|---:|---:|---:|---:|---:|
+| 訊息 | −20 dB | 9／401 | 幾乎全掉 | 2.7–3.5 dB | — |
+| 訊息 | −10 dB | 487／13 | 2.6% | 10.6–11.3 dB | — |
+| 訊息 | −5 dB | 499／1 | 0.2% | 14.8–15.5 dB | — |
+| 影像 | −5 dB | 8,553／25 | **0.29%** | 13.4–15.2 dB | 24 |
+| 影像 | **0 dB** | 8,672／4 | **0.05%** | 17.1–18.7 dB | 4 |
+| 影像 | 0 dB（再一次） | 8,650／3 | 0.03% | 17.4–19.1 dB | 2 |
+
+- **同樣的 TX −5 dB，這次 SNR 低了 1–2 dB，而且不是零遺失。** 上面那次的「0 遺失、全程 `GOOD`」
+  是當時的環境，不是這個設定的保證。2.4 GHz 的干擾與擺放的細微差異沒有分開量。
+- TX −5 dB 的影像 `Link` light 幾乎全程是黃燈 `LOSS`；0 dB 時約一半時間是綠燈。兩種情況的畫面
+  看起來都正常，偶爾破一小塊後自己恢復。**遺失率低於 1% 的黃燈可以接受。**
+- RX overflow 全部是 0。
+- −5 到 0 dB 這 5 dB 只換到約 3.5 dB 的 SNR，比 −20 到 −5 那一段（接近 1 dB 換 1 dB）少；
+  原因沒有查。
+
+## 8.6 N210 與 ADALM-Pluto 交叉，2.45 GHz
+
+第一次讓兩種不同廠牌的 radio 各在一端。N210r4（daughterboard 可調 1180–6020 MHz，TX gain
+0–31.5 dB、RX gain 0–38 dB，Slot A `TX/RX (RF1)` 接 antenna）與 PlutoSDR Rev.B（原廠 antenna），
+同一張桌上，預設 profile、5 MS/s、MCS 0。訊息測試是 500 個 900-byte datagram、每秒 50 個。
+
+### N210 發 → Pluto 收：可以
+
+| N210 TX gain | Pluto RX gain | 送達／遺失 | 遺失率 | `SNR (2 s)` |
+|---:|---:|---:|---:|---:|
+| 0、5 dB | 15 dB | 0 | 沒有偵測到任何 burst | — |
+| 10 dB | 15 dB | 0 | 偵測到 16 個，header 全部解不出來 | — |
+| 15 dB | 15 dB | 83／413 | 83% | 5.3–6.3 dB |
+| 20 dB | 15 dB | 439／61 | 12.2% | 7.9–8.5 dB |
+| 25 dB | 15 dB | 498／2 | 0.4% | 10.6–11.3 dB |
+| 30 dB | 15 dB | 500／0 | 0 | 12.3–12.7 dB |
+| 20 dB | **30 dB** | 494／6 | 1.2% | 12.7–13.2 dB |
+
+影像（N210 TX 25 dB、Pluto RX 30 dB，750 kbit/s，60 秒）：送達 8,703、遺失 36（**0.41%**），
+`SNR (2 s)` 14.0–15.2 dB，RX overflow 0，ffplay `corrupt` 31 次。這次沒有畫面截圖（螢幕在測試中
+鎖定），只有數據。
+
+- **把 Pluto 的 RX gain 從 15 調到 30 dB，N210 就可以少發 10 dB**（TX 20 dB 時 SNR 從約 8 dB 變成
+  約 13 dB）。接收端的 gain 不會多輻射任何東西，先調它比較好。
+- N210 的 TX gain 每加 5 dB，SNR 只多約 3 dB。
+
+### Pluto 發 → N210 收：這個擺放下收不到
+
+Pluto TX −15、−10、−5、0 dB（N210 RX 15 dB），以及 Pluto TX 0 dB 配 N210 RX 30 與 38 dB，
+**全部是 0 個 burst candidate**。N210 有以 5 MS/s 收到 samples，RX overflow 0。
+
+直接抓 N210 的原始 samples（RX gain 30 dB，Pluto TX 0 dB、每秒 100 個 burst）：
+
+| N210 的 port | 沒有人發射 | Pluto 發射中 |
+|---|---:|---:|
+| `TX/RX (RF1)`，底噪（中位數） | −35.5 dBFS | −34.8 dBFS |
+| `TX/RX (RF1)`，burst 期間 | — | −30.0 dBFS（佔 41% 的時間） |
+| `RX2 (RF2)` | — | −35.6 dBFS，沒有變化 |
+
+- N210 **有聽到** Pluto：功率升高的時間比例（41%）和 burst 的佔空比吻合，頻譜也是 OFDM 的形狀。
+  但 burst 只比底噪高約 5 dB，換算 SNR 約 **3.6 dB**，低於 MCS 0 需要的 8 dB。
+- RX gain 30 與 38 dB 結果相同，所以是接收前端的雜訊在限制，不是 gain 不夠。
+- 同一條路徑反方向是通的，所以不是頻率偏移或 port 接錯（`RX2` 完全沒有訊號，確認 antenna 在 RF1）。
+- **結論是 link budget 不夠，不是軟體解不出來。** 同樣是 Pluto 用最大輸出發射，另一台 Pluto 收到
+  約 18 dB，N210 只收到約 4 dB。原因（daughterboard 在這個頻率的 noise figure、bulkhead cable、
+  antenna）沒有再往下查。把 antenna 放近、或用 cable 加 attenuator，應該可以驗證 N210 的接收路徑，
+  但這次沒有做。
+
+每個設定只跑了一次。
+
+## 8.7 沒有實測過的東西
 
 誠實列出來，免得被誤認為已經驗證：
 
-- **USRP 在預設的 2.45 GHz profile**，不論 OTA 或 cable（8.5 只量了 Pluto）。
+- **B210／2901 在預設的 2.45 GHz profile**，不論 OTA 或 cable（8.5、8.6 只量了 Pluto 與 N210）。
+- **N210 當接收端並成功解出 burst。** 8.6 只確認它在那個擺放下 SNR 不夠。
 - **任何 cable 加 attenuator 的量測。** 上面全部是 antenna。
-- Pluto 與 USRP 各在一端的組合。
+- Pluto 與 B210／2901 各在一端的組合。
 - 20 MS/s。
 - MCS 1、2、3、5、6、7 的影像 demo（throughput 報告有它們的 UDP 掃描結果）。
 - 超過幾分鐘的長時間穩定度。

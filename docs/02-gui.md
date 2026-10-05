@@ -46,6 +46,11 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 | 黃 `MARGINAL` | SNR < 門檻 + 1 dB | `SNR 11.4 dB is within 1 dB of 11 dB needed for MCS 4` |
 | 綠 `GOOD` | 其餘 | `No loss, SNR 2.3 dB above MCS 4 threshold` |
 
+**黃燈 `LOSS` 在真的 radio 上很常見，不代表設定有問題。** 規則是「10 秒內掉 1 個 burst 就變黃」，
+而影像 demo 每 10 秒約有 1,400 個 burst；2.4 GHz 又和 Wi-Fi 共用，偶爾被蓋掉一個是正常的。
+實測中遺失率 0.05% 時燈號有一半時間是黃的，畫面看起來完全正常。需要處理的是紅燈 `LOSSY`
+（≥ 1%），或是畫面持續破圖。模擬環境沒有干擾，所以在模擬裡看到黃燈就值得追查。
+
 SNR 門檻只有兩個有實測值：MCS 4 為 11 dB、MCS 0 為 8 dB（來源見[實測紀錄](08-measurements.md)）。
 其他 MCS 只依遺失率判斷，原因會註明 `no SNR threshold measured for MCS N`。紅燈或黃燈且 SNR
 已低於目前 MCS 的門檻時，原因後面會附上 `— try MCS 0`。
@@ -63,7 +68,8 @@ TX 不知道 RX 有沒有收到（單向），所以不顯示遺失或 SNR。
 | `TX` | 燈號，旁邊是 `RF ON`（真的 radio）或 `SIMULATED`（udp） |
 
 TX 燈號：灰 `OFF` = radio 尚未啟動；紅 `FAULT` = 最近 10 秒 UHD 的 `tx_time_error`、underflow 或
-sequence error 有增加；黃 `BUSY` = queue 連續 3 次刷新增加，或 airtime > 90 %；其餘綠 `OK`。
+sequence error 有增加（只有 USRP 會回報這些；用 Pluto 或模擬時不會出現紅燈，trend 的標題也只寫
+`transmit fault`）；黃 `BUSY` = queue 連續 3 次刷新增加，或 airtime > 90 %；其餘綠 `OK`。
 
 ## 2.4 Spectrum 與 constellation 怎麼看
 

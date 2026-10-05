@@ -8,8 +8,9 @@
 # attenuator first, and check with your supervisor which bands and power
 # levels your lab may use before putting an antenna on the transmitter.
 #
-# Over the air this default has only a short Pluto-to-Pluto measurement; no
-# USRP has been measured at it.  The other measured operating points are
+# Over the air this default has only short measurements: Pluto to Pluto, and
+# an N210 transmitting to a Pluto.  No B210/2901 has been measured at it, and
+# an N210 receiving a Pluto did not have the SNR.  The other operating points are
 # usrp_ota_1p2ghz.yaml and b210_ota_3p8ghz.yaml; see docs/08-measurements.md.
 #
 # The profile does not arm the transmitter: every RF run still requires

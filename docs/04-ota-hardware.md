@@ -33,8 +33,9 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
 
 - 2.45 GHz 在 2.4 GHz ISM 頻段內，B210／2901、N210（CBX daughterboard）與 ADALM-Pluto 都調得到。
 - 這個頻段和 Wi-Fi、Bluetooth 共用，所以用 antenna 時會有干擾，constellation 不會像 cable 那麼乾淨。
-- **這個預設值只有 Pluto 對 Pluto 的短時間 OTA 實測**（見[實測紀錄 8.5](08-measurements.md#85-adalm-pluto--adalm-pluto245-ghz預設-profile)），
-  USRP 沒有在這個頻率量過。其他實測用的是另外兩個選用的 profile（1.2 GHz 與 3.8 GHz）；
+- **這個預設值只有短時間的 OTA 實測**：Pluto 對 Pluto（[實測紀錄 8.5](08-measurements.md#85-adalm-pluto--adalm-pluto245-ghz預設-profile)）
+  與 N210 發、Pluto 收（[8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)）。B210／2901
+  沒有在這個頻率量過。其他實測用的是另外兩個選用的 profile（1.2 GHz 與 3.8 GHz）；
   那兩個頻段都不是 ISM 頻段，只有在你確定可以使用時才用。
 
 要換頻率或 sample rate，自己寫一個 profile（複製 `ota_2p45ghz.yaml` 來改），然後**兩端**都加
@@ -84,7 +85,7 @@ python -m ofdm_message_link.tx_app --transport uhd \
 | **Device** | `uhd.find()` 列舉到的每一台，顯示名稱、型號與 serial。**Refresh** 重新列舉 |
 | **Front end** | 選到裝置後實際開啟它讀回的 channels。B210／2901 是 `RF A (ch 0)` 與 `RF B (ch 1)`；N210 是 `Slot A (ch 0)` |
 | **Antenna** | 該 channel 該方向實際回報的 port。RX 有 `TX/RX` 與 `RX2`，**TX 只有 `TX/RX`**（N210 front panel 上是 RF1／RF2） |
-| **Gain (dB)** | 上下限直接取自裝置（B210 為 RX 0–76、TX 0–89.75；N210 + CBX 為 0–31.5）。**Radio 執行中仍可調整**，立即套用 |
+| **Gain (dB)** | 上下限直接取自裝置（B210 為 RX 0–76、TX 0–89.75；N210 + CBX 為 TX 0–31.5、RX 0–38）。**Radio 執行中仍可調整**，立即套用。數字框右邊的灰字說明這台裝置的 gain 是什麼，見下方 [Gain 的定義](#gain-的定義) |
 | **Centre (MHz)** / **Sample rate** | Center frequency 與 sample rate；sample rate 限於 5／10／20 MS/s |
 | **Start radio** | 按下去才會建立 UHD flowgraph。在此之前不會有任何 RF 輸出 |
 
@@ -97,6 +98,26 @@ python -m ofdm_message_link.tx_app --transport uhd \
 - **同一台裝置不能同時被兩個 process 開啟。** 一邊已在串流時，另一邊 probe 它會失敗，panel 會說明原因。
 - **Gain 以外的欄位執行中是鎖住的。** 要換裝置、antenna 或頻率，先 Stop radio。
 - 未啟動 radio 時打的字**會排隊**，按下 Start 後一次送出，不會被丟掉。
+
+### Gain 的定義
+
+不同廠牌對「gain」的定義不一樣，所以選好裝置之後，`Gain (dB)` 右邊會出現一行說明：
+
+| 裝置與方向 | 顯示的文字 | 意思 |
+|---|---|---|
+| USRP，TX | `Amplifier gain · max output at 89.75 dB` | 發射鏈的增益，0 dB 最小；上限依裝置而定（N210 + CBX 是 31.5） |
+| Pluto，TX | `Attenuator · max output at 0 dB` | 衰減器：0 dB 是最大輸出，−89.75 dB 幾乎沒有輸出 |
+| 任何裝置，RX | `Receive gain · 0 to 76 dB` | 接收增益與它的範圍 |
+
+**這個專案裡所有的 gain 都是「數字越大越強」**，畫面、`--gain` 與 log 都一樣，而且數字就是裝置自己
+回報的值，可以直接和 `uhd_usrp_probe`、`iio_attr` 對照。所以 Pluto 的 TX 是負數：從 −20 調到 −5
+是變強，調到 0 就到頂了，沒有正的值可以調。
+
+> 💡 如果你用過 GNU Radio 內建的 **PlutoSDR Sink** block：它的參數叫 `Attenuation`，填正數，
+> **越大越弱**，方向和這裡相反。那個 block 的 `Attenuation 5` 等於這裡的 `--gain -5`。
+
+這條規則寫在 `devices.py` 的 `GainControl`，每個裝置家族宣告自己的那一顆旋鈕；
+加新裝置時怎麼填見[新增一種 SDR](05-add-a-new-sdr.md)。
 
 ### B210／2901 的 channel 編號
 
@@ -118,7 +139,8 @@ B210／2901 回報的 subdev spec 是 `A:A A:B`，依 channel 順序對應 front
 | 選擇 | 跟 B2xx 一樣用 serial：`--serial <N210_SERIAL>`。Device 清單會顯示型號、serial 與 IP |
 | Front end | 只有一個 daughterboard slot，顯示為 `Slot A (ch 0)` |
 | Antenna | 顯示成 front panel 名稱：`TX/RX (RF1)`、`RX2 (RF2)`。**TX 只能用 RF1** |
-| Frequency／gain | 由 daughterboard 決定，GUI 讀回實際範圍。例如 CBX 是 1.2–6 GHz、TX/RX gain 0–31.5 dB。超出範圍時 Start 前就會被拒絕 |
+| Frequency／gain | 由 daughterboard 決定，GUI 讀回實際範圍。例如 CBX 是 1.2–6 GHz、TX gain 0–31.5 dB、RX gain 0–38 dB。超出範圍時 Start 前就會被拒絕 |
+| 當接收端 | 2.45 GHz 時靈敏度明顯比 Pluto 差：同一個擺放下 Pluto 用最大輸出發射，N210 只收到約 4 dB 的 SNR，解不出來（見[實測紀錄 8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)）。N210 建議放在發送端 |
 | Analog bandwidth | CBX 固定 40 MHz；實際 bandwidth 由 N210 的 digital filtering 決定 |
 
 **Frequency 一定要確認有調到。** UHD 遇到超出範圍的 frequency 不會報錯，只會默默改成最近的邊界：
@@ -157,7 +179,13 @@ sudo udevadm trigger --subsystem-match=usb --attr-match=idVendor=0456
 **兩台都是出廠位址時會互撞**（兩台都是 `192.168.2.1`），Radio panel 會直接說 probe 到的 serial
 不對，並提示裝這條 rule。
 
-**② 啟動**（serial 在 Radio panel 的 Device 清單裡，也可以用 `lsusb -v -d 0456:b673` 查）：
+**② 啟動。** 先查兩台的 serial。Radio panel 的 Device 清單裡有，命令列用這個最清楚，每台一行：
+
+```bash
+iio_info -s        # ... serial=104473541196000419000c00f2ff1e6e77 [usb:1.15.5]
+```
+
+（`lsusb -v -d 0456:b673` 的 `iSerial` 欄位也是同一個值。）
 
 ```bash
 # 接收端（先開）
@@ -177,7 +205,7 @@ python -m ofdm_message_link.tx_app \
 | 項目 | Pluto |
 |---|---|
 | Front end／Antenna | 一個 channel（`RF (ch 0)`）；port 就是外殼上的 `RX` 與 `TX` 兩個 SMA，每個方向只有一個選項 |
-| **TX gain 是 attenuator** | 範圍 **−89.75 到 0 dB**，0 dB 是最大輸出（幾 dBm）。預設 −89.75 dB，等於沒有輸出 |
+| **TX gain 是 attenuator** | 範圍 **−89.75 到 0 dB**，0 dB 是最大輸出（幾 dBm），沒有正的值。數字越大越強，和 USRP 同方向；預設 −89.75 dB，等於沒有輸出。見 [Gain 的定義](#gain-的定義) |
 | RX gain | Manual gain，範圍由裝置回報（隨 frequency 不同，約 −3 到 71 dB） |
 | **Sample rate 只有 5 MS/s** | USB 2.0 的上限：要求 10 MS/s 時實收只有 5.5 MS/s。Panel 選 10／20 MS/s 會在 Start 前被拒絕 |
 | 沒有 timed TX | Pluto 沒有 device clock，burst 一送到 FPGA 就發射；所以沒有 late／underflow 計數，`Hardware` tab 顯示 `UHD faults: n/a for this transport` |
@@ -187,11 +215,22 @@ python -m ofdm_message_link.tx_app \
 | 一台一個 process | 走 USB 時，同一台 Pluto 同時只能被一個 process 開啟；收發請各用一台 |
 | 調頻時的 carrier | TX 第一次調到新 frequency 時，量到約 33 ms、接近滿輸出的未調變 carrier，**不受 gain 設定控制**（研判是 AD936x 的 TX calibration）。**這是用 cable 加 attenuator 的另一個理由** |
 
-**④ 建議起點：TX −5 dB／RX 15 dB**（預設的 2.45 GHz、兩台放在同一張桌上、各接原廠 antenna 的
-實測值；同樣的擺放在 1.2 GHz 只需要 TX −15 dB）。SNR 不夠時先調 TX；RX gain 太高加上較強的
-signal，接收端的 acquisition 可能會跟不上而掉包。
+**④ 建議起點：TX −5 dB／RX 15 dB**（預設的 2.45 GHz、兩台放在同一張桌上、各接原廠 antenna；
+同樣的擺放在 1.2 GHz 只需要 TX −15 dB）。**這只是起點，不是保證**：2.4 GHz 和 Wi-Fi、Bluetooth
+共用，同一個擺放在不同時間量到的 SNR 差了 1–2 dB。照這個順序調：
 
-Pluto 和 USRP 可以各在一端（每個 process 自己選 `--transport`），但**這個組合還沒有實測過**。
+1. 從 TX −5 dB 開始，看接收端的 `SNR (2 s)` 與 `Loss (10 s)`。
+2. 影像會破、或 `Link` light 變紅（`LOSSY`）時，把 TX 往 0 dB 調。0 dB 是上限。
+3. 還不夠就把兩支 antenna 放近，或把 RX gain 調到 30 dB 左右。RX gain 太高加上較強的 signal，
+   接收端的 acquisition 可能會跟不上而掉包，所以 RX 是最後才動的。
+
+黃燈 `LOSS` 不代表要調：OTA 時零星掉一兩個 burst 很常見，遺失率低於 1% 時影像看起來是正常的
+（見[實測紀錄 8.5](08-measurements.md#85-adalm-pluto--adalm-pluto245-ghz預設-profile)）。
+
+Pluto 和 USRP 可以各在一端（每個 process 自己選 `--transport`）。實測過 N210 發、Pluto 收可以傳
+影像；反過來 Pluto 發、N210 收在同樣的擺放下收不到，見
+[實測紀錄 8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)。一鍵腳本的 `--transport`
+是兩端共用的，兩端不同廠牌時要照[第 3 篇](03-your-own-app.md#先用模擬跑不需要-sdr)的做法分開啟動。
 
 ## 4.4 為什麼 burst 要做 peak normalization
 
