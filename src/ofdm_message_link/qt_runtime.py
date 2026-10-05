@@ -8,8 +8,11 @@ A short idle timer gives the interpreter a chance to service the signal.
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -71,11 +74,43 @@ def run_window(
     return application.exec_()
 
 
+@contextmanager
+def private_font_cache() -> Iterator[None]:
+    """Keep fontconfig away from the user's shared font cache while it loads.
+
+    ``~/.cache/fontconfig`` is written by every program on the machine, each
+    with its own fontconfig build.  One that cannot parse a font leaves an
+    entry without a character set, and this environment's fontconfig then
+    segfaults the first time Qt looks for a fallback font: typing one Chinese
+    character closed both windows.  Fontconfig resolves its cache directories
+    once, when it loads its configuration, so pointing ``XDG_CACHE_HOME`` at a
+    directory of our own for that moment is enough; the fonts themselves are
+    still the system's.  See docs/06-troubleshooting.md.
+    """
+
+    saved = os.environ.get("XDG_CACHE_HOME")
+    base = saved or os.path.join(os.path.expanduser("~"), ".cache")
+    os.environ["XDG_CACHE_HOME"] = os.path.join(base, "ofdm-message-link")
+    try:
+        yield
+    finally:
+        if saved is None:
+            del os.environ["XDG_CACHE_HOME"]
+        else:
+            os.environ["XDG_CACHE_HOME"] = saved
+
+
 def create_application() -> QtWidgets.QApplication:
     """Create the QApplication without letting Qt eat our own arguments."""
 
     existing = QtWidgets.QApplication.instance()
-    return existing if existing is not None else QtWidgets.QApplication(sys.argv[:1])
+    if existing is not None:
+        return existing
+    with private_font_cache():
+        application = QtWidgets.QApplication(sys.argv[:1])
+        # Qt loads fontconfig lazily; make it happen inside the override.
+        QtGui.QFontDatabase().families()
+    return application
 
 
 def set_text_preserving_scroll(

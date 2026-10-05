@@ -2479,6 +2479,20 @@ def test_parallel_decode_bounds_in_flight_work_and_counts_the_waits(profile):
     assert snapshot.in_flight == 0
 
 
+def test_private_font_cache_only_lasts_while_fontconfig_loads(monkeypatch, tmp_path):
+    from ofdm_message_link import qt_runtime
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    with qt_runtime.private_font_cache():
+        assert os.environ["XDG_CACHE_HOME"] == str(tmp_path / "ofdm-message-link")
+    assert os.environ["XDG_CACHE_HOME"] == str(tmp_path)
+
+    monkeypatch.delenv("XDG_CACHE_HOME")
+    with qt_runtime.private_font_cache():
+        assert os.environ["XDG_CACHE_HOME"].endswith(os.path.join(".cache", "ofdm-message-link"))
+    assert "XDG_CACHE_HOME" not in os.environ
+
+
 def test_udp_recv_prints_each_message_as_it_arrives(tmp_path):
     """Its output must reach a pipe or a file at once, not after 8 KiB."""
 

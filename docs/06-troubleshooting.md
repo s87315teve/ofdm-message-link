@@ -21,6 +21,7 @@
 | TX 送了但 RX 沒反應 | RX 比 TX 晚開，或兩邊的 `--udp-port` 不同 | 先開 RX；兩邊用同一個 port |
 | 視窗開不起來，訊息提到 `xcb` 或 display | 沒有圖形桌面（例如純 SSH） | 在有桌面的機器上執行，或用 `ssh -X` |
 | `Warning: Ignoring XDG_SESSION_TYPE=wayland` | Qt 在 Wayland 上改用 XWayland | 無害，可忽略 |
+| 打中文或 emoji、或收到含這些字的訊息時，視窗直接消失（`Segmentation fault`） | 家目錄的字型快取 `~/.cache/fontconfig` 裡有壞掉的項目，見 [6.7](#67-打中文視窗就閃退) | 更新到最新版（app 已經會避開）；自己寫的 Qt 程式照 6.7 處理 |
 
 ## 6.3 真的 radio
 
@@ -84,5 +85,38 @@ rx level now -64.7 dBFS   quietest -65.2 dBFS   loudest -43.9 dBFS   spread 21.3
    | `detected_burst_candidates` | 連 preamble 都沒找到：synchronization 的問題（gain、sample rate、antenna port） |
    | `header_decode_success` | 找到 preamble 但 header 解不出來：SNR 太低或頻率偏太多 |
    | `valid_decoded_bursts` | Header 過了但 payload 失敗（`crc_failures` 在增加）：payload 的 SNR 不夠，換比較穩的 MCS |
+
+## 6.7 打中文視窗就閃退
+
+症狀：英文訊息正常，但只要畫面要顯示一個中文字或 emoji，TX 與 RX 兩個視窗就一起消失，終端機
+只留下 `Segmentation fault (core dumped)`。`journalctl -k | grep segfault` 會看到它死在
+`libfontconfig.so`。
+
+這不是編碼問題。訊息從頭到尾都是 UTF-8，`udp_recv` 印出來的中文是對的。出事的是「把字畫出來」：
+預設字型沒有中文，Qt 請 fontconfig 找一個有的，而 fontconfig 讀到一筆壞掉的快取就 crash 了。
+
+`~/.cache/fontconfig` 是整台機器上所有程式共用的，每個程式用的 fontconfig 版本不一定相同。某個
+程式看不懂某種字型（我們遇到的是 `/usr/share/fonts/woff/` 底下的 WOFF 字型，由
+`fonts-ebgaramond-extra` 這類套件安裝）時，會寫下一筆沒有字元表的項目，conda 環境裡的 fontconfig
+讀到它就會出事。可以這樣確認（要在 `conda activate ofdm-message-link` 之後執行）：
+
+```bash
+fc-cat -v ~/.cache/fontconfig/*.cache-* 2>/dev/null | grep -B3 '":fontwrapper=WOFF"' | head
+```
+
+有輸出就是中了：正常的項目後面會有一長串 `family=...:charset=...`。
+
+**這個專案的兩個視窗已經會避開**：`qt_runtime.py` 的 `private_font_cache()` 在 Qt 載入字型的那
+一刻，讓 fontconfig 不去讀那個共用的快取。字型還是用系統的，只是快取改用 conda 環境自己的那一份。
+
+你自己寫的 PyQt 程式遇到同樣的問題時，兩個解法擇一：
+
+```bash
+# 只影響這一次執行
+XDG_CACHE_HOME=/tmp/my-cache python my_app.py
+
+# 或把壞掉的那個檔改名（上面指令輸出裡的 "Cache:" 那一行就是檔名）；它之後可能被重新寫壞
+mv ~/.cache/fontconfig/<那個檔> ~/.cache/fontconfig/<那個檔>.bad
+```
 
 回到 [README](../README.md)。
