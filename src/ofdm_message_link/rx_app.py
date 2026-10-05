@@ -729,8 +729,11 @@ class ReceiveWindow(QtWidgets.QWidget):
         self._stats_timer.stop()
         self._worker.stop()
         options.clear_ready(self._ready_file)
-        if self._stats_log is not None:
-            self._stats_log.close()
+        # Dropped, not only closed: a refresh already queued when the window
+        # closes, or a second close, must find no log rather than a shut one.
+        stats_log, self._stats_log = self._stats_log, None
+        if stats_log is not None:
+            stats_log.close()
         super().closeEvent(event)
 
 

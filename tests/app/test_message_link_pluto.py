@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import errno
 import os
+import threading
+import time
 
 import numpy as np
 import pytest
@@ -398,6 +400,31 @@ def test_pluto_receive_scales_the_adc_counts_and_reports_overflow(monkeypatch):
     assert snapshot["samples_received"] == 4
     assert snapshot["stream_error"] == "stream ended"
     assert fake.buffers[0].samples == 256 and fake.closed
+
+
+def test_pluto_receive_survives_an_overflow_poll_while_stopping(monkeypatch):
+    """stop() lets go of the context before the reader thread has finished."""
+
+    monkeypatch.setattr(pluto, "_OVERFLOW_POLL_S", 0.0)
+    crashes = []
+    monkeypatch.setattr(threading, "excepthook", crashes.append)
+    fake = _FakePluto()
+    source = pluto.PlutoSampleSource(_settings(), chunk_samples=256, open_context=fake)
+
+    class _HeldUntilStopping(list):
+        def pop(self, index):
+            while source._context is not None:
+                time.sleep(0.001)
+            return super().pop(index)
+
+    fake.incoming = _HeldUntilStopping([np.zeros(4, dtype=np.int16)])
+    fake.overflows = [False, False]
+
+    source.start()
+    source.stop()
+
+    assert crashes == []
+    assert fake.closed
 
 
 def test_pluto_receive_refuses_the_wrong_device():

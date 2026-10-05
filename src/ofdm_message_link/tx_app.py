@@ -444,8 +444,11 @@ class TransmitWindow(QtWidgets.QWidget):
         cards.addWidget(self._reset_button)
         layout.addWidget(self._cards)
 
+        # Only UHD reports late or underflowed bursts; a Pluto and the
+        # simulated channel have no such events to name.
+        fault = "UHD transmit fault" if self._resolved.transport == "uhd" else "transmit fault"
         self._trend = TrendPlot(
-            "Last 60 s (red: UHD transmit fault)",
+            f"Last 60 s (red: {fault})",
             primary_label="Goodput",
             primary_scale=1e6,
             primary_unit="Mbit/s",

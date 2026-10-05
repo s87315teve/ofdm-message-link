@@ -750,6 +750,10 @@ class PlutoSampleSource:
     def _run(self) -> None:
         scale = np.float32(1.0 / _RX_FULL_SCALE)
         next_poll = time.monotonic() + _OVERFLOW_POLL_S
+        # stop() clears self._context before it joins this thread, and closes
+        # the context only afterwards: hold it here so a poll that lands in
+        # between still has it.
+        context = self._context
         try:
             while not self._stop.is_set():
                 raw = self._buffer.refill()
@@ -768,7 +772,7 @@ class PlutoSampleSource:
                         self._queue_full_backpressure += 1
                 if time.monotonic() >= next_poll:
                     next_poll = time.monotonic() + _OVERFLOW_POLL_S
-                    if self._context.take_overflow():
+                    if context.take_overflow():
                         self._overflow_events += 1
         except OSError as error:
             if not self._stop.is_set():

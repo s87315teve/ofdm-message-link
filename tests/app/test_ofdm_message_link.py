@@ -9,6 +9,11 @@ by a widget.
 from __future__ import annotations
 
 import json
+import os
+import select
+import socket
+import subprocess
+import sys
 import time
 
 import numpy as np
@@ -492,6 +497,8 @@ def test_tx_source_block_emits_one_length_tagged_run_per_burst():
     collected = blocks.vector_sink_c()
     tags = blocks.tag_debug(gr.sizeof_gr_complex, "tags")
     tags.set_save_all(True)
+    # Keep the tags, not the block's own printout: it lands after pytest's summary.
+    tags.set_display(False)
     top = gr.top_block("tx_source_block_test")
     top.connect(source, collected)
     top.connect(source, tags)
@@ -824,6 +831,36 @@ def test_stats_log_rotates_at_its_cap_and_keeps_cumulative_lines(offscreen_qt, t
         assert any(record.get("event") == "reset" for record in records)
     finally:
         window.close()
+
+
+@pytest.mark.gui
+def test_a_refresh_after_the_window_closed_does_not_write_to_the_closed_stats_log(
+    offscreen_qt, tmp_path
+):
+    """Closing a running radio takes long enough for one more refresh to be queued."""
+
+    from ofdm_message_link.rx_app import ReceiveWindow, build_parser, open_stats_log
+
+    log = tmp_path / "rx_stats.jsonl"
+    args = build_parser().parse_args(
+        ["--udp-port", "53307", "--egress-port", "53308", "--stats-log", str(log)]
+    )
+    resolved = options.resolve(args)
+    window = ReceiveWindow(
+        resolved,
+        ("127.0.0.1", 53308),
+        build_source=lambda selection: options.build_source(args, resolved, selection),
+        stats_log=open_stats_log(args),
+    )
+    window._refresh_stats()
+    window.close()
+    written = log.read_text()
+
+    window._refresh_stats()
+    window._reset_stats()
+    window.close()
+
+    assert written and log.read_text() == written
 
 
 @pytest.mark.gui
@@ -2038,7 +2075,7 @@ def test_choosing_radio_means_a_panel_that_is_neither_running_nor_auto_starting(
 def test_radio_panel_gain_stays_live_while_running(offscreen_qt, monkeypatch):
     from ofdm_message_link import devices, radio_panel
 
-    monkeypatch.setattr(devices, "discover", lambda: ())
+    monkeypatch.setattr(devices, "discover", lambda **_: ())
     panel = radio_panel.RadioPanel(
         direction="tx", center_frequency_hz=1.2e9, sample_rate=5_000_000
     )
@@ -2440,3 +2477,28 @@ def test_parallel_decode_bounds_in_flight_work_and_counts_the_waits(profile):
     assert snapshot.max_in_flight == 8
     assert snapshot.backpressure_waits > 0
     assert snapshot.in_flight == 0
+
+
+def test_udp_recv_prints_each_message_as_it_arrives(tmp_path):
+    """Its output must reach a pipe or a file at once, not after 8 KiB."""
+
+    port = 53391
+    with subprocess.Popen(
+        [sys.executable, "-m", "ofdm_message_link.udp_recv", "--port", str(port)],
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as receiver:
+
+        def line() -> str:
+            # A block-buffered receiver would hold the line back for ever.
+            ready, _, _ = select.select([receiver.stdout], [], [], 10.0)
+            assert ready, "udp_recv printed nothing within 10 s"
+            return receiver.stdout.readline()
+
+        try:
+            assert line().startswith("listening on")
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+                sender.sendto(b"one line", ("127.0.0.1", port))
+            assert line() == "one line\n"
+        finally:
+            receiver.terminate()

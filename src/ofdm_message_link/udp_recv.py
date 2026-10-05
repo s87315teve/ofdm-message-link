@@ -19,13 +19,13 @@ def main(argv: list[str] | None = None) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((args.host, args.port))
-        print(f"listening on {args.host}:{args.port}")
+        print(f"listening on {args.host}:{args.port}", flush=True)
         while True:
             payload, _ = sock.recvfrom(1 << 16)
             if args.binary:
-                print(f"<{len(payload)} bytes>")
+                print(f"<{len(payload)} bytes>", flush=True)
             else:
-                print(payload.decode("utf-8", errors="replace"))
+                print(payload.decode("utf-8", errors="replace"), flush=True)
     return 0
 
 
