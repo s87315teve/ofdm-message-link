@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ofdm-message-link"
-version = "0.1.0"
+version = "1.0.0"
 description = "One-way SISO OFDM message link built with GNU Radio: a teaching example that runs with or without an SDR"
 readme = "README.md"
 requires-python = ">=3.11"
