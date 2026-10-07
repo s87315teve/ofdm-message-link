@@ -2,7 +2,7 @@
 # OTA webcam video demo:
 #   ffmpeg -> UDP 52001 -> tx_app ~~RF~~ rx_app -> UDP 52012 -> ffplay
 # at the default profile (configs/profiles/ota_2p45ghz.yaml) unless --overlay
-# names another.  --transport pluto runs the same demo between two ADALM-Plutos.
+# names another.  The transport follows the attached radios: USRPs, else ADALM-Plutos.
 # Run it inside the project's conda environment (conda activate ofdm-message-link).
 # Opens the RX and TX windows, waits until the operator has chosen and started
 # a radio in each (Hardware tab: device, antenna, gain, then Start radio), then
@@ -18,7 +18,9 @@ usage() {
 usage: scripts/run_ota_video_demo.sh --enable-rf [options]
 
   --enable-rf          required: this script keys the transmitting radio
-  --transport T        uhd (USRPs, default) or pluto (ADALM-Plutos)
+  --transport T        auto (default), uhd (USRPs) or pluto (ADALM-Plutos); auto takes
+                       USRPs when any are attached, else Plutos, and with exactly
+                       two Plutos preselects them as TX and RX
   --overlay PATH       configuration overlay passed to both apps, repeatable
                        (default: the apps' default, configs/profiles/ota_2p45ghz.yaml)
   --duration SEC       stop automatically after SEC seconds of video (default: run until Ctrl-C)
@@ -35,7 +37,7 @@ usage: scripts/run_ota_video_demo.sh --enable-rf [options]
                        waiting for the operator to choose them in the windows;
                        needs --tx-serial and --rx-serial
   --tx-serial S        transmitter preselected in the TX window (uhd_find_devices lists
-                       serials); pluto always needs both serials
+                       serials); pluto needs both unless exactly two are attached
   --rx-serial S        receiver preselected in the RX window
   --tx-gain DB         preselected TX gain (default: the device minimum; N210/CBX 0-31.5,
                        B210 0-89.75; a Pluto's is its attenuator, -89.75 to 0)
@@ -55,7 +57,7 @@ DURATION=""
 OUT=""
 MCS=4
 VIDEO_KBPS=1300
-TRANSPORT=uhd
+TRANSPORT=auto
 TX_SERIAL="" RX_SERIAL="" TX_GAIN="" RX_GAIN=""
 OVERLAYS=()
 CAMERA=/dev/video0
@@ -99,30 +101,14 @@ case "$LAYOUT" in
     auto|single|dual|none) ;;
     *) echo "--layout must be auto, single, dual or none, not '$LAYOUT'" >&2; exit 2 ;;
 esac
-# A USRP front end is chosen by channel and antenna port; a Pluto has one of each.
 case "$TRANSPORT" in
-    uhd)
-        : "${RX_GAIN:=15}"
-        FRONT_END=(--channel 0 --antenna TX/RX) ;;
-    pluto)
-        if [ -z "$TX_SERIAL" ] || [ -z "$RX_SERIAL" ]; then
-            echo "--transport pluto needs --tx-serial and --rx-serial (two different Plutos)" >&2
-            exit 2
-        fi
-        : "${RX_GAIN:=15}"
-        FRONT_END=() ;;
-    *) echo "--transport must be uhd or pluto, not '$TRANSPORT'" >&2; exit 2 ;;
+    auto|uhd|pluto) ;;
+    *) echo "--transport must be auto, uhd or pluto, not '$TRANSPORT'" >&2; exit 2 ;;
 esac
 if [ "$AUTO_START" -eq 1 ] && { [ -z "$TX_SERIAL" ] || [ -z "$RX_SERIAL" ]; }; then
     echo "--auto-start needs --tx-serial and --rx-serial" >&2
     exit 2
 fi
-# Only what the operator gave is preselected; the windows choose the rest.
-TX_SELECT=() RX_SELECT=()
-[ -n "$TX_SERIAL" ] && TX_SELECT+=(--serial "$TX_SERIAL")
-[ -n "$RX_SERIAL" ] && RX_SELECT+=(--serial "$RX_SERIAL")
-[ -n "$TX_GAIN" ] && TX_SELECT+=(--gain "$TX_GAIN")
-RX_SELECT+=(--gain "$RX_GAIN")
 
 for value in "$LOG_MAX_MB" "$STATS_MAX_MB"; do
     [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] \
@@ -144,6 +130,43 @@ if ! "$PYTHON" -c "import ofdm_message_link" 2>/dev/null; then
     echo "cannot import ofdm_message_link: run 'conda activate ofdm-message-link' first" >&2
     exit 1
 fi
+
+# Transport and Pluto serials the operator left out come from what is attached.
+if [ "$TRANSPORT" = auto ] || { [ "$TRANSPORT" = pluto ] && [ -z "$TX_SERIAL$RX_SERIAL" ]; }; then
+    FOUND=()
+    while read -r key value; do
+        case "$key" in
+            transport) TRANSPORT="$value" ;;
+            serial) FOUND+=("$value") ;;
+        esac
+    done < <("$PYTHON" -m ofdm_message_link.devices --backend "$TRANSPORT" 2>/dev/null)
+    [ "$TRANSPORT" = auto ] && TRANSPORT=uhd
+    echo "transport: $TRANSPORT (${#FOUND[@]} attached)"
+    # Two Plutos are interchangeable, so either order is a fair preselection.
+    if [ "$TRANSPORT" = pluto ] && [ "${#FOUND[@]}" -eq 2 ] && [ -z "$TX_SERIAL$RX_SERIAL" ]; then
+        TX_SERIAL="${FOUND[0]}" RX_SERIAL="${FOUND[1]}"
+        echo "  TX ${TX_SERIAL}, RX ${RX_SERIAL}; --tx-serial/--rx-serial swap them"
+    fi
+fi
+# A USRP front end is chosen by channel and antenna port; a Pluto has one of each.
+case "$TRANSPORT" in
+    uhd)
+        : "${RX_GAIN:=15}"
+        FRONT_END=(--channel 0 --antenna TX/RX) ;;
+    pluto)
+        if [ -z "$TX_SERIAL" ] || [ -z "$RX_SERIAL" ]; then
+            echo "--transport pluto needs --tx-serial and --rx-serial (two different Plutos)" >&2
+            exit 2
+        fi
+        : "${RX_GAIN:=15}"
+        FRONT_END=() ;;
+esac
+# Only what the operator gave is preselected; the windows choose the rest.
+TX_SELECT=() RX_SELECT=()
+[ -n "$TX_SERIAL" ] && TX_SELECT+=(--serial "$TX_SERIAL")
+[ -n "$RX_SERIAL" ] && RX_SELECT+=(--serial "$RX_SERIAL")
+[ -n "$TX_GAIN" ] && TX_SELECT+=(--gain "$TX_GAIN")
+RX_SELECT+=(--gain "$RX_GAIN")
 if pgrep -f '^(python|\S*/python) -m ofdm_message_link[.](tx_app|rx_app)' >/dev/null \
     || pgrep -f '^ffmpeg .*52001' >/dev/null || pgrep -f '^ffplay .*52012' >/dev/null; then
     echo "an earlier demo is still running; stop it first (see docs/03-your-own-app.md)" >&2

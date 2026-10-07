@@ -23,6 +23,7 @@ Nothing here transmits.  Probing configures nothing and opens no TX stream.
 
 from __future__ import annotations
 
+import argparse
 import fcntl
 import os
 import tempfile
@@ -604,3 +605,38 @@ def validate(
         allowed = ", ".join(f"{rate / 1e6:g}" for rate in capabilities.sample_rates)
         problems.append(f"sample rate must be one of {allowed} MS/s on this device")
     return problems
+
+
+def detect(backend: str = "auto") -> tuple[str, tuple[DiscoveredDevice, ...]]:
+    """Choose the sample transport from what is attached, and list its devices.
+
+    ``auto`` takes USRPs when there are any and ADALM-Plutos otherwise; with
+    nothing attached it stays on ``uhd``.  A backend that cannot enumerate
+    (no UHD bindings, say) counts as having no devices.
+    """
+
+    for candidate in ("uhd", "pluto") if backend == "auto" else (backend,):
+        try:
+            found = discover(backend=candidate)
+        except DeviceError:
+            found = ()
+        if found:
+            return candidate, found
+    return ("uhd" if backend == "auto" else backend), ()
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Print ``transport NAME`` then one ``serial S`` line per attached device."""
+
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument("--backend", choices=("auto", "uhd", "pluto"), default="auto")
+    args = parser.parse_args(argv)
+    backend, found = detect(args.backend)
+    print(f"transport {backend}")
+    for device in found:
+        print(f"serial {device.serial}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

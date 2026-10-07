@@ -116,7 +116,8 @@ scripts/run_ota_video_demo.sh --enable-rf                  # 在 GUI 選硬體�
 scripts/run_ota_video_demo.sh --enable-rf --duration 180   # 影片開始後 3 分鐘自動停止
 scripts/run_ota_video_demo.sh --enable-rf --layout none    # 不排列視窗
 
-# 兩台 ADALM-Pluto（serial 必填；gain 是 Pluto 的範圍）：
+# 兩台 ADALM-Pluto 不用另外指定：沒有 USRP 時腳本自己改用 pluto，並預選兩台的 serial。
+# 要跳過視窗裡的選擇（--auto-start）才需要自己給 serial；gain 是 Pluto 的範圍：
 scripts/run_ota_video_demo.sh --enable-rf --transport pluto --auto-start \
     --tx-serial <TX_PLUTO_SERIAL> --rx-serial <RX_PLUTO_SERIAL> \
     --tx-gain -5 --rx-gain 15 --mcs-index 0 --video-kbps 750
@@ -135,7 +136,7 @@ scripts/run_ota_video_demo.sh --enable-rf --transport pluto --auto-start \
 | 選項 | 預設 | 用途 |
 |---|---|---|
 | `--enable-rf` | 必填 | 確認這會讓 SDR 發射；沒帶就拒絕執行 |
-| `--transport T` | `uhd` | `uhd`（USRP）或 `pluto`（ADALM-Pluto）。兩端共用：一端 USRP、一端 Pluto 時不能用這支腳本，請照上面「先用模擬跑」的四個終端機做法，各自帶 `--transport` |
+| `--transport T` | `auto` | `auto`、`uhd`（USRP）或 `pluto`（ADALM-Pluto）。`auto` 看接了什麼：有 USRP 就用 `uhd`，否則有 Pluto 就用 `pluto`；剛好兩台 Pluto 時會預選成 TX 與 RX（要對調就給 `--tx-serial`／`--rx-serial`）。兩端共用：一端 USRP、一端 Pluto 時不能用這支腳本，請照上面「先用模擬跑」的四個終端機做法，各自帶 `--transport` |
 | `--overlay PATH` | app 的預設 | 傳給兩個 app 的設定 profile，可重複 |
 | `--auto-start` | 關 | 不等你選，直接用 `--tx-serial`／`--rx-serial` 指定的裝置啟動 |
 | `--duration SEC` | 不限 | 影片開始後 SEC 秒自動停止 |

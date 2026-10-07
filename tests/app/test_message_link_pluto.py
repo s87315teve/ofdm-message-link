@@ -202,6 +202,38 @@ def test_the_device_list_follows_the_transport(monkeypatch):
     assert devices.discover(backend="pluto") == listed
 
 
+def _attached(monkeypatch, **by_backend):
+    def discover(*, backend="uhd"):
+        found = by_backend.get(backend, ())
+        if isinstance(found, Exception):
+            raise found
+        return found
+
+    monkeypatch.setattr(devices, "discover", discover)
+
+
+def test_the_transport_is_detected_from_what_is_attached(monkeypatch):
+    plutos = (devices.DiscoveredDevice(SERIAL_B, "ADALM-Pluto", "", "pluto", "usb:1.12.5"),)
+    usrps = (devices.DiscoveredDevice("30F4F2A", "", "B210", "b200", ""),)
+
+    _attached(monkeypatch, pluto=plutos)
+    assert devices.detect() == ("pluto", plutos)
+    _attached(monkeypatch, uhd=usrps, pluto=plutos)
+    assert devices.detect() == ("uhd", usrps)
+    assert devices.detect("pluto") == ("pluto", plutos)
+    _attached(monkeypatch)
+    assert devices.detect() == ("uhd", ())
+
+
+def test_detection_skips_a_backend_that_cannot_enumerate(monkeypatch, capsys):
+    plutos = (devices.DiscoveredDevice(SERIAL_B, "ADALM-Pluto", "", "pluto", "usb:1.12.5"),)
+    _attached(monkeypatch, uhd=devices.DeviceError("no UHD bindings"), pluto=plutos)
+
+    assert devices.main([]) == 0
+
+    assert capsys.readouterr().out.splitlines() == ["transport pluto", f"serial {SERIAL_B}"]
+
+
 # -- probing ---------------------------------------------------------------
 
 
