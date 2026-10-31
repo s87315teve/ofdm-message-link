@@ -27,7 +27,11 @@ from ofdm_link.phy import (
     turbo_coded_frame_bit_count,
 )
 from ofdm_link.phy.fec import FecError
-from ofdm_link.phy.turbo import turbo_encode_oracle
+from ofdm_link.phy.turbo import (
+    code_block_information_ranges,
+    turbo_encode_oracle,
+    turbo_segmentation_plan,
+)
 
 
 @pytest.mark.parametrize(
@@ -128,6 +132,44 @@ def test_native_segmented_decode_reports_block_crc_and_filler() -> None:
     assert codec.last_decode_report.filler_bit_count == 15
     assert codec.last_decode_report.code_block_crc_ok == (True, True)
     assert codec.last_decode_report.filler_ok
+
+
+def test_allow_block_failures_returns_bits_and_report_instead_of_raising() -> None:
+    information = np.random.default_rng(915).integers(0, 2, size=14_000, dtype=np.uint8)
+    codec = NativeTurboFecAdapter(max_information_bits=20_000, max_iterations=2)
+    coded = codec.encode(information)
+    llrs = np.where(coded == 0, 10.0, -10.0).astype(np.float32)
+    plan = turbo_segmentation_plan(information.size)
+    assert plan.block_count == 3
+    start = 3 * (plan.block_sizes[0] + 4)
+    stop = start + 3 * (plan.block_sizes[1] + 4)
+    llrs[start:stop] = np.random.default_rng(1).choice([-10.0, 10.0], stop - start)
+
+    with pytest.raises(FecError, match="CRC-24B"):
+        codec.decode_result(llrs, information_bit_count=information.size)
+    result = codec.decode_result(
+        llrs, information_bit_count=information.size, allow_block_failures=True
+    )
+
+    assert result.report.code_block_crc_ok == (True, False, True)
+    ranges = code_block_information_ranges(information.size)
+    for (begin, end), ok in zip(ranges, result.report.code_block_crc_ok, strict=True):
+        if ok:
+            np.testing.assert_array_equal(
+                result.information_bits[begin:end], information[begin:end]
+            )
+
+
+def test_code_block_information_ranges_skip_filler_and_crc24b() -> None:
+    assert code_block_information_ranges(6_144) == ((0, 6_144),)
+    assert code_block_information_ranges(1_000) == ((0, 1_000),)
+    # 6145 bits: B' = 6193 -> K- = 3072, K+ = 3136, F = 15 (TS 36.212 5.1.2).
+    plan = turbo_segmentation_plan(6_145)
+    assert plan.block_sizes == (3_072, 3_136) and plan.filler_bit_count == 15
+    assert code_block_information_ranges(6_145) == ((0, 3_033), (3_033, 6_145))
+    ranges = code_block_information_ranges(60_000)
+    assert ranges[0][0] == 0 and ranges[-1][1] == 60_000
+    assert all(left[1] == right[0] for left, right in zip(ranges, ranges[1:], strict=False))
 
 
 def test_native_uncorrectable_frame_is_rejected_by_outer_crc() -> None:

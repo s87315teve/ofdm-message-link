@@ -1,11 +1,13 @@
 """LTE-derived rate-1/3 Turbo-code contract and portable correctness oracle.
 
 The normative primitives follow ETSI TS 136 212 V19.2.0 clauses 5.1.1,
-5.1.2, and 5.1.3.2.  This project deliberately stops before LTE rate
-matching: every systematic/parity output, including zero-valued filler
-positions, is transmitted in time-major ``systematic, parity-1, parity-2``
-order.  The scalar trellis loops in this module are a portable test oracle;
-the production adapter is implemented by the private native extension.
+5.1.2, and 5.1.3.2.  The coder itself stops before LTE rate matching: every
+systematic/parity output, including zero-valued filler positions, leaves it in
+time-major ``systematic, parity-1, parity-2`` order, which wire v1-v4 transmit
+as is.  Wire v5 punctures or repeats that output with the clause 5.1.4.1
+circular buffer in :mod:`rate_match`, outside the coder.  The scalar trellis
+loops in this module are a portable test oracle; the production adapter is
+implemented by the private native extension.
 """
 
 from __future__ import annotations
@@ -216,8 +218,17 @@ class NativeTurboFecAdapter:
         observations: ArrayLike,
         *,
         information_bit_count: int | None = None,
+        allow_block_failures: bool = False,
     ) -> TurboDecodeResult:
-        """Decode one frame and return its immutable per-call report."""
+        """Decode one frame and return its immutable per-call report.
+
+        By default a failed code-block CRC-24B or non-zero filler raises, which
+        is right when the frame is one indivisible unit.  An aggregated v5 PSDU
+        is not: its subframes carry their own CRCs, so a block that failed only
+        damages the subframes it overlaps.  ``allow_block_failures=True``
+        therefore always returns the hard decisions and leaves judging them to
+        the report and the caller.
+        """
 
         with self._report_lock:
             self._last_decode_report = None
@@ -257,12 +268,16 @@ class NativeTurboFecAdapter:
         )
         with self._report_lock:
             self._last_decode_report = report
-        if not report.filler_ok:
+        if not report.filler_ok and not allow_block_failures:
             raise FecError(
                 "decoded Turbo filler bits are not zero",
                 decode_report=report,
             )
-        if plan.segmented and not all(outcome is True for outcome in report.code_block_crc_ok):
+        if (
+            plan.segmented
+            and not allow_block_failures
+            and not all(outcome is True for outcome in report.code_block_crc_ok)
+        ):
             raise FecError(
                 "one or more Turbo code-block CRC-24B checks failed",
                 decode_report=report,
@@ -375,6 +390,30 @@ def _turbo_segmentation_plan(b: int) -> TurboSegmentationPlan:
     if not 0 <= filler <= block_sizes[0]:
         raise TurboError("invalid filler count derived from segmentation")
     return TurboSegmentationPlan(b, block_sizes, filler, block_crc_bits)
+
+
+def code_block_information_ranges(
+    information_bit_count: int,
+) -> tuple[tuple[int, int], ...]:
+    """Return the ``[start, end)`` span of caller information bits per code block.
+
+    Filler (block 0) and the per-block CRC-24B are coder-internal, so block
+    ``r`` carries ``K_r - F_r - L`` caller bits.  The spans tile the frame in
+    order; this is what lets a receiver map one failed CRC-24B to the bytes it
+    may have corrupted.
+    """
+
+    plan = turbo_segmentation_plan(information_bit_count)
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    for block_index, block_size in enumerate(plan.block_sizes):
+        filler = plan.filler_bit_count if block_index == 0 else 0
+        end = start + block_size - filler - plan.code_block_crc_bits
+        ranges.append((start, end))
+        start = end
+    if start != plan.information_bit_count:
+        raise TurboError("code-block information spans do not tile the frame")
+    return tuple(ranges)
 
 
 def turbo_coded_bit_count(information_bit_count: int) -> int:
