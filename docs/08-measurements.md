@@ -335,8 +335,8 @@ TX 關閉時錄空中訊號約 90 秒（RX gain 15 與 30 dB 各一段），cohe
 沒有任何一次 ≥ 0.25，和以前量到的 0.199 一致。所以 `correlation_threshold` 降到 0.30 仍有 0.1 的餘裕。
 `detection_threshold` 在空中雜訊上任何設定都會過（metric 最高到 0.96），它只決定有多少候選要做
 coherent 檢查。在邊緣的錄音上，0.25／0.30 讓 MCS 0 在 −20 dB 的遺失從 14.5% 降到 0.25%（當時的 RX
-版本，`results/thresholds_*.json`）。只有預設的 2.45 GHz profile 與程式預設值改了；B210 與 N210 的
-profile 沒有量，仍是 0.40。
+版本，`results/thresholds_*.json`）。B210、N210 的 profile 也改成同樣的值：這個門檻是正規化的，
+最早在 USRP 上量到的空中雜訊上限 0.199 和 Pluto 的 0.203 一致；但這兩組設備還沒有配新 RX 實測。
 
 ### 這次沒有量到的
 

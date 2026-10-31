@@ -20,8 +20,12 @@ phy:
     decision_mode: turbo
     max_iterations: 8
   sync:
-    detection_threshold: 0.40
-    correlation_threshold: 0.40
+    # The same values as the default 2.45 GHz profile.  They were measured on
+    # Plutos (experiments/rx_improvement); this radio pair has not been measured
+    # with the improved receiver.  The correlation threshold is what keeps noise
+    # out, and signal-free air on USRPs peaked at 0.199, so 0.30 keeps a margin.
+    detection_threshold: 0.25
+    correlation_threshold: 0.30
 
 radio:
   adapter: uhd
