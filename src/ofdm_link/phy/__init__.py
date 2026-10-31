@@ -45,6 +45,13 @@ from .burst_header import (
     decode_burst_header_soft,
     encode_burst_header,
 )
+from .burst_v5 import (
+    AnyDecodedBurst,
+    DecodedPsduBurst,
+    EncodedBurstV5,
+    encode_burst_v5,
+    v5_burst_sample_count,
+)
 from .channel import (
     ChannelEstimate,
     ChannelEstimationError,
@@ -111,6 +118,24 @@ from .gnuradio_fec import (
     decode_frame_native_timed,
     decode_soft_fec_bits_native,
 )
+from .header_v5 import (
+    V5_HEADER_INTERLEAVER,
+    V5Header,
+    V5HeaderDecodeError,
+    V5HeaderError,
+    V5HeaderIntegrityError,
+    decode_v5_header,
+    encode_v5_header,
+    v5_header_symbols,
+)
+from .mcs_table import (
+    V5_WIRE_VERSION,
+    McsTableEntry,
+    PayloadGeometry,
+    mcs_entry,
+    v5_entries,
+    v5_payload_geometry,
+)
 from .native_decoder_pool import (
     NativeFecDecoderPool,
     NativeFrameDecoderPool,
@@ -125,6 +150,8 @@ from .ofdm import (
     modulate_ofdm,
     pilot_symbols,
 )
+from .psdu_codec import PsduDecodeResult, RateMatchedTurboCodec
+from .scrambler import descramble_llrs, scramble_bits, scrambler_sequence
 from .soft import (
     DEFAULT_LLR_CLIP,
     LLR_CONVENTION,
@@ -134,11 +161,27 @@ from .soft import (
 )
 from .sync import (
     AcquisitionResult,
+    SharedCorrelation,
     SyncConfig,
     SyncError,
+    acquire_all,
     acquire_preamble,
     generate_preamble,
     prepend_preamble,
+    shared_correlation,
+)
+from .sync_v5 import (
+    V5_FIXED_LENGTH,
+    V5_PREAMBLE_LENGTH,
+    AnyAcquisition,
+    LtfMeasurement,
+    V5Acquisition,
+    V5RxConfig,
+    V5SyncConfig,
+    generate_ltf,
+    generate_stf,
+    measure_ltf_pair,
+    v5_candidates,
 )
 from .turbo import (
     NativeTurboFecAdapter,
@@ -278,4 +321,43 @@ __all__ = [
     "turbo_coded_bit_count",
     "turbo_coded_frame_bit_count",
     "turbo_segmentation_plan",
+    # Wire v5.
+    "AnyAcquisition",
+    "AnyDecodedBurst",
+    "DecodedPsduBurst",
+    "EncodedBurstV5",
+    "LtfMeasurement",
+    "McsTableEntry",
+    "PayloadGeometry",
+    "PsduDecodeResult",
+    "RateMatchedTurboCodec",
+    "SharedCorrelation",
+    "V5Acquisition",
+    "V5Header",
+    "V5HeaderDecodeError",
+    "V5HeaderError",
+    "V5HeaderIntegrityError",
+    "V5RxConfig",
+    "V5SyncConfig",
+    "V5_FIXED_LENGTH",
+    "V5_HEADER_INTERLEAVER",
+    "V5_PREAMBLE_LENGTH",
+    "V5_WIRE_VERSION",
+    "acquire_all",
+    "decode_v5_header",
+    "descramble_llrs",
+    "encode_burst_v5",
+    "encode_v5_header",
+    "generate_ltf",
+    "generate_stf",
+    "mcs_entry",
+    "measure_ltf_pair",
+    "scramble_bits",
+    "scrambler_sequence",
+    "shared_correlation",
+    "v5_burst_sample_count",
+    "v5_candidates",
+    "v5_entries",
+    "v5_header_symbols",
+    "v5_payload_geometry",
 ]
