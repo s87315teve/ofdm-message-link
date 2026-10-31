@@ -14,6 +14,8 @@ from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from ofdm_link.phy.mcs_table import mcs_entry
+
 from .link import RateMeter
 
 # Preamble SNR each MCS needs, from the Pluto-to-Pluto captures in
@@ -24,7 +26,22 @@ from .link import RateMeter
 # new receiver needs about 10 dB less for MCS 0 and 5 dB less for MCS 4.  An
 # MCS missing here has no measured threshold, and its light is judged on
 # loss alone.
-SNR_THRESHOLD_DB: Mapping[int, float] = {0: 9.0, 4: 15.0}
+#
+# The wire-v5 values (8-14) are placeholders predicted from AWGN simulation
+# plus the 3.5 dB hardware penalty seen at 8.7, under a 21-22 dB EVM floor,
+# then the same +1 dB rounded to 0.5 dB (it reproduces 9.0 dB for QPSK 1/3).
+# Replace them with the H4 ladder measurements.  64QAM (15-17) has none.
+SNR_THRESHOLD_DB: Mapping[int, float] = {
+    0: 9.0,
+    4: 15.0,
+    8: 9.0,
+    9: 11.5,
+    10: 13.5,
+    11: 13.5,
+    12: 17.5,
+    13: 20.5,
+    14: 22.5,
+}
 
 LOSS_WINDOW_S = 10.0
 SNR_WINDOW_S = 2.0
@@ -97,6 +114,8 @@ def suggested_mcs(snr_db: float | None, mcs_index: int | None) -> int | None:
     Only offered below the current MCS's own threshold.  Among the measured
     MCS with a lower threshold, the highest one the SNR still meets is chosen;
     when it meets none of them, the most robust one is still worth trying.
+    Only entries of the same family (legacy or wire v5) that the transmitter
+    offers are suggested: a legacy transmitter cannot switch to a v5 index.
     """
 
     if snr_db is None or mcs_index is None:
@@ -104,10 +123,13 @@ def suggested_mcs(snr_db: float | None, mcs_index: int | None) -> int | None:
     current = SNR_THRESHOLD_DB.get(mcs_index)
     if current is None or snr_db >= current:
         return None
+    family = mcs_entry(mcs_index).family
     robust = sorted(
         (threshold, index)
         for index, threshold in SNR_THRESHOLD_DB.items()
         if threshold < current
+        and mcs_entry(index).family == family
+        and mcs_entry(index).tx_visible
     )
     if not robust:
         return None

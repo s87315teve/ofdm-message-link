@@ -35,7 +35,18 @@ def _light(**overrides):
 
 
 def test_threshold_table_holds_the_measured_mcs_thresholds():
-    assert dashboard.SNR_THRESHOLD_DB == {0: 9.0, 4: 15.0}
+    assert {index: dashboard.SNR_THRESHOLD_DB[index] for index in (0, 4)} == {
+        0: 9.0,
+        4: 15.0,
+    }
+
+
+def test_threshold_table_holds_the_v5_placeholders_and_no_64qam():
+    assert {
+        index: threshold
+        for index, threshold in dashboard.SNR_THRESHOLD_DB.items()
+        if index >= 8
+    } == {8: 9.0, 9: 11.5, 10: 13.5, 11: 13.5, 12: 17.5, 13: 20.5, 14: 22.5}
 
 
 # -- receive light, in rule order -----------------------------------------
@@ -132,6 +143,14 @@ def test_no_suggestion_while_snr_meets_the_current_threshold():
 def test_no_suggestion_when_already_on_the_most_robust_measured_mcs():
     light = _light(mcs_index=0, loss_10s=0.05, snr_2s=8.0)
     assert "try MCS" not in light.reason
+
+
+def test_suggestions_stay_in_the_family_and_skip_hidden_entries():
+    # A legacy transmitter cannot switch to a v5 index, and MCS 11 is hidden.
+    assert dashboard.suggested_mcs(13.5, 4) == 0
+    assert dashboard.suggested_mcs(16.0, 12) == 10
+    assert dashboard.suggested_mcs(12.0, 12) == 9
+    assert dashboard.suggested_mcs(5.0, 9) == 8
 
 
 def test_no_suggestion_for_a_green_light():
