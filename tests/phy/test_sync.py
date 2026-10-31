@@ -215,8 +215,8 @@ def test_default_thresholds_are_the_bench_measured_values() -> None:
 
     config = SyncConfig()
 
-    assert config.detection_threshold == pytest.approx(0.40)
-    assert config.correlation_threshold == pytest.approx(0.40)
+    assert config.detection_threshold == pytest.approx(0.25)
+    assert config.correlation_threshold == pytest.approx(0.30)
 
 
 @pytest.mark.parametrize(

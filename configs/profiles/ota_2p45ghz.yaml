@@ -25,8 +25,11 @@ phy:
     decision_mode: turbo
     max_iterations: 8
   sync:
-    detection_threshold: 0.40
-    correlation_threshold: 0.40
+    # Measured on two Plutos at 2.45 GHz (experiments/rx_improvement): below
+    # about 4 dB the 0.40 / 0.40 pair rejected bursts the receiver can decode.
+    # Signal-free air never reached 0.21 correlation, so 0.30 keeps a margin.
+    detection_threshold: 0.25
+    correlation_threshold: 0.30
 
 radio:
   adapter: uhd

@@ -565,9 +565,10 @@ def _positive_number(value: Mapping[str, Any], key: str, location: str) -> float
 
 #: Bench-measured defaults, used when ``phy.sync`` is absent.  They match
 #: :class:`ofdm_link.phy.SyncConfig` so an unconfigured caller and a configured
-#: one acquire identically.
-DEFAULT_DETECTION_THRESHOLD = 0.40
-DEFAULT_CORRELATION_THRESHOLD = 0.40
+#: one acquire identically.  Lowered from 0.40/0.40 once the receiver could
+#: decode the bursts they were rejecting: see experiments/rx_improvement.
+DEFAULT_DETECTION_THRESHOLD = 0.25
+DEFAULT_CORRELATION_THRESHOLD = 0.30
 
 #: Below this the coherent correlation stops separating a preamble from noise:
 #: 140 s of measured signal-free air put the noise ceiling at 0.199.

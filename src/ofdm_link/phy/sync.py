@@ -46,7 +46,8 @@ class SyncConfig:
     on how many windows reach the coherent stage, and its only real cost is
     that a value inside the signal distribution discards true preambles.  It
     therefore sits below the metric a preamble produces at the lowest SNR the
-    link must work at (0.40 corresponds to about +4 dB).
+    link must work at: once the receiver decoded bursts at 3-4 dB, the old
+    0.40 was rejecting half of them there, and 0.25 is what it takes.
 
     ``correlation_threshold`` gates the coherent preamble correlation and is
     the only stage that separates signal from noise.  Its ceiling is set by the
@@ -54,13 +55,15 @@ class SyncConfig:
     a response that varies across the band caps the correlation however strong
     the signal is -- 0.77 at 11 dB of in-band spread, 0.63 at 18 dB.  0.40
     accepts up to about 25 dB of spread, and 140 s of signal-free air reached
-    only 0.199.
+    only 0.199 (0.203 in a later 90 s at 2.45 GHz).  At 3 dB the preamble's own
+    correlation is about 0.47 at the median, so 0.30 keeps most of those
+    bursts while staying 0.1 above anything noise produced.
     """
 
     fft_size: int = 64
     cyclic_prefix_length: int = 16
-    detection_threshold: float = 0.40
-    correlation_threshold: float = 0.40
+    detection_threshold: float = 0.25
+    correlation_threshold: float = 0.30
     ambiguity_ratio: float = 1.10
     minimum_power: float = 1e-8
 
