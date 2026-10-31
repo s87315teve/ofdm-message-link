@@ -96,15 +96,16 @@ ffmpeg 剛啟動的半秒會一次送出一批 datagram，模擬 transport 來�
 
 ### 選 MCS 與 bitrate
 
-以下是實機 OTA 的量測（B210 → NI USRP-2901，5 MS/s），可以當作起點：
+以下可以當作起點。SNR 門檻來自 Pluto 對 Pluto 的實測（[8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz)），
+datagram 上限與 bitrate 來自 B210 → NI USRP-2901 的實測（8.2），都是 5 MS/s：
 
 | 接收端 `SNR (2 s)` | 設定 | 752-byte datagram 的上限 | 建議影片 bitrate |
 |---|---|---|---|
 | ≥ 11 dB | **MCS 4**（16QAM Turbo 1/3） | 2.41 Mbit/s（mux rate） | **1.3 Mbit/s**（mux 1.44，約 60%） |
-| 約 8–11 dB，或 MCS 4 出現 `bursts missing` | **MCS 0**（QPSK Turbo 1/3） | 1.38 Mbit/s | 0.75 Mbit/s（mux 0.83） |
+| 約 5–11 dB，或 MCS 4 出現 `bursts missing` | **MCS 0**（QPSK Turbo 1/3） | 1.38 Mbit/s | 0.75 Mbit/s（mux 0.83） |
 
 SNR 低於 11 dB 請退回 `--mcs-index 0`（Link light 會提示 `try MCS 0`）。長時間請讓 bitrate 留在
-上限的 60% 左右。
+上限的 60% 左右。這裡的 SNR 是 `improve-rx` 之後的 preamble 估計值（定義見 [2.6](02-gui.md#26-統計數字的意義與限制)）。
 
 ### 用真的 SDR：一鍵腳本
 

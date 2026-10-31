@@ -16,10 +16,13 @@ from dataclasses import dataclass
 
 from .link import RateMeter
 
-# Effective SNR each MCS needed for loss-free video in the over-the-air
-# measurements summarised in docs/08-measurements.md.  An MCS missing
-# here has no measured threshold, and its light is judged on loss alone.
-SNR_THRESHOLD_DB: Mapping[int, float] = {0: 8.0, 4: 11.0}
+# Preamble SNR each MCS needs, from the Pluto-to-Pluto captures in
+# docs/08-measurements.md (8.7): the lowest SNR at which the receiver lost
+# under 1 % of 900-byte bursts, plus 1 dB, rounded to 0.5 dB.  The SNR is the
+# preamble estimate the SNR card shows, not the EVM-based figure the 8 / 11 dB
+# thresholds of v1.0.0 were measured with.  An MCS missing here has no
+# measured threshold, and its light is judged on loss alone.
+SNR_THRESHOLD_DB: Mapping[int, float] = {0: 5.0, 4: 11.0}
 
 LOSS_WINDOW_S = 10.0
 SNR_WINDOW_S = 2.0
@@ -274,14 +277,12 @@ class Baseline:
 class RxView:
     goodput_bps: float
     loss_10s: float | None
-    # Decision-directed SNR of decoded bursts; the light's thresholds use it.
+    # Preamble SNR of every burst acquired in the window, decoded or not.
     snr_2s: float | None
     light: Light
     recent: dict[str, int]
     totals: dict[str, int]
     trend: tuple[TrendPoint, ...]
-    # Preamble SNR of every burst acquired in the window, decoded or not.
-    link_snr_2s: float | None = None
 
 
 class RxDashboard:
@@ -296,25 +297,27 @@ class RxDashboard:
         self._goodput = RateMeter(GOODPUT_WINDOW_S)
         self._window = WindowedCounters(LOSS_WINDOW_S)
         self._snr = SampleWindow(SNR_WINDOW_S)
-        self._link_snr = SampleWindow(SNR_WINDOW_S)
         self._trend = Trend()
         self._baseline = Baseline()
         self._last_burst_at: float | None = None
         self._previous: Mapping[str, int] | None = None
 
-    def observe_burst(self, now: float, snr_db: float | None) -> None:
-        """Record one decoded burst's time and effective SNR."""
+    def observe_burst(self, now: float) -> None:
+        """Record when a burst decoded."""
 
         self._last_burst_at = now if self._last_burst_at is None else max(
             self._last_burst_at, now
         )
-        if snr_db is not None:
-            self._snr.add(now, snr_db)
 
-    def observe_link_snr(self, now: float, snr_db: float) -> None:
-        """Record one acquired burst's preamble SNR, whether or not it decoded."""
+    def observe_snr(self, now: float, snr_db: float) -> None:
+        """Record one acquired burst's preamble SNR, whether or not it decoded.
 
-        self._link_snr.add(now, snr_db)
+        Counting the lost bursts too is what keeps the SNR honest while the
+        link is failing: an SNR taken only from bursts that decoded describes
+        the lucky ones.
+        """
+
+        self._snr.add(now, snr_db)
 
     def refresh(self, now: float, counters: Mapping[str, int], *, mcs_index: int | None) -> RxView:
         previous = self._previous
@@ -336,9 +339,8 @@ class RxDashboard:
         expected = recent.get("bursts_decoded", 0) + recent.get("missing_bursts", 0)
         loss = None if expected <= 0 else recent.get("missing_bursts", 0) / expected
         snr = self._snr.mean(now)
-        link_snr = self._link_snr.mean(now)
         goodput = self._goodput.bits_per_second
-        self._trend.append(TrendPoint(now, goodput, link_snr, lost_now))
+        self._trend.append(TrendPoint(now, goodput, snr, lost_now))
         light = rx_light(
             now=now,
             last_burst_at=self._last_burst_at,
@@ -346,7 +348,7 @@ class RxDashboard:
             snr_2s=snr,
             mcs_index=mcs_index,
         )
-        return RxView(goodput, loss, snr, light, recent, totals, self._trend.points(), link_snr)
+        return RxView(goodput, loss, snr, light, recent, totals, self._trend.points())
 
     def reset(self, now: float, counters: Mapping[str, int]) -> None:
         """Make the current counter values the new zero.
@@ -361,7 +363,6 @@ class RxDashboard:
         self._goodput = RateMeter(GOODPUT_WINDOW_S)
         self._window.clear()
         self._snr.clear()
-        self._link_snr.clear()
         self._trend.clear()
         self._previous = dict(counters)
 

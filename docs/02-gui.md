@@ -29,7 +29,7 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 |---|---|
 | `Goodput (2 s)` | 最近 2 秒送達 UDP 的 application bytes，Mbit/s |
 | `Loss (10 s)` | 最近 10 秒遺失率 = missing ÷（decoded + missing）；10 秒內沒有預期中的 burst 時顯示 `—` |
-| `SNR (2 s)` | 最近 2 秒解出 burst 的平均 effective SNR；2 秒內沒有 burst 時顯示 `—` |
+| `SNR (2 s)` | 最近 2 秒**每一個抓到 preamble 的 burst**（包括後來沒解出來的）的平均 SNR，由 preamble 估計；2 秒內沒有 burst 時顯示 `—` |
 | `MCS` | 最後一個解出 burst 的 header 所帶的 MCS |
 | `Link` | 燈號加一行原因或建議 |
 
@@ -51,7 +51,8 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 實測中遺失率 0.05% 時燈號有一半時間是黃的，畫面看起來完全正常。需要處理的是紅燈 `LOSSY`
 （≥ 1%），或是畫面持續破圖。模擬環境沒有干擾，所以在模擬裡看到黃燈就值得追查。
 
-SNR 門檻只有兩個有實測值：MCS 4 為 11 dB、MCS 0 為 8 dB（來源見[實測紀錄](08-measurements.md)）。
+SNR 門檻只有兩個有實測值：MCS 4 為 11 dB、MCS 0 為 5 dB（來源見[實測紀錄 8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz)）。
+v1.0.0 的門檻是 11 dB 與 8 dB，但那是舊的 SNR 定義（見 2.6），兩組數字不能直接比較。
 其他 MCS 只依遺失率判斷，原因會註明 `no SNR threshold measured for MCS N`。紅燈或黃燈且 SNR
 已低於目前 MCS 的門檻時，原因後面會附上 `— try MCS 0`。
 
@@ -124,18 +125,25 @@ SNR 附近突然從接近 0 升到接近 100%。換一個 MCS 再做一次，比
 | `burst loss ratio` | missing ÷ (decoded + missing) | 即 PER |
 | `incomplete messages` | 缺 fragment 而被丟棄的訊息 | 永遠無法修復 |
 | `foreign bursts` | CRC 有效但不是這個專案的格式 | 同一 channel 上的其他應用，不是 link 故障 |
-| `mean EVM` / `effective SNR` | Decision-directed：以最近的 constellation 點為參考算出的誤差 | Error rate 一高就**會飽和**。它描述「解得出來的 burst」，不是 link 的失效門檻 |
+| `mean SNR` | 由 preamble 估計：兩個重複的半段相同的部分是訊號，不同的部分是雜訊 | 每個 burst 單獨估約有 ±0.8 dB 的誤差，畫面上的 2 秒平均穩定得多。量的是熱雜訊，IQ imbalance 之類的固定失真不算在內 |
+| `mean EVM` | Decision-directed：以最近的 constellation 點為參考算出的誤差 | Error rate 一高就**會飽和**。只從解得出來的 burst 計算 |
 | `mean one-way latency` | End-to-end latency | **只在收發同機時顯示**。跨主機沒有共同時間基準，所以直接顯示 `n/a` 而不是給假數字 |
 | `delivered goodput` | Application bits ÷ wall clock | 包含打字等待時間，只是觀察用 |
 
-**關於 effective SNR 的提醒：** 它只從成功解出的 burst 計算。Link 很差的時候，解得出來的都是
-運氣比較好的那幾個，所以這個數字會比真實情況樂觀。判斷 link 好壞要同時看 loss。
+**SNR 的定義在 `improve-rx` 之後改了。** 以前畫面上的 SNR 是由 EVM 推算的，只從成功解出的 burst
+計算，所以 link 很差時反而偏樂觀，而且比真實 SNR 低 3–5 dB。現在的 SNR 由每個 burst 的 preamble
+估計，**沒解出來的 burst 也算**，在模擬中 0–20 dB 與真實 SNR 的差距在 ±0.75 dB 內。
+定義是「burst 的平均 sample 功率 ÷ noise variance」，和 udp transport 的 `--snr-db` 相同，
+所以模擬時畫面上的數字會接近你設定的值。
 
 ## 2.7 `--stats-log`：把統計存成檔案
 
 RX 加上 `--stats-log PATH` 之後，每次統計刷新（0.5 秒）附加一行 JSON，內容與畫面同一次計算：
 `receiver`、`decoder`、`transport` 的累計計數，以及 `link_state`、`link_reason`、`loss_10s`
 （比例，不是 %）、`snr_2s`、`mcs_index`。做實驗時用這個取數據，比看畫面抄數字可靠。
+
+`snr_2s` 與 `mean_effective_snr_db` 是 preamble 估計的 SNR，同一行的 `"snr_method": "preamble"`
+標明這一點。沒有這個欄位的舊 log 用的是 EVM 推算的舊定義，兩者不要混在一起比。
 
 ```bash
 python -m ofdm_message_link.rx_app --snr-db 12 --stats-log rx_stats.jsonl

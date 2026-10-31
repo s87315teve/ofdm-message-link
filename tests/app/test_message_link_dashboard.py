@@ -35,7 +35,7 @@ def _light(**overrides):
 
 
 def test_threshold_table_holds_the_measured_mcs_thresholds():
-    assert dashboard.SNR_THRESHOLD_DB == {0: 8.0, 4: 11.0}
+    assert dashboard.SNR_THRESHOLD_DB == {0: 5.0, 4: 11.0}
 
 
 # -- receive light, in rule order -----------------------------------------
@@ -171,27 +171,26 @@ def test_loss_is_unknown_when_no_burst_was_expected():
 
 def test_snr_is_the_mean_of_the_last_two_seconds():
     board = RxDashboard()
-    board.observe_burst(0.0, 20.0)
-    board.observe_burst(1.0, 10.0)
-    board.observe_burst(2.5, 12.0)
+    board.observe_snr(0.0, 20.0)
+    board.observe_snr(1.0, 10.0)
+    board.observe_snr(2.5, 12.0)
     view = board.refresh(2.5, _counters(3, 0), mcs_index=4)
     assert view.snr_2s == pytest.approx(11.0)
     view = board.refresh(10.0, _counters(3, 0), mcs_index=4)
     assert view.snr_2s is None
 
 
-def test_preamble_snr_counts_every_acquired_burst_and_feeds_the_trend():
+def test_snr_counts_every_acquired_burst_and_feeds_the_trend():
     board = RxDashboard()
-    board.observe_burst(1.0, 12.0)
-    # Two more bursts were acquired but lost; their preamble SNR still counts.
+    board.observe_burst(1.0)
+    # Two of the three bursts were acquired but lost; their SNR still counts.
     for t, value in ((0.5, 9.0), (1.0, 15.0), (1.5, 6.0)):
-        board.observe_link_snr(t, value)
+        board.observe_snr(t, value)
     view = board.refresh(1.5, _counters(1, 2), mcs_index=0)
-    assert view.link_snr_2s == pytest.approx(10.0)
-    assert view.snr_2s == pytest.approx(12.0)
+    assert view.snr_2s == pytest.approx(10.0)
     assert view.trend[-1].secondary == pytest.approx(10.0)
     board.reset(2.0, _counters(1, 2))
-    assert board.refresh(2.5, _counters(1, 2), mcs_index=0).link_snr_2s is None
+    assert board.refresh(2.5, _counters(1, 2), mcs_index=0).snr_2s is None
 
 
 def test_a_rising_decode_counter_counts_as_a_burst_for_the_light():
@@ -207,7 +206,8 @@ def test_a_rising_decode_counter_counts_as_a_burst_for_the_light():
 def test_reset_makes_the_current_counters_the_new_zero():
     board = RxDashboard()
     board.refresh(0.0, _counters(0, 0), mcs_index=0)
-    board.observe_burst(1.0, 12.0)
+    board.observe_burst(1.0)
+    board.observe_snr(1.0, 12.0)
     board.refresh(1.0, _counters(100, 20, 5000), mcs_index=0)
     board.reset(1.0, _counters(100, 20, 5000))
     view = board.refresh(1.5, _counters(100, 20, 5000), mcs_index=0)
