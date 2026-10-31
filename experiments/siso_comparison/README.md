@@ -14,7 +14,6 @@ comb pilot、CP-based MNC 同步）放進同一組 channel 比較。完整的圖
 | `sweep_ofdm_link.py` | 用 repo 裡的 `encode_burst` / `decode_burst` 掃 SNR，比較現在的 RX 與兩個只改 RX 的修正 |
 | `siso_model.py` | SISO-master `lib/` 的 TX 鏈與 RX（MNC 同步、整數 CFO 搜尋、pilot 內插、hard Viterbi、RS 判斷）的 numpy 移植 |
 | `siso_sweep.py` | 用 siso-rx 的串流迴圈收連續 symbol 並掃 SNR |
-| `results/*.json` | `index.html` 使用的數據 |
 
 ## 重現
 
@@ -23,6 +22,12 @@ python setup.py build_ext --inplace       # 需要原生 Turbo decoder
 PYTHONPATH=src python experiments/siso_comparison/sweep_ofdm_link.py 150 ofdm_link.json
 python experiments/siso_comparison/siso_sweep.py experiments/siso_comparison 80 siso.json
 ```
+
+兩支腳本的輸出就是 `index.html` 用的數據；報告把它們直接寫在 HTML 裡的 `const DATA = {...}`，
+所以沒有另外存 JSON 檔。
+
+> **後續：** 報告找到的兩個 RX 問題（LLR 飽和、header 太脆弱）已經在 `improve-rx` 分支修掉，
+> 實機量測與做法見 [`../rx_improvement/`](../rx_improvement/README.md)。上面表格是修正**之前**的數字。
 
 ## 結論摘要（AWGN，900 B burst，50% 成功點的真實 SNR）
 

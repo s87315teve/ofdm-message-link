@@ -8,6 +8,11 @@
 > 所在場所可用的頻段與功率；不確定時改用 cable 加 attenuator（見[發射前必讀](04-ota-hardware.md#41-發射前必讀)）。
 >
 > 預設的 2.45 GHz profile 只有 8.5 的 Pluto 對 Pluto、與 8.6 的 N210 對 Pluto 短時間量測。
+>
+> **SNR 的定義在 8.7 改了。** 8.1–8.6 的 SNR（`SNR (2 s)`、`effective SNR`）是由 EVM 推算的舊定義：
+> 只算解出來的 burst，而且比真實 SNR 低 3–5 dB。8.7 之後的 SNR 由每個 burst 的 preamble 在資料 carrier
+> 的頻帶內估計（見 [2.6](02-gui.md#26-統計數字的意義與限制)）。8.1–8.6 當時沒有錄原始 samples，無法用新定義重算，
+> 所以舊的數字保留原樣；**兩種定義的數字不要直接比較。**
 
 這些都是 demo 等級的觀察：單一擺放位置、時間短、沒有重複多次。不能當作 throughput 或 reliability
 的正式結論。
@@ -242,7 +247,108 @@ Pluto TX −15、−10、−5、0 dB（N210 RX 15 dB），以及 Pluto TX 0 dB �
 
 每個設定只跑了一次。
 
-## 8.7 沒有實測過的東西
+## 8.7 改進 RX 之後：Pluto → Pluto，2.45 GHz
+
+`improve-rx` 分支**只改接收端**，wire format 與 v1.0.0 完全相同。改了五件事：
+1. Turbo decoder 拿到真正的 soft 輸入（以前 noise variance 是寫死的 `1e-6`，LLR 全部飽和）。現在 LLR 的雜訊
+   用解出來的 header 實際量。
+2. Channel estimate 平滑。
+3. Header 在 CRC 失敗時改用 maximum likelihood 選。
+4. Acquisition 門檻從 0.40／0.40 降到 0.25／0.30。
+5. 畫面上的 SNR 改由 preamble 在資料 carrier 的頻帶內估計。
+
+做法、模擬與所有原始數據見 [`experiments/rx_improvement/`](../experiments/rx_improvement/README.md)。
+
+兩台 PlutoSDR Rev.B（Z7010-AD9364，韌體 v0.39，USB backend），各接原廠 antenna、放在同一張桌上，
+預設 profile、5 MS/s，RX gain 15 dB。2026-11-01 量測。
+
+### 同一份錄音，新舊兩版 RX 各解一次
+
+TX 依序用 −25 到 0 dB（每 2.5 dB）各送 400 個 900-byte burst（每秒 100 個，app 的 framing），
+RX 那台錄下原始 IQ；22 份錄音的 RX overflow 都是 0。之後用 v1.0.0 的 RX（連同它自己的設定檔）
+與新的 RX 解**同一份錄音**，所以環境變化不影響比較。SNR 是新 RX 顯示的 SNR（中位數）。
+
+| TX gain | SNR | MCS 0 v1.0.0 | MCS 0 新 | SNR | MCS 4 v1.0.0 | MCS 4 新 |
+|---:|---:|---:|---:|---:|---:|---:|
+| −5 dB | 22.0 dB | 0 | 0 | 20.8 dB | 0.25% | 0 |
+| −10 dB | 17.5 dB | 0 | 0 | 16.5 dB | 3.25% | **0** |
+| −12.5 dB | 15.0 dB | 1% | **0** | 13.8 dB | 21.75% | **0** |
+| −15 dB | 12.7 dB | 10% | **0.25%** | 11.4 dB | 50.75% | **1.75%** |
+| −17.5 dB | 10.3 dB | 35.25% | **0** | 8.9 dB | 84% | **19.5%** |
+| −20 dB | 8.1 dB | 73% | **0.25%** | 6.7 dB | 98.5% | 75.5% |
+| −22.5 dB | 5.6 dB | 97% | 16.5% | 4.8 dB | 100% | 100% |
+| −25 dB | 3.5 dB | 100% | 81.75% | 2.8 dB | 100% | 100% |
+
+（0、−2.5、−7.5 dB 兩版都幾乎沒有遺失，表中省略；完整數據在 `results/ota_v1.json`、`results/ota_new.json`。）
+
+- **遺失率 < 1% 的最低 TX gain**：MCS 0 從 −10 dB 移到 **−20 dB**（少發 10 dB）；MCS 4 從 −7.5 dB
+  移到 **−12.5 dB**（少發 5 dB）。量測間距是 2.5 dB，所以這兩個數字的解析度也是 2.5 dB。
+- 新 RX 在每一個點都不比舊的差。
+- 舊 RX 的遺失大多是 header 解不出來（MCS 0 在 −20 dB 有 229 次）。新 RX 每個點的 header 失敗最多
+  4 次，而且大多出現在 400 個全部解出的點上，是多出來的候選，不是遺失。新 RX 剩下的遺失：MCS 0 在
+  −22.5 dB 的 66 個裡有 61 個是 **preamble 沒抓到**；MCS 4 主要是 payload 解不出來。
+
+### 真的 app，即時收發
+
+`tx_app` 與 `rx_app`（4 個 decode worker），`udp_load.py` 每秒送 100 個 900-byte datagram、30 秒，
+逐 byte 比對。舊、新、舊、新輪流跑，兩次之間只換 RX 的程式碼與它的設定檔。量測時電腦沒有其他負載。
+
+| 設定 | v1.0.0 RX（兩次） | 新 RX（兩次） | 送資料期間 RX overflow |
+|---|---:|---:|---:|
+| MCS 0，TX −20 dB | 75.6% / 77.4% 遺失 | **0.80% / 1.27%** | 全部 0 |
+| MCS 4，TX −15 dB | 47.6% / 49.1% 遺失 | **1.17% / 1.53%** | 全部 0 |
+
+**電腦有其他負載時會掉包。** 有一輪 A/B 跑的時候，背景同時有離線解碼與模擬在跑（負載平均約 25，
+這台是 20 核）。新 RX 出現 RX overflow（11–33 次），MCS 0 遺失 7–10%；舊 RX 沒有，因為它在這個 SNR
+下大多在 header 就放棄，不跑 Turbo。新 RX 在門檻附近每個 burst 都要跑滿 Turbo iteration，所以需要
+空出 CPU 給 decode worker。上表是電腦閒置時重跑的結果。
+
+影像（`scripts/run_ota_video_demo.sh --transport pluto`，MCS 0、750 kbit/s、60 秒，只跑新 RX）：
+
+| TX gain | `SNR (2 s)` | 送達／遺失 burst | 遺失率 | ffplay `corrupt` | goodput 中位數 |
+|---:|---:|---:|---:|---:|---:|
+| −17.5 dB | 10.0–10.5 dB | 8,472／8 | **0.094%** | 9 | 0.835 Mbit/s |
+| −20 dB | 7.7–8.2 dB | 8,306／156 | 1.8% | 142 | 0.820 Mbit/s |
+
+8.5 節 10/05 重跑時，同樣的兩台 Pluto 要 TX −5 到 0 dB 才有 0.05–0.3% 的影像遺失。這次在 −17.5 dB
+就做到 0.09%。兩次不是同一天、同一個環境，所以這不是嚴格的比較，但量級是清楚的。
+
+### SNR 顯示與 MCS 門檻
+
+- **Pluto 的雜訊不是白的。** 錄音開頭還沒有 burst 的那 0.2 秒裡，guard band 的雜訊比資料 carrier 高
+  10.3–10.7 dB，整個頻寬平均比資料 carrier 高 4.3–4.5 dB（`noise_spectrum.py`）。所以 SNR 只在資料
+  carrier 的頻帶內估；用整個頻寬估會低約 4 dB。
+- 新的 `SNR (2 s)` 在即時 run 裡的跳動（標準差）是 0.12–0.21 dB，舊的 EVM 推算值是 0.25–0.40 dB。
+- TX gain 每降 2.5 dB，新的 SNR 降 1.8–2.5 dB。
+- 新的 SNR 是熱雜訊的 SNR，所以比 v1.0.0 的 EVM 推算值高：TX −10 dB 以上高 3.8–5.9 dB（EVM 還包含
+  硬體缺陷），低 SNR 時差距縮小，因為 EVM 只算解得出來的 burst。
+- **解碼用的雜訊比熱雜訊大。** 解出來的 header 量到的有效雜訊，在會掉包的 SNR 範圍比熱雜訊高約
+  3.3–3.7 dB（channel 估計誤差、相位雜訊、IQ imbalance、TX 失真）。同樣的 SNR，實機比模擬難解。
+- GUI 的門檻用「新 RX 遺失 < 1% 的最低 SNR + 1 dB，四捨五入到 0.5 dB」重訂：**MCS 0 = 9.0 dB，
+  MCS 4 = 15.0 dB**。數字比 v1.0.0 的 8／11 dB 高，是因為 SNR 的刻度換了，不是 RX 變差；用發射功率比，
+  新 RX 少發 10 dB 與 5 dB。MCS 4 那一點的間距太粗：11.4 dB 遺失 1.75%、13.8 dB 遺失 0，真正的 1% 點
+  在兩者之間，所以 15.0 dB 偏保守。
+
+### Acquisition 門檻
+
+TX 關閉時錄空中訊號約 90 秒（RX gain 15 與 30 dB 各一段），coherent correlation 最高 0.203，
+沒有任何一次 ≥ 0.25，和以前量到的 0.199 一致。所以 `correlation_threshold` 降到 0.30 仍有 0.1 的餘裕。
+`detection_threshold` 在空中雜訊上任何設定都會過（metric 最高到 0.96），它只決定有多少候選要做
+coherent 檢查。在邊緣的錄音上，0.25／0.30 讓 MCS 0 在 −20 dB 的遺失從 14.5% 降到 0.25%（當時的 RX
+版本，`results/thresholds_*.json`）。只有預設的 2.45 GHz profile 與程式預設值改了；B210 與 N210 的
+profile 沒有量，仍是 0.40。
+
+### 這次沒有量到的
+
+- **B210、N210、USRP-2901 配新 RX。** 只量了 Pluto。
+- **每秒 330 個 burst 以上。** Pluto 發送端在 MCS 4 大約每秒 330 個就飽和：每秒送 380 個時只收到 88%，
+  但 RX 端的 PHY sequence 沒有缺號，所以是 TX 送不出去。在這個速率下新 RX 的 owner thread 跟得上，
+  RX overflow 為 0。B210 那種每秒 400 個 burst 的速率沒有測。
+- **CPU：** 單核解一個 MCS 0 burst，20 dB 時新 RX 2.57 ms、v1.0.0 2.46 ms；3 dB 時新 RX 3.6 ms 而且
+  解得出來（`results/cpu_bench.txt`）。門檻附近 4 個 decode worker 要有空的 CPU 可用，見上面的負載說明。
+- 每個設定只跑一次錄音、即時 run 各兩次，單一擺放位置。
+
+## 8.8 沒有實測過的東西
 
 誠實列出來，免得被誤認為已經驗證：
 
