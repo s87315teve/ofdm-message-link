@@ -7,6 +7,11 @@ UDP egress 出的 **UDP payload throughput**。兩個 app 都用預設參數原�
 > （`configs/profiles/usrp_ota_1p2ghz.yaml`），**不是專案現在的預設頻率**。重現前請先確認你所在
 > 場所可用的頻段與功率；不確定時改用 cable 加 attenuator。
 
+> **MCS 編號說明**：本報告的數據用的是舊版（legacy）MCS 0–7，是在 TX 只送 wire v5 之前量的。
+> 現在的 `tx_app` 只接受 wire-v5 的 `--mcs-index 8–17`（0–7 會被拒絕，預設 8），所以下方「重現」一節的指令
+> 已改用 v5 編號（`airtime.py` 與 `sweep.py` 預設只列 `v5_entries()` 看得到的 8、9、10、12、13、14）。
+> v5 編號的數據與本報告表格**不能直接對照**；舊版編號的結果要重跑才有新數據。
+
 這份報告同時是一個範例：實驗怎麼設計、指標怎麼定義、哪些結論有數據支持、哪些沒有。
 
 ## 1. 結論
@@ -74,7 +79,7 @@ udp_load.py ──UDP :52001──▶ tx_app ──OTA 1.2 GHz──▶ rx_app �
   也能**逐 byte 驗證**。長度或內容不對算 `corrupt`，重複收到算 `duplicate`。這次所有 run 的
   `corrupt`、`duplicate` 與亂序都是 0。
 - 送出端以固定間隔送（落後時立刻補送，不會集中爆發）。所有 run 的最大落後都不超過 5.3 ms，送出速率本身不是瓶頸。
-- [`sweep.py`](sweep.py) 負責啟動 `rx_app`（`--stats-log`）與 `tx_app`（`--mcs-index N`）。每個量測點前後
+- [`sweep.py`](sweep.py) 負責啟動 `rx_app`（`--stats-log`）與 `tx_app`（`--mcs-index N`，N 為 8–17）。每個量測點前後
   各讀一次 RX 的 stats log，把兩次的差當作這個點的計數。它也記錄 TX／RX 的 CPU 用量，以及 TX log 裡 UHD
   的 `U`／`L`／`S`／`O` 標記。
 - TX 每換一個 MCS 就重新啟動（`--mcs-index` 是啟動參數）。RX 在第一輪掃描中一直保持運作。
@@ -292,15 +297,15 @@ RADIOS="--tx-serial <TX_SERIAL> --rx-serial <RX_SERIAL> --overlay configs/profil
 # 1. TX 服務速率模型（不需要硬體）；可加 datagram 大小，例如 1472
 python -m experiments.ota_udp_throughput.airtime
 
-# 2. 第一輪掃描：8 個 MCS × 6 個速率 × 20 秒（約 25 分鐘）
+# 2. 第一輪掃描：6 個 v5 MCS（8、9、10、12、13、14）× 6 個速率 × 20 秒（約 25 分鐘）
 python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/sweep1 --duration 20
 
-# 3. 60 秒確認，例如 MCS 4
-python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/c60-m4 --mcs 4 --rates 388 --duration 60
+# 3. 60 秒確認，例如 MCS 12（約為服務速率 568/s 的 97%）
+python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/c60-m12 --mcs 12 --rates 550 --duration 60
 
 # 4. TX gain 與 datagram 大小
-python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/gain-tx10 --tx-gain 10 --mcs 4,5,6,3,7 --fractions 0.5 --duration 15
-python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/size-m4-1472 --mcs 4 --rates 60,230 --duration 20 --size 1472
+python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/gain-tx10 --tx-gain 10 --mcs 12,13,14,10 --fractions 0.5 --duration 15
+python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/size-m12-1472 --mcs 12 --rates 60,230 --duration 20 --size 1472
 ```
 
 `--tx-serial` 與 `--rx-serial` 必填；gain 預設是 `--tx-gain 5 --rx-gain 15`，RX egress 用 UDP 52022。

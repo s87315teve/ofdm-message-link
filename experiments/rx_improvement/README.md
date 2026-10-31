@@ -61,6 +61,8 @@ GUI 的 MCS 門檻用新的 SNR 重訂：MCS 0 = 9.0 dB、MCS 4 = 15.0 dB。比 
 
 ## 3. 怎麼量的
 
+> 這一節的指令要在 improve-rx 的 tree 上跑（`git worktree add <dir> improve-rx`），因為目前的 `tx_app` 只送 wire v5，這些指令用的舊版 MCS 編號與 TX 行為在現在的 tree 上已不成立。
+
 ### 模擬
 
 - `sim_sweep.py`：每點 150 個 burst，同樣的 seed，新舊 RX 各跑一次。SNR = burst 平均 sample 功率 ÷ noise variance。

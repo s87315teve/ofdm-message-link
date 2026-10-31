@@ -21,9 +21,10 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 PY = sys.executable
 ACK = "I acknowledge that this process will transmit RF"
-# Airtime-only burst rate per MCS for a 968-byte datagram at 5 MS/s (airtime.py);
-# --fractions scales these.  The real ceiling is lower: see README.md section 4.
-CAP = {0: 234.6, 1: 237.3, 2: 348.4, 3: 655.1, 4: 448.4, 5: 454.9, 6: 655.1, 7: 1170.4}
+# Airtime-only burst rate per wire-v5 MCS (the only indices the TX accepts) for a
+# 968-byte datagram at 5 MS/s (airtime.py); --fractions scales these.  The real
+# ceiling is lower: see README.md section 4.
+CAP = {8: 238.5, 9: 351.1, 10: 463.0, 12: 672.0, 13: 868.1, 14: 961.5}
 
 
 def env() -> dict:
@@ -108,7 +109,11 @@ def uhd_marks(text: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
-    ap.add_argument("--mcs", default="0,1,2,3,4,5,6,7")
+    ap.add_argument(
+        "--mcs",
+        default=",".join(str(m) for m in CAP),
+        help="comma-separated wire-v5 indices for tx_app --mcs-index (8-17; 0-7 are refused)",
+    )
     ap.add_argument("--fractions", default="0.5,0.8,0.9,0.95,1.0,1.1")
     ap.add_argument(
         "--rates", default="", help="explicit rates (overrides --fractions), same for every MCS"

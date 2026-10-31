@@ -1,4 +1,4 @@
-"""Burst airtime and TX service rate of one datagram per MCS, from the example's own encoder.
+"""Burst airtime and TX service rate per wire-v5 MCS (indices 8-17), from the example's own encoder.
 
 Run from the repository root (no radio needed):
 
@@ -16,7 +16,7 @@ import json
 import sys
 import time
 
-from ofdm_link.phy.mcs_table import MCS_TABLE, describe_mcs_entry
+from ofdm_link.phy.mcs_table import describe_mcs_entry, v5_entries
 from ofdm_message_link import options
 from ofdm_message_link.link import MessageTransmitter
 from ofdm_message_link.transport import UhdSinkLimits
@@ -25,7 +25,7 @@ from ofdm_message_link.transport import UhdSinkLimits
 def main() -> None:
     size = int(sys.argv[1]) if len(sys.argv) > 1 else 968
     limits = UhdSinkLimits()
-    for entry in MCS_TABLE:
+    for entry in v5_entries():
         parser = argparse.ArgumentParser()
         options.add_common_arguments(parser)
         resolved = options.resolve(
