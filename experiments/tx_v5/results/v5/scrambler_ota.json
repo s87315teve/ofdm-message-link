@@ -1,0 +1,708 @@
+[
+ {
+  "file": "v5m8_tx-23p75_random_scr_on.npy",
+  "stem": "v5m8_tx-23p75_random_scr_on",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -23.75,
+  "guards": [
+   16,
+   64
+  ],
+  "scrambler": true,
+  "payload": "random",
+  "sets": [],
+  "sent": 1000,
+  "decoded": 999,
+  "loss": 0.0010000000000000009,
+  "loss_ci95": [
+   0.0001765418290572713,
+   0.0056427029601604705
+  ],
+  "preamble_missed": 1,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   0.93,
+   1.33,
+   1.34
+  ],
+  "candidates": 999,
+  "candidates_v5": 999,
+  "candidates_legacy": 0,
+  "header_ok": 999,
+  "header_fail": 0,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 999,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": 6.294694961090634,
+  "preamble_snr_db_median": 8.09514927155217,
+  "preamble_snr_db_iqr": 2.0195486504122764,
+  "preamble_snr_count": 999,
+  "burst_snr_db_median": 8.09514927155217,
+  "burst_snr_db_iqr": 2.0195486504122764,
+  "burst_snr_count": 999,
+  "noise_floor_dbfs": -51.602783597847036,
+  "decoded_burst_power_dbfs_median": -46.351232090111665,
+  "decoded_burst_wideband_snr_db": 3.712251522879788,
+  "decode_seconds": 10.313211425003828,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 1,
+   "attribution": "positions",
+   "spacing_samples": 49998.773680117156,
+   "loo_jitter_samples_p50": 655.0,
+   "loo_jitter_samples_p99": 7106.699999999998,
+   "loo_jitter_samples_max": 15383.5,
+   "window_samples": 10000,
+   "preamble_missed": 1,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     406,
+     "preamble_missed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "v5m8_tx-23p75_zeros_scr_off.npy",
+  "stem": "v5m8_tx-23p75_zeros_scr_off",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -23.75,
+  "guards": [
+   16,
+   64
+  ],
+  "scrambler": false,
+  "payload": "zeros",
+  "sets": [],
+  "sent": 1000,
+  "decoded": 2,
+  "loss": 0.998,
+  "loss_ci95": [
+   0.9927370411104123,
+   0.9994513678975429
+  ],
+  "preamble_missed": 659,
+  "sig_failed": 31,
+  "payload_failed": 308,
+  "stage_attribution": "clusters",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   0.9,
+   1.35,
+   1.35
+  ],
+  "candidates": 341,
+  "candidates_v5": 341,
+  "candidates_legacy": 0,
+  "header_ok": 310,
+  "header_fail": 31,
+  "payload_fail": 308,
+  "psdu_fcs_failures": 308,
+  "bursts_v5": 2,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": -1.7839910748007086,
+  "preamble_snr_db_median": 0.9885886841360183,
+  "preamble_snr_db_iqr": 2.348489680788044,
+  "preamble_snr_count": 340,
+  "burst_snr_db_median": null,
+  "burst_snr_db_iqr": null,
+  "burst_snr_count": 0,
+  "noise_floor_dbfs": -51.70844621181633,
+  "decoded_burst_power_dbfs_median": -49.95251815889958,
+  "decoded_burst_wideband_snr_db": -3.025270765203387,
+  "decode_seconds": 8.945017292018747,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 998,
+   "attribution": "clusters",
+   "payload_failed": 308,
+   "sig_failed": 31,
+   "preamble_missed": 659,
+   "clusters": 341
+  }
+ },
+ {
+  "file": "v5m8_tx-23p75_zeros_scr_on.npy",
+  "stem": "v5m8_tx-23p75_zeros_scr_on",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -23.75,
+  "guards": [
+   16,
+   64
+  ],
+  "scrambler": true,
+  "payload": "zeros",
+  "sets": [],
+  "sent": 1000,
+  "decoded": 998,
+  "loss": 0.0020000000000000018,
+  "loss_ci95": [
+   0.000548632102457155,
+   0.007262958889587807
+  ],
+  "preamble_missed": 2,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   0.97,
+   1.38,
+   1.36
+  ],
+  "candidates": 998,
+  "candidates_v5": 998,
+  "candidates_legacy": 0,
+  "header_ok": 998,
+  "header_fail": 0,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 998,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": 6.348260704024345,
+  "preamble_snr_db_median": 8.012890201373637,
+  "preamble_snr_db_iqr": 1.911325979527673,
+  "preamble_snr_count": 998,
+  "burst_snr_db_median": 8.012890201373637,
+  "burst_snr_db_iqr": 1.911325979527673,
+  "burst_snr_count": 998,
+  "noise_floor_dbfs": -51.55943573711575,
+  "decoded_burst_power_dbfs_median": -46.20440947001547,
+  "decoded_burst_wideband_snr_db": 3.85900556412754,
+  "decode_seconds": 10.85378284601029,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 2,
+   "attribution": "positions",
+   "spacing_samples": 49998.879595781116,
+   "loo_jitter_samples_p50": 621.75,
+   "loo_jitter_samples_p99": 5370.74999999999,
+   "loo_jitter_samples_max": 16342.0,
+   "window_samples": 10000,
+   "preamble_missed": 2,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     715,
+     "preamble_missed"
+    ],
+    [
+     970,
+     "preamble_missed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "v5m8_tx-26p25_random_scr_on.npy",
+  "stem": "v5m8_tx-26p25_random_scr_on",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -26.25,
+  "guards": [
+   16,
+   64
+  ],
+  "scrambler": true,
+  "payload": "random",
+  "sets": [],
+  "sent": 1000,
+  "decoded": 965,
+  "loss": 0.03500000000000003,
+  "loss_ci95": [
+   0.025272112485012703,
+   0.0482869032003305
+  ],
+  "preamble_missed": 8,
+  "sig_failed": 0,
+  "payload_failed": 27,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   1.15,
+   1.43,
+   1.37
+  ],
+  "candidates": 992,
+  "candidates_v5": 992,
+  "candidates_legacy": 0,
+  "header_ok": 992,
+  "header_fail": 0,
+  "payload_fail": 27,
+  "psdu_fcs_failures": 27,
+  "bursts_v5": 965,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": 4.284377748487762,
+  "preamble_snr_db_median": 5.2722113151099546,
+  "preamble_snr_db_iqr": 2.1339025707369137,
+  "preamble_snr_count": 992,
+  "burst_snr_db_median": 5.2722113151099546,
+  "burst_snr_db_iqr": 2.1339025707369137,
+  "burst_snr_count": 992,
+  "noise_floor_dbfs": -51.79280396484148,
+  "decoded_burst_power_dbfs_median": -48.034167897352404,
+  "decoded_burst_wideband_snr_db": 1.3864808243056983,
+  "decode_seconds": 8.938001642003655,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 35,
+   "attribution": "positions",
+   "spacing_samples": 49999.016482563195,
+   "loo_jitter_samples_p50": 646.5,
+   "loo_jitter_samples_p99": 9293.299999999996,
+   "loo_jitter_samples_max": 22151.5,
+   "window_samples": 10000,
+   "preamble_missed": 8,
+   "sig_failed": 0,
+   "payload_failed": 27,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     15,
+     "payload_failed"
+    ],
+    [
+     27,
+     "preamble_missed"
+    ],
+    [
+     103,
+     "payload_failed"
+    ],
+    [
+     114,
+     "preamble_missed"
+    ],
+    [
+     136,
+     "payload_failed"
+    ],
+    [
+     142,
+     "preamble_missed"
+    ],
+    [
+     177,
+     "payload_failed"
+    ],
+    [
+     232,
+     "payload_failed"
+    ],
+    [
+     233,
+     "preamble_missed"
+    ],
+    [
+     269,
+     "preamble_missed"
+    ],
+    [
+     345,
+     "payload_failed"
+    ],
+    [
+     354,
+     "payload_failed"
+    ],
+    [
+     359,
+     "payload_failed"
+    ],
+    [
+     375,
+     "preamble_missed"
+    ],
+    [
+     396,
+     "payload_failed"
+    ],
+    [
+     412,
+     "payload_failed"
+    ],
+    [
+     502,
+     "payload_failed"
+    ],
+    [
+     613,
+     "payload_failed"
+    ],
+    [
+     638,
+     "payload_failed"
+    ],
+    [
+     639,
+     "payload_failed"
+    ],
+    [
+     722,
+     "payload_failed"
+    ],
+    [
+     740,
+     "payload_failed"
+    ],
+    [
+     741,
+     "payload_failed"
+    ],
+    [
+     770,
+     "payload_failed"
+    ],
+    [
+     777,
+     "preamble_missed"
+    ],
+    [
+     791,
+     "payload_failed"
+    ],
+    [
+     792,
+     "payload_failed"
+    ],
+    [
+     857,
+     "payload_failed"
+    ],
+    [
+     867,
+     "payload_failed"
+    ],
+    [
+     868,
+     "payload_failed"
+    ],
+    [
+     883,
+     "payload_failed"
+    ],
+    [
+     904,
+     "preamble_missed"
+    ],
+    [
+     990,
+     "payload_failed"
+    ],
+    [
+     994,
+     "payload_failed"
+    ],
+    [
+     995,
+     "payload_failed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "v5m8_tx-26p25_zeros_scr_off.npy",
+  "stem": "v5m8_tx-26p25_zeros_scr_off",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -26.25,
+  "guards": [
+   16,
+   64
+  ],
+  "scrambler": false,
+  "payload": "zeros",
+  "sets": [],
+  "sent": 1000,
+  "decoded": 0,
+  "loss": 1.0,
+  "loss_ci95": [
+   0.9961731014136095,
+   1.0
+  ],
+  "preamble_missed": 998,
+  "sig_failed": 2,
+  "payload_failed": 0,
+  "stage_attribution": "clusters",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   1.22,
+   1.45,
+   1.38
+  ],
+  "candidates": 2,
+  "candidates_v5": 2,
+  "candidates_legacy": 0,
+  "header_ok": 0,
+  "header_fail": 2,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": null,
+  "preamble_snr_db_median": -1.8373602672310694,
+  "preamble_snr_db_iqr": 0.6145456588586957,
+  "preamble_snr_count": 2,
+  "burst_snr_db_median": null,
+  "burst_snr_db_iqr": null,
+  "burst_snr_count": 0,
+  "noise_floor_dbfs": -51.719617098350426,
+  "decoded_burst_power_dbfs_median": null,
+  "decoded_burst_wideband_snr_db": null,
+  "decode_seconds": 6.666697309003212,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 1000,
+   "attribution": "clusters",
+   "payload_failed": 0,
+   "sig_failed": 2,
+   "preamble_missed": 998,
+   "clusters": 2
+  }
+ },
+ {
+  "file": "v5m8_tx-26p25_zeros_scr_on.npy",
+  "stem": "v5m8_tx-26p25_zeros_scr_on",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -26.25,
+  "guards": [
+   16,
+   64
+  ],
+  "scrambler": true,
+  "payload": "zeros",
+  "sets": [],
+  "sent": 1000,
+  "decoded": 960,
+  "loss": 0.040000000000000036,
+  "loss_ci95": [
+   0.02951080927390945,
+   0.05400993742556984
+  ],
+  "preamble_missed": 11,
+  "sig_failed": 0,
+  "payload_failed": 29,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   1.35,
+   1.49,
+   1.39
+  ],
+  "candidates": 989,
+  "candidates_v5": 989,
+  "candidates_legacy": 0,
+  "header_ok": 989,
+  "header_fail": 0,
+  "payload_fail": 29,
+  "psdu_fcs_failures": 29,
+  "bursts_v5": 960,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": 4.527893400099712,
+  "preamble_snr_db_median": 5.3605221614293725,
+  "preamble_snr_db_iqr": 2.152669853194772,
+  "preamble_snr_count": 989,
+  "burst_snr_db_median": 5.3605221614293725,
+  "burst_snr_db_iqr": 2.152669853194772,
+  "burst_snr_count": 989,
+  "noise_floor_dbfs": -51.70286772521724,
+  "decoded_burst_power_dbfs_median": -47.90041395405041,
+  "decoded_burst_wideband_snr_db": 1.4618655187294538,
+  "decode_seconds": 9.320752619009,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 40,
+   "attribution": "positions",
+   "spacing_samples": 49999.0074760596,
+   "loo_jitter_samples_p50": 672.25,
+   "loo_jitter_samples_p99": 4485.596666666695,
+   "loo_jitter_samples_max": 15711.0,
+   "window_samples": 10000,
+   "preamble_missed": 11,
+   "sig_failed": 0,
+   "payload_failed": 29,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     10,
+     "preamble_missed"
+    ],
+    [
+     15,
+     "payload_failed"
+    ],
+    [
+     51,
+     "payload_failed"
+    ],
+    [
+     102,
+     "preamble_missed"
+    ],
+    [
+     105,
+     "payload_failed"
+    ],
+    [
+     121,
+     "payload_failed"
+    ],
+    [
+     142,
+     "payload_failed"
+    ],
+    [
+     143,
+     "payload_failed"
+    ],
+    [
+     154,
+     "preamble_missed"
+    ],
+    [
+     163,
+     "preamble_missed"
+    ],
+    [
+     173,
+     "payload_failed"
+    ],
+    [
+     232,
+     "payload_failed"
+    ],
+    [
+     233,
+     "payload_failed"
+    ],
+    [
+     245,
+     "payload_failed"
+    ],
+    [
+     248,
+     "preamble_missed"
+    ],
+    [
+     359,
+     "payload_failed"
+    ],
+    [
+     373,
+     "payload_failed"
+    ],
+    [
+     397,
+     "payload_failed"
+    ],
+    [
+     409,
+     "payload_failed"
+    ],
+    [
+     470,
+     "payload_failed"
+    ],
+    [
+     472,
+     "preamble_missed"
+    ],
+    [
+     482,
+     "preamble_missed"
+    ],
+    [
+     486,
+     "payload_failed"
+    ],
+    [
+     523,
+     "payload_failed"
+    ],
+    [
+     535,
+     "payload_failed"
+    ],
+    [
+     573,
+     "payload_failed"
+    ],
+    [
+     611,
+     "payload_failed"
+    ],
+    [
+     613,
+     "payload_failed"
+    ],
+    [
+     614,
+     "payload_failed"
+    ],
+    [
+     721,
+     "payload_failed"
+    ],
+    [
+     740,
+     "preamble_missed"
+    ],
+    [
+     741,
+     "payload_failed"
+    ],
+    [
+     756,
+     "preamble_missed"
+    ],
+    [
+     777,
+     "payload_failed"
+    ],
+    [
+     834,
+     "payload_failed"
+    ],
+    [
+     867,
+     "payload_failed"
+    ],
+    [
+     868,
+     "payload_failed"
+    ],
+    [
+     881,
+     "preamble_missed"
+    ],
+    [
+     904,
+     "preamble_missed"
+    ],
+    [
+     994,
+     "payload_failed"
+    ]
+   ]
+  }
+ }
+]

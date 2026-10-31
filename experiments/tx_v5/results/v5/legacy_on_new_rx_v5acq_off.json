@@ -1,0 +1,4751 @@
+[
+ {
+  "file": "qam16_tx+00p0.npy",
+  "stem": "qam16_tx+00p0",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": 0.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 401,
+  "candidates_v5": 0,
+  "candidates_legacy": 401,
+  "header_ok": 400,
+  "header_fail": 1,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 20.327602210300306,
+  "preamble_snr_db_median": 25.11654631858324,
+  "preamble_snr_db_iqr": 2.954977226456826,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 25.11654631858324,
+  "burst_snr_db_iqr": 2.954977226456826,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.77624970285696,
+  "decoded_burst_power_dbfs_median": -29.662434048027613,
+  "decoded_burst_wideband_snr_db": 22.087039954240574,
+  "decode_seconds": 2.802994848025264,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49998.4245364073,
+   "loo_jitter_samples_p50": 583.5,
+   "loo_jitter_samples_p99": 5626.749999999974,
+   "loo_jitter_samples_max": 13931.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qam16_tx-02p5.npy",
+  "stem": "qam16_tx-02p5",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -2.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 402,
+  "candidates_v5": 0,
+  "candidates_legacy": 402,
+  "header_ok": 400,
+  "header_fail": 2,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 18.665297590332905,
+  "preamble_snr_db_median": 22.78212430685057,
+  "preamble_snr_db_iqr": 2.601148355903483,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 22.78212430685057,
+  "burst_snr_db_iqr": 2.601148355903483,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.7639759289738,
+  "decoded_burst_power_dbfs_median": -31.99040169596847,
+  "decoded_burst_wideband_snr_db": 19.727577743980714,
+  "decode_seconds": 2.7366635360231157,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49998.14906277625,
+   "loo_jitter_samples_p50": 668.0,
+   "loo_jitter_samples_p99": 2262.3149999999832,
+   "loo_jitter_samples_max": 5661.0,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qam16_tx-05p0.npy",
+  "stem": "qam16_tx-05p0",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -5.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 401,
+  "candidates_v5": 0,
+  "candidates_legacy": 401,
+  "header_ok": 400,
+  "header_fail": 1,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 16.8906630993256,
+  "preamble_snr_db_median": 20.523438476698615,
+  "preamble_snr_db_iqr": 2.5035344814884652,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 20.523438476698615,
+  "burst_snr_db_iqr": 2.5035344814884652,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.77217250912331,
+  "decoded_burst_power_dbfs_median": -34.273710400533275,
+  "decoded_burst_wideband_snr_db": 17.420509636194154,
+  "decode_seconds": 2.688820821000263,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49997.30437443105,
+   "loo_jitter_samples_p50": 594.0,
+   "loo_jitter_samples_p99": 7850.49499999999,
+   "loo_jitter_samples_max": 16310.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qam16_tx-07p5.npy",
+  "stem": "qam16_tx-07p5",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -7.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 403,
+  "candidates_v5": 0,
+  "candidates_legacy": 403,
+  "header_ok": 400,
+  "header_fail": 3,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 15.269483261489874,
+  "preamble_snr_db_median": 18.517021660065712,
+  "preamble_snr_db_iqr": 2.6610777174762816,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 18.517021660065712,
+  "burst_snr_db_iqr": 2.6610777174762816,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.79697735102853,
+  "decoded_burst_power_dbfs_median": -36.466166444633444,
+  "decoded_burst_wideband_snr_db": 15.201645720414142,
+  "decode_seconds": 2.6593631969881244,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49999.621288138005,
+   "loo_jitter_samples_p50": 701.25,
+   "loo_jitter_samples_p99": 7243.8449999999775,
+   "loo_jitter_samples_max": 14678.0,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qam16_tx-10p0.npy",
+  "stem": "qam16_tx-10p0",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -10.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 402,
+  "candidates_v5": 0,
+  "candidates_legacy": 402,
+  "header_ok": 400,
+  "header_fail": 2,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 13.78139248326535,
+  "preamble_snr_db_median": 16.30766580187419,
+  "preamble_snr_db_iqr": 2.6422141028809456,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 16.30766580187419,
+  "burst_snr_db_iqr": 2.6422141028809456,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.7513509828236,
+  "decoded_burst_power_dbfs_median": -38.723331670070635,
+  "decoded_burst_wideband_snr_db": 12.806185963691432,
+  "decode_seconds": 2.6766168600006495,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49999.83236222693,
+   "loo_jitter_samples_p50": 597.25,
+   "loo_jitter_samples_p99": 7185.064999999988,
+   "loo_jitter_samples_max": 13404.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qam16_tx-12p5.npy",
+  "stem": "qam16_tx-12p5",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -12.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 400,
+  "candidates_v5": 0,
+  "candidates_legacy": 400,
+  "header_ok": 400,
+  "header_fail": 0,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 11.717184899023565,
+  "preamble_snr_db_median": 13.721477241141265,
+  "preamble_snr_db_iqr": 2.4202791285242355,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 13.721477241141265,
+  "burst_snr_db_iqr": 2.4202791285242355,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.758428143204576,
+  "decoded_burst_power_dbfs_median": -41.01472182562019,
+  "decoded_burst_wideband_snr_db": 10.36142088420922,
+  "decode_seconds": 2.7027148269989993,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49998.40643650231,
+   "loo_jitter_samples_p50": 557.5,
+   "loo_jitter_samples_p99": 2547.2149999999892,
+   "loo_jitter_samples_max": 4583.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qam16_tx-15p0.npy",
+  "stem": "qam16_tx-15p0",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -15.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 396,
+  "loss": 0.010000000000000009,
+  "loss_ci95": [
+   0.0038954207932788126,
+   0.02542696699440824
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 4,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 400,
+  "candidates_v5": 0,
+  "candidates_legacy": 400,
+  "header_ok": 400,
+  "header_fail": 0,
+  "payload_fail": 4,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 396,
+  "evm_snr_db_median": 9.900931705661591,
+  "preamble_snr_db_median": 11.731809977698745,
+  "preamble_snr_db_iqr": 2.506707076898641,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 11.731809977698745,
+  "burst_snr_db_iqr": 2.506707076898641,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.75718896271529,
+  "decoded_burst_power_dbfs_median": -43.146631133245535,
+  "decoded_burst_wideband_snr_db": 7.9671252793171,
+  "decode_seconds": 2.886819413979538,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 4,
+   "attribution": "positions",
+   "spacing_samples": 49999.74562319926,
+   "loo_jitter_samples_p50": 569.75,
+   "loo_jitter_samples_p99": 5590.404999999998,
+   "loo_jitter_samples_max": 11108.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 4,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     65,
+     "payload_failed"
+    ],
+    [
+     190,
+     "payload_failed"
+    ],
+    [
+     251,
+     "payload_failed"
+    ],
+    [
+     296,
+     "payload_failed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "qam16_tx-17p5.npy",
+  "stem": "qam16_tx-17p5",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -17.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 325,
+  "loss": 0.1875,
+  "loss_ci95": [
+   0.15228856358904605,
+   0.2286568367857544
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 75,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 400,
+  "candidates_v5": 0,
+  "candidates_legacy": 400,
+  "header_ok": 400,
+  "header_fail": 0,
+  "payload_fail": 75,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 325,
+  "evm_snr_db_median": 7.6325073860700225,
+  "preamble_snr_db_median": 8.995513083334947,
+  "preamble_snr_db_iqr": 2.842476635041277,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 8.995513083334947,
+  "burst_snr_db_iqr": 2.842476635041277,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.74078497947998,
+  "decoded_burst_power_dbfs_median": -45.04286367145323,
+  "decoded_burst_wideband_snr_db": 5.652707203564442,
+  "decode_seconds": 3.2753696559811942,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 75,
+   "attribution": "positions",
+   "spacing_samples": 49998.61042631846,
+   "loo_jitter_samples_p50": 721.5,
+   "loo_jitter_samples_p99": 5248.8399999999765,
+   "loo_jitter_samples_max": 12580.0,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 75,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     0,
+     "payload_failed"
+    ],
+    [
+     6,
+     "payload_failed"
+    ],
+    [
+     7,
+     "payload_failed"
+    ],
+    [
+     9,
+     "payload_failed"
+    ],
+    [
+     13,
+     "payload_failed"
+    ],
+    [
+     14,
+     "payload_failed"
+    ],
+    [
+     35,
+     "payload_failed"
+    ],
+    [
+     39,
+     "payload_failed"
+    ],
+    [
+     41,
+     "payload_failed"
+    ],
+    [
+     45,
+     "payload_failed"
+    ],
+    [
+     47,
+     "payload_failed"
+    ],
+    [
+     64,
+     "payload_failed"
+    ],
+    [
+     69,
+     "payload_failed"
+    ],
+    [
+     75,
+     "payload_failed"
+    ],
+    [
+     78,
+     "payload_failed"
+    ],
+    [
+     88,
+     "payload_failed"
+    ],
+    [
+     116,
+     "payload_failed"
+    ],
+    [
+     119,
+     "payload_failed"
+    ],
+    [
+     120,
+     "payload_failed"
+    ],
+    [
+     136,
+     "payload_failed"
+    ],
+    [
+     137,
+     "payload_failed"
+    ],
+    [
+     140,
+     "payload_failed"
+    ],
+    [
+     141,
+     "payload_failed"
+    ],
+    [
+     147,
+     "payload_failed"
+    ],
+    [
+     155,
+     "payload_failed"
+    ],
+    [
+     164,
+     "payload_failed"
+    ],
+    [
+     169,
+     "payload_failed"
+    ],
+    [
+     172,
+     "payload_failed"
+    ],
+    [
+     175,
+     "payload_failed"
+    ],
+    [
+     180,
+     "payload_failed"
+    ],
+    [
+     181,
+     "payload_failed"
+    ],
+    [
+     183,
+     "payload_failed"
+    ],
+    [
+     184,
+     "payload_failed"
+    ],
+    [
+     192,
+     "payload_failed"
+    ],
+    [
+     194,
+     "payload_failed"
+    ],
+    [
+     195,
+     "payload_failed"
+    ],
+    [
+     200,
+     "payload_failed"
+    ],
+    [
+     211,
+     "payload_failed"
+    ],
+    [
+     215,
+     "payload_failed"
+    ],
+    [
+     218,
+     "payload_failed"
+    ],
+    [
+     224,
+     "payload_failed"
+    ],
+    [
+     229,
+     "payload_failed"
+    ],
+    [
+     234,
+     "payload_failed"
+    ],
+    [
+     245,
+     "payload_failed"
+    ],
+    [
+     249,
+     "payload_failed"
+    ],
+    [
+     265,
+     "payload_failed"
+    ],
+    [
+     270,
+     "payload_failed"
+    ],
+    [
+     282,
+     "payload_failed"
+    ],
+    [
+     283,
+     "payload_failed"
+    ],
+    [
+     290,
+     "payload_failed"
+    ],
+    [
+     296,
+     "payload_failed"
+    ],
+    [
+     301,
+     "payload_failed"
+    ],
+    [
+     302,
+     "payload_failed"
+    ],
+    [
+     303,
+     "payload_failed"
+    ],
+    [
+     307,
+     "payload_failed"
+    ],
+    [
+     309,
+     "payload_failed"
+    ],
+    [
+     310,
+     "payload_failed"
+    ],
+    [
+     316,
+     "payload_failed"
+    ],
+    [
+     336,
+     "payload_failed"
+    ],
+    [
+     337,
+     "payload_failed"
+    ],
+    [
+     338,
+     "payload_failed"
+    ],
+    [
+     345,
+     "payload_failed"
+    ],
+    [
+     357,
+     "payload_failed"
+    ],
+    [
+     358,
+     "payload_failed"
+    ],
+    [
+     371,
+     "payload_failed"
+    ],
+    [
+     372,
+     "payload_failed"
+    ],
+    [
+     373,
+     "payload_failed"
+    ],
+    [
+     376,
+     "payload_failed"
+    ],
+    [
+     379,
+     "payload_failed"
+    ],
+    [
+     380,
+     "payload_failed"
+    ],
+    [
+     383,
+     "payload_failed"
+    ],
+    [
+     389,
+     "payload_failed"
+    ],
+    [
+     392,
+     "payload_failed"
+    ],
+    [
+     393,
+     "payload_failed"
+    ],
+    [
+     395,
+     "payload_failed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "qam16_tx-20p0.npy",
+  "stem": "qam16_tx-20p0",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -20.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 90,
+  "loss": 0.775,
+  "loss_ci95": [
+   0.7315721378719925,
+   0.8131959097981832
+  ],
+  "preamble_missed": 19,
+  "sig_failed": 1,
+  "payload_failed": 290,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 383,
+  "candidates_v5": 0,
+  "candidates_legacy": 383,
+  "header_ok": 381,
+  "header_fail": 2,
+  "payload_fail": 291,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 90,
+  "evm_snr_db_median": 6.638711081178222,
+  "preamble_snr_db_median": 6.74479956701718,
+  "preamble_snr_db_iqr": 2.447041331045372,
+  "preamble_snr_count": 382,
+  "burst_snr_db_median": 6.756919333518022,
+  "burst_snr_db_iqr": 2.454998267397836,
+  "burst_snr_count": 381,
+  "noise_floor_dbfs": -51.77617359743128,
+  "decoded_burst_power_dbfs_median": -46.3067668338805,
+  "decoded_burst_wideband_snr_db": 4.019563942385877,
+  "decode_seconds": 3.8459882739989553,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 310,
+   "attribution": "positions",
+   "spacing_samples": 50000.74985604904,
+   "loo_jitter_samples_p50": 424.33333333348855,
+   "loo_jitter_samples_p99": 4067.589999999999,
+   "loo_jitter_samples_max": 4279.0,
+   "window_samples": 10000,
+   "preamble_missed": 19,
+   "sig_failed": 1,
+   "payload_failed": 290,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     1,
+     "payload_failed"
+    ],
+    [
+     2,
+     "payload_failed"
+    ],
+    [
+     3,
+     "payload_failed"
+    ],
+    [
+     5,
+     "payload_failed"
+    ],
+    [
+     6,
+     "payload_failed"
+    ],
+    [
+     7,
+     "payload_failed"
+    ],
+    [
+     8,
+     "payload_failed"
+    ],
+    [
+     9,
+     "payload_failed"
+    ],
+    [
+     10,
+     "payload_failed"
+    ],
+    [
+     11,
+     "payload_failed"
+    ],
+    [
+     12,
+     "payload_failed"
+    ],
+    [
+     13,
+     "payload_failed"
+    ],
+    [
+     15,
+     "payload_failed"
+    ],
+    [
+     18,
+     "payload_failed"
+    ],
+    [
+     19,
+     "payload_failed"
+    ],
+    [
+     20,
+     "payload_failed"
+    ],
+    [
+     21,
+     "preamble_missed"
+    ],
+    [
+     22,
+     "preamble_missed"
+    ],
+    [
+     23,
+     "payload_failed"
+    ],
+    [
+     26,
+     "payload_failed"
+    ],
+    [
+     27,
+     "payload_failed"
+    ],
+    [
+     29,
+     "payload_failed"
+    ],
+    [
+     30,
+     "payload_failed"
+    ],
+    [
+     31,
+     "payload_failed"
+    ],
+    [
+     32,
+     "payload_failed"
+    ],
+    [
+     33,
+     "payload_failed"
+    ],
+    [
+     34,
+     "payload_failed"
+    ],
+    [
+     35,
+     "payload_failed"
+    ],
+    [
+     39,
+     "payload_failed"
+    ],
+    [
+     40,
+     "payload_failed"
+    ],
+    [
+     41,
+     "payload_failed"
+    ],
+    [
+     42,
+     "payload_failed"
+    ],
+    [
+     43,
+     "payload_failed"
+    ],
+    [
+     44,
+     "payload_failed"
+    ],
+    [
+     45,
+     "payload_failed"
+    ],
+    [
+     46,
+     "payload_failed"
+    ],
+    [
+     47,
+     "payload_failed"
+    ],
+    [
+     48,
+     "payload_failed"
+    ],
+    [
+     49,
+     "payload_failed"
+    ],
+    [
+     50,
+     "payload_failed"
+    ],
+    [
+     51,
+     "payload_failed"
+    ],
+    [
+     52,
+     "preamble_missed"
+    ],
+    [
+     53,
+     "payload_failed"
+    ],
+    [
+     55,
+     "payload_failed"
+    ],
+    [
+     56,
+     "payload_failed"
+    ],
+    [
+     57,
+     "payload_failed"
+    ],
+    [
+     58,
+     "payload_failed"
+    ],
+    [
+     60,
+     "payload_failed"
+    ],
+    [
+     61,
+     "payload_failed"
+    ],
+    [
+     62,
+     "payload_failed"
+    ],
+    [
+     65,
+     "payload_failed"
+    ],
+    [
+     66,
+     "payload_failed"
+    ],
+    [
+     67,
+     "payload_failed"
+    ],
+    [
+     68,
+     "payload_failed"
+    ],
+    [
+     69,
+     "preamble_missed"
+    ],
+    [
+     70,
+     "payload_failed"
+    ],
+    [
+     71,
+     "payload_failed"
+    ],
+    [
+     74,
+     "payload_failed"
+    ],
+    [
+     75,
+     "preamble_missed"
+    ],
+    [
+     76,
+     "payload_failed"
+    ],
+    [
+     77,
+     "payload_failed"
+    ],
+    [
+     78,
+     "payload_failed"
+    ],
+    [
+     79,
+     "preamble_missed"
+    ],
+    [
+     81,
+     "payload_failed"
+    ],
+    [
+     83,
+     "payload_failed"
+    ],
+    [
+     85,
+     "payload_failed"
+    ],
+    [
+     87,
+     "payload_failed"
+    ],
+    [
+     88,
+     "payload_failed"
+    ],
+    [
+     89,
+     "payload_failed"
+    ],
+    [
+     90,
+     "payload_failed"
+    ],
+    [
+     91,
+     "payload_failed"
+    ],
+    [
+     94,
+     "payload_failed"
+    ],
+    [
+     96,
+     "payload_failed"
+    ],
+    [
+     97,
+     "payload_failed"
+    ],
+    [
+     98,
+     "payload_failed"
+    ],
+    [
+     99,
+     "payload_failed"
+    ],
+    [
+     101,
+     "payload_failed"
+    ],
+    [
+     102,
+     "payload_failed"
+    ],
+    [
+     103,
+     "payload_failed"
+    ],
+    [
+     104,
+     "payload_failed"
+    ],
+    [
+     105,
+     "payload_failed"
+    ],
+    [
+     106,
+     "payload_failed"
+    ],
+    [
+     107,
+     "payload_failed"
+    ],
+    [
+     108,
+     "payload_failed"
+    ],
+    [
+     111,
+     "payload_failed"
+    ],
+    [
+     112,
+     "payload_failed"
+    ],
+    [
+     114,
+     "payload_failed"
+    ],
+    [
+     115,
+     "payload_failed"
+    ],
+    [
+     116,
+     "payload_failed"
+    ],
+    [
+     117,
+     "payload_failed"
+    ],
+    [
+     118,
+     "payload_failed"
+    ],
+    [
+     119,
+     "payload_failed"
+    ],
+    [
+     120,
+     "payload_failed"
+    ],
+    [
+     122,
+     "preamble_missed"
+    ],
+    [
+     123,
+     "payload_failed"
+    ],
+    [
+     124,
+     "preamble_missed"
+    ],
+    [
+     125,
+     "payload_failed"
+    ],
+    [
+     127,
+     "payload_failed"
+    ],
+    [
+     128,
+     "payload_failed"
+    ],
+    [
+     129,
+     "payload_failed"
+    ],
+    [
+     130,
+     "payload_failed"
+    ],
+    [
+     131,
+     "payload_failed"
+    ],
+    [
+     132,
+     "payload_failed"
+    ],
+    [
+     134,
+     "payload_failed"
+    ],
+    [
+     135,
+     "payload_failed"
+    ],
+    [
+     136,
+     "payload_failed"
+    ],
+    [
+     137,
+     "payload_failed"
+    ],
+    [
+     138,
+     "payload_failed"
+    ],
+    [
+     139,
+     "payload_failed"
+    ],
+    [
+     140,
+     "payload_failed"
+    ],
+    [
+     141,
+     "payload_failed"
+    ],
+    [
+     142,
+     "payload_failed"
+    ],
+    [
+     145,
+     "payload_failed"
+    ],
+    [
+     146,
+     "payload_failed"
+    ],
+    [
+     147,
+     "preamble_missed"
+    ],
+    [
+     148,
+     "payload_failed"
+    ],
+    [
+     149,
+     "payload_failed"
+    ],
+    [
+     150,
+     "payload_failed"
+    ],
+    [
+     151,
+     "payload_failed"
+    ],
+    [
+     152,
+     "payload_failed"
+    ],
+    [
+     153,
+     "payload_failed"
+    ],
+    [
+     155,
+     "payload_failed"
+    ],
+    [
+     156,
+     "payload_failed"
+    ],
+    [
+     157,
+     "payload_failed"
+    ],
+    [
+     158,
+     "payload_failed"
+    ],
+    [
+     160,
+     "payload_failed"
+    ],
+    [
+     162,
+     "payload_failed"
+    ],
+    [
+     163,
+     "payload_failed"
+    ],
+    [
+     164,
+     "payload_failed"
+    ],
+    [
+     165,
+     "payload_failed"
+    ],
+    [
+     166,
+     "payload_failed"
+    ],
+    [
+     167,
+     "payload_failed"
+    ],
+    [
+     169,
+     "payload_failed"
+    ],
+    [
+     171,
+     "payload_failed"
+    ],
+    [
+     172,
+     "payload_failed"
+    ],
+    [
+     173,
+     "payload_failed"
+    ],
+    [
+     174,
+     "payload_failed"
+    ],
+    [
+     175,
+     "payload_failed"
+    ],
+    [
+     176,
+     "preamble_missed"
+    ],
+    [
+     177,
+     "payload_failed"
+    ],
+    [
+     178,
+     "payload_failed"
+    ],
+    [
+     180,
+     "payload_failed"
+    ],
+    [
+     181,
+     "payload_failed"
+    ],
+    [
+     182,
+     "payload_failed"
+    ],
+    [
+     183,
+     "payload_failed"
+    ],
+    [
+     184,
+     "payload_failed"
+    ],
+    [
+     185,
+     "payload_failed"
+    ],
+    [
+     188,
+     "payload_failed"
+    ],
+    [
+     190,
+     "payload_failed"
+    ],
+    [
+     191,
+     "payload_failed"
+    ],
+    [
+     192,
+     "preamble_missed"
+    ],
+    [
+     193,
+     "payload_failed"
+    ],
+    [
+     194,
+     "payload_failed"
+    ],
+    [
+     195,
+     "preamble_missed"
+    ],
+    [
+     196,
+     "payload_failed"
+    ],
+    [
+     197,
+     "payload_failed"
+    ],
+    [
+     198,
+     "payload_failed"
+    ],
+    [
+     199,
+     "payload_failed"
+    ],
+    [
+     200,
+     "payload_failed"
+    ],
+    [
+     201,
+     "payload_failed"
+    ],
+    [
+     202,
+     "payload_failed"
+    ],
+    [
+     204,
+     "payload_failed"
+    ],
+    [
+     205,
+     "payload_failed"
+    ],
+    [
+     206,
+     "payload_failed"
+    ],
+    [
+     208,
+     "payload_failed"
+    ],
+    [
+     209,
+     "payload_failed"
+    ],
+    [
+     210,
+     "payload_failed"
+    ],
+    [
+     211,
+     "payload_failed"
+    ],
+    [
+     212,
+     "payload_failed"
+    ],
+    [
+     215,
+     "payload_failed"
+    ],
+    [
+     216,
+     "payload_failed"
+    ],
+    [
+     217,
+     "payload_failed"
+    ],
+    [
+     218,
+     "payload_failed"
+    ],
+    [
+     220,
+     "payload_failed"
+    ],
+    [
+     221,
+     "payload_failed"
+    ],
+    [
+     222,
+     "payload_failed"
+    ],
+    [
+     223,
+     "payload_failed"
+    ],
+    [
+     224,
+     "payload_failed"
+    ],
+    [
+     226,
+     "payload_failed"
+    ],
+    [
+     227,
+     "payload_failed"
+    ],
+    [
+     228,
+     "payload_failed"
+    ],
+    [
+     229,
+     "payload_failed"
+    ],
+    [
+     230,
+     "payload_failed"
+    ],
+    [
+     232,
+     "payload_failed"
+    ],
+    [
+     234,
+     "payload_failed"
+    ],
+    [
+     235,
+     "payload_failed"
+    ],
+    [
+     236,
+     "payload_failed"
+    ],
+    [
+     239,
+     "payload_failed"
+    ],
+    [
+     241,
+     "preamble_missed"
+    ],
+    [
+     243,
+     "payload_failed"
+    ],
+    [
+     244,
+     "payload_failed"
+    ],
+    [
+     245,
+     "payload_failed"
+    ],
+    [
+     247,
+     "payload_failed"
+    ],
+    [
+     248,
+     "payload_failed"
+    ],
+    [
+     249,
+     "payload_failed"
+    ],
+    [
+     250,
+     "payload_failed"
+    ],
+    [
+     251,
+     "payload_failed"
+    ],
+    [
+     252,
+     "payload_failed"
+    ],
+    [
+     253,
+     "payload_failed"
+    ],
+    [
+     255,
+     "payload_failed"
+    ],
+    [
+     256,
+     "payload_failed"
+    ],
+    [
+     257,
+     "payload_failed"
+    ],
+    [
+     258,
+     "payload_failed"
+    ],
+    [
+     259,
+     "payload_failed"
+    ],
+    [
+     260,
+     "payload_failed"
+    ],
+    [
+     261,
+     "payload_failed"
+    ],
+    [
+     262,
+     "payload_failed"
+    ],
+    [
+     264,
+     "payload_failed"
+    ],
+    [
+     265,
+     "payload_failed"
+    ],
+    [
+     267,
+     "payload_failed"
+    ],
+    [
+     271,
+     "payload_failed"
+    ],
+    [
+     272,
+     "payload_failed"
+    ],
+    [
+     275,
+     "sig_failed"
+    ],
+    [
+     276,
+     "payload_failed"
+    ],
+    [
+     278,
+     "payload_failed"
+    ],
+    [
+     279,
+     "payload_failed"
+    ],
+    [
+     280,
+     "payload_failed"
+    ],
+    [
+     281,
+     "payload_failed"
+    ],
+    [
+     282,
+     "payload_failed"
+    ],
+    [
+     283,
+     "payload_failed"
+    ],
+    [
+     284,
+     "payload_failed"
+    ],
+    [
+     285,
+     "payload_failed"
+    ],
+    [
+     286,
+     "payload_failed"
+    ],
+    [
+     287,
+     "payload_failed"
+    ],
+    [
+     289,
+     "payload_failed"
+    ],
+    [
+     290,
+     "payload_failed"
+    ],
+    [
+     291,
+     "payload_failed"
+    ],
+    [
+     292,
+     "payload_failed"
+    ],
+    [
+     293,
+     "payload_failed"
+    ],
+    [
+     294,
+     "payload_failed"
+    ],
+    [
+     295,
+     "payload_failed"
+    ],
+    [
+     296,
+     "payload_failed"
+    ],
+    [
+     297,
+     "payload_failed"
+    ],
+    [
+     298,
+     "payload_failed"
+    ],
+    [
+     299,
+     "payload_failed"
+    ],
+    [
+     300,
+     "payload_failed"
+    ],
+    [
+     301,
+     "preamble_missed"
+    ],
+    [
+     302,
+     "payload_failed"
+    ],
+    [
+     303,
+     "payload_failed"
+    ],
+    [
+     304,
+     "payload_failed"
+    ],
+    [
+     305,
+     "payload_failed"
+    ],
+    [
+     308,
+     "payload_failed"
+    ],
+    [
+     309,
+     "preamble_missed"
+    ],
+    [
+     310,
+     "payload_failed"
+    ],
+    [
+     311,
+     "payload_failed"
+    ],
+    [
+     313,
+     "payload_failed"
+    ],
+    [
+     314,
+     "payload_failed"
+    ],
+    [
+     315,
+     "payload_failed"
+    ],
+    [
+     316,
+     "payload_failed"
+    ],
+    [
+     317,
+     "payload_failed"
+    ],
+    [
+     318,
+     "payload_failed"
+    ],
+    [
+     320,
+     "payload_failed"
+    ],
+    [
+     322,
+     "payload_failed"
+    ],
+    [
+     323,
+     "payload_failed"
+    ],
+    [
+     324,
+     "payload_failed"
+    ],
+    [
+     325,
+     "payload_failed"
+    ],
+    [
+     326,
+     "payload_failed"
+    ],
+    [
+     327,
+     "payload_failed"
+    ],
+    [
+     329,
+     "payload_failed"
+    ],
+    [
+     330,
+     "payload_failed"
+    ],
+    [
+     331,
+     "payload_failed"
+    ],
+    [
+     332,
+     "payload_failed"
+    ],
+    [
+     333,
+     "payload_failed"
+    ],
+    [
+     336,
+     "payload_failed"
+    ],
+    [
+     337,
+     "payload_failed"
+    ],
+    [
+     338,
+     "payload_failed"
+    ],
+    [
+     340,
+     "preamble_missed"
+    ],
+    [
+     341,
+     "payload_failed"
+    ],
+    [
+     342,
+     "payload_failed"
+    ],
+    [
+     343,
+     "payload_failed"
+    ],
+    [
+     345,
+     "payload_failed"
+    ],
+    [
+     346,
+     "payload_failed"
+    ],
+    [
+     349,
+     "payload_failed"
+    ],
+    [
+     350,
+     "payload_failed"
+    ],
+    [
+     351,
+     "payload_failed"
+    ],
+    [
+     352,
+     "payload_failed"
+    ],
+    [
+     353,
+     "payload_failed"
+    ],
+    [
+     354,
+     "payload_failed"
+    ],
+    [
+     357,
+     "preamble_missed"
+    ],
+    [
+     359,
+     "payload_failed"
+    ],
+    [
+     361,
+     "payload_failed"
+    ],
+    [
+     362,
+     "payload_failed"
+    ],
+    [
+     363,
+     "payload_failed"
+    ],
+    [
+     367,
+     "preamble_missed"
+    ],
+    [
+     368,
+     "payload_failed"
+    ],
+    [
+     369,
+     "preamble_missed"
+    ],
+    [
+     370,
+     "payload_failed"
+    ],
+    [
+     371,
+     "payload_failed"
+    ],
+    [
+     372,
+     "payload_failed"
+    ],
+    [
+     374,
+     "payload_failed"
+    ],
+    [
+     375,
+     "payload_failed"
+    ],
+    [
+     376,
+     "payload_failed"
+    ],
+    [
+     377,
+     "payload_failed"
+    ],
+    [
+     378,
+     "payload_failed"
+    ],
+    [
+     381,
+     "payload_failed"
+    ],
+    [
+     382,
+     "payload_failed"
+    ],
+    [
+     384,
+     "payload_failed"
+    ],
+    [
+     385,
+     "payload_failed"
+    ],
+    [
+     386,
+     "payload_failed"
+    ],
+    [
+     387,
+     "payload_failed"
+    ],
+    [
+     388,
+     "payload_failed"
+    ],
+    [
+     389,
+     "payload_failed"
+    ],
+    [
+     390,
+     "payload_failed"
+    ],
+    [
+     391,
+     "payload_failed"
+    ],
+    [
+     393,
+     "payload_failed"
+    ],
+    [
+     394,
+     "payload_failed"
+    ],
+    [
+     395,
+     "payload_failed"
+    ],
+    [
+     397,
+     "payload_failed"
+    ],
+    [
+     398,
+     "payload_failed"
+    ],
+    [
+     399,
+     "payload_failed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "qam16_tx-22p5.npy",
+  "stem": "qam16_tx-22p5",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -22.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 4,
+  "loss": 0.99,
+  "loss_ci95": [
+   0.9745730330055918,
+   0.9961045792067212
+  ],
+  "preamble_missed": 149,
+  "sig_failed": 0,
+  "payload_failed": 247,
+  "stage_attribution": "clusters",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 251,
+  "candidates_v5": 0,
+  "candidates_legacy": 251,
+  "header_ok": 251,
+  "header_fail": 0,
+  "payload_fail": 247,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 4,
+  "evm_snr_db_median": 4.071445009773311,
+  "preamble_snr_db_median": 4.995543495075413,
+  "preamble_snr_db_iqr": 2.457312117763517,
+  "preamble_snr_count": 251,
+  "burst_snr_db_median": null,
+  "burst_snr_db_iqr": null,
+  "burst_snr_count": 0,
+  "noise_floor_dbfs": -51.75716261990678,
+  "decoded_burst_power_dbfs_median": -47.16835974402851,
+  "decoded_burst_wideband_snr_db": 2.7337295587556376,
+  "decode_seconds": 3.2247240409778897,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 396,
+   "attribution": "clusters",
+   "payload_failed": 247,
+   "sig_failed": 0,
+   "preamble_missed": 149,
+   "clusters": 251
+  }
+ },
+ {
+  "file": "qam16_tx-25p0.npy",
+  "stem": "qam16_tx-25p0",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -25.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 0,
+  "loss": 1.0,
+  "loss_ci95": [
+   0.9904873594003194,
+   1.0
+  ],
+  "preamble_missed": 319,
+  "sig_failed": 4,
+  "payload_failed": 77,
+  "stage_attribution": "clusters",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 81,
+  "candidates_v5": 0,
+  "candidates_legacy": 81,
+  "header_ok": 77,
+  "header_fail": 4,
+  "payload_fail": 77,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": null,
+  "preamble_snr_db_median": 3.262732292295023,
+  "preamble_snr_db_iqr": 2.438015604624672,
+  "preamble_snr_count": 81,
+  "burst_snr_db_median": null,
+  "burst_snr_db_iqr": null,
+  "burst_snr_count": 0,
+  "noise_floor_dbfs": -51.75989868557974,
+  "decoded_burst_power_dbfs_median": null,
+  "decoded_burst_wideband_snr_db": null,
+  "decode_seconds": 2.104362507001497,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 400,
+   "attribution": "clusters",
+   "payload_failed": 77,
+   "sig_failed": 4,
+   "preamble_missed": 319,
+   "clusters": 81
+  }
+ },
+ {
+  "file": "qam16_tx-27p5.npy",
+  "stem": "qam16_tx-27p5",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -27.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 0,
+  "loss": 1.0,
+  "loss_ci95": [
+   0.9904873594003194,
+   1.0
+  ],
+  "preamble_missed": 381,
+  "sig_failed": 6,
+  "payload_failed": 13,
+  "stage_attribution": "clusters",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 19,
+  "candidates_v5": 0,
+  "candidates_legacy": 19,
+  "header_ok": 13,
+  "header_fail": 6,
+  "payload_fail": 13,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": null,
+  "preamble_snr_db_median": 1.7567314513053802,
+  "preamble_snr_db_iqr": 3.1599980042485463,
+  "preamble_snr_count": 19,
+  "burst_snr_db_median": null,
+  "burst_snr_db_iqr": null,
+  "burst_snr_count": 0,
+  "noise_floor_dbfs": -51.78612051548789,
+  "decoded_burst_power_dbfs_median": null,
+  "decoded_burst_wideband_snr_db": null,
+  "decode_seconds": 1.6655510170094203,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 400,
+   "attribution": "clusters",
+   "payload_failed": 13,
+   "sig_failed": 6,
+   "preamble_missed": 381,
+   "clusters": 19
+  }
+ },
+ {
+  "file": "qam16_tx-30p0.npy",
+  "stem": "qam16_tx-30p0",
+  "family": "legacy",
+  "mcs": "qam16",
+  "mcs_index": null,
+  "tx_gain_db": -30.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 0,
+  "loss": 1.0,
+  "loss_ci95": [
+   0.9904873594003194,
+   1.0
+  ],
+  "preamble_missed": 398,
+  "sig_failed": 2,
+  "payload_failed": 0,
+  "stage_attribution": "clusters",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 2,
+  "candidates_v5": 0,
+  "candidates_legacy": 2,
+  "header_ok": 0,
+  "header_fail": 2,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": null,
+  "preamble_snr_db_median": 1.3616943648473554,
+  "preamble_snr_db_iqr": 0.030396827788100156,
+  "preamble_snr_count": 2,
+  "burst_snr_db_median": null,
+  "burst_snr_db_iqr": null,
+  "burst_snr_count": 0,
+  "noise_floor_dbfs": -51.78604036340494,
+  "decoded_burst_power_dbfs_median": null,
+  "decoded_burst_wideband_snr_db": null,
+  "decode_seconds": 1.6610361850180198,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 400,
+   "attribution": "clusters",
+   "payload_failed": 0,
+   "sig_failed": 2,
+   "preamble_missed": 398,
+   "clusters": 2
+  }
+ },
+ {
+  "file": "qpsk_tx+00p0.npy",
+  "stem": "qpsk_tx+00p0",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": 0.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 402,
+  "candidates_v5": 0,
+  "candidates_legacy": 402,
+  "header_ok": 400,
+  "header_fail": 2,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 21.718939711114146,
+  "preamble_snr_db_median": 26.180753015215014,
+  "preamble_snr_db_iqr": 2.879453664524984,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 26.180753015215014,
+  "burst_snr_db_iqr": 2.879453664524984,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.76866474755093,
+  "decoded_burst_power_dbfs_median": -28.285326422672462,
+  "decoded_burst_wideband_snr_db": 23.463820743789242,
+  "decode_seconds": 2.310693005012581,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49998.850001260056,
+   "loo_jitter_samples_p50": 622.5,
+   "loo_jitter_samples_p99": 6508.7799999999825,
+   "loo_jitter_samples_max": 12120.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qpsk_tx-02p5.npy",
+  "stem": "qpsk_tx-02p5",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -2.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 403,
+  "candidates_v5": 0,
+  "candidates_legacy": 403,
+  "header_ok": 400,
+  "header_fail": 3,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 19.927998585769743,
+  "preamble_snr_db_median": 24.114715661930482,
+  "preamble_snr_db_iqr": 2.7937953238400546,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 24.114715661930482,
+  "burst_snr_db_iqr": 2.7937953238400546,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.76777215313561,
+  "decoded_burst_power_dbfs_median": -30.625092917315072,
+  "decoded_burst_wideband_snr_db": 21.109167966836235,
+  "decode_seconds": 2.3069224010105245,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49998.64190909807,
+   "loo_jitter_samples_p50": 658.75,
+   "loo_jitter_samples_p99": 3004.869999999998,
+   "loo_jitter_samples_max": 14756.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qpsk_tx-05p0.npy",
+  "stem": "qpsk_tx-05p0",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -5.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 401,
+  "candidates_v5": 0,
+  "candidates_legacy": 401,
+  "header_ok": 400,
+  "header_fail": 1,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 17.967686262770385,
+  "preamble_snr_db_median": 22.008140342317784,
+  "preamble_snr_db_iqr": 2.8880889183192267,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 22.008140342317784,
+  "burst_snr_db_iqr": 2.8880889183192267,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.751683829803035,
+  "decoded_burst_power_dbfs_median": -32.92516242177519,
+  "decoded_burst_wideband_snr_db": 18.76924273389308,
+  "decode_seconds": 2.299800384003902,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49999.776745552714,
+   "loo_jitter_samples_p50": 619.5,
+   "loo_jitter_samples_p99": 4634.634999999948,
+   "loo_jitter_samples_max": 13738.0,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qpsk_tx-07p5.npy",
+  "stem": "qpsk_tx-07p5",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -7.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 402,
+  "candidates_v5": 0,
+  "candidates_legacy": 402,
+  "header_ok": 400,
+  "header_fail": 2,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 15.731397249158864,
+  "preamble_snr_db_median": 19.85101432846448,
+  "preamble_snr_db_iqr": 2.406141284471037,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 19.85101432846448,
+  "burst_snr_db_iqr": 2.406141284471037,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.756117028253115,
+  "decoded_burst_power_dbfs_median": -35.19602324473151,
+  "decoded_burst_wideband_snr_db": 16.463128973039414,
+  "decode_seconds": 2.298749167995993,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49999.26447890942,
+   "loo_jitter_samples_p50": 549.5,
+   "loo_jitter_samples_p99": 4645.319999999988,
+   "loo_jitter_samples_max": 11929.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qpsk_tx-10p0.npy",
+  "stem": "qpsk_tx-10p0",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -10.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 401,
+  "candidates_v5": 0,
+  "candidates_legacy": 401,
+  "header_ok": 400,
+  "header_fail": 1,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 13.795798593844395,
+  "preamble_snr_db_median": 17.793242256847964,
+  "preamble_snr_db_iqr": 2.5606443228226397,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 17.793242256847964,
+  "burst_snr_db_iqr": 2.5606443228226397,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.75085914908452,
+  "decoded_burst_power_dbfs_median": -37.40557533550512,
+  "decoded_burst_wideband_snr_db": 14.1825922190154,
+  "decode_seconds": 2.263393719011219,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49998.26532762262,
+   "loo_jitter_samples_p50": 624.0,
+   "loo_jitter_samples_p99": 7158.599999999991,
+   "loo_jitter_samples_max": 10989.0,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qpsk_tx-12p5.npy",
+  "stem": "qpsk_tx-12p5",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -12.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 403,
+  "candidates_v5": 0,
+  "candidates_legacy": 403,
+  "header_ok": 400,
+  "header_fail": 3,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 11.775510995279587,
+  "preamble_snr_db_median": 15.264452875780012,
+  "preamble_snr_db_iqr": 2.333263747411891,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 15.264452875780012,
+  "burst_snr_db_iqr": 2.333263747411891,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.78237699617977,
+  "decoded_burst_power_dbfs_median": -39.78826489158679,
+  "decoded_burst_wideband_snr_db": 11.710667459931997,
+  "decode_seconds": 2.2319649060082156,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 50000.228918711975,
+   "loo_jitter_samples_p50": 546.0,
+   "loo_jitter_samples_p99": 3981.439999999985,
+   "loo_jitter_samples_max": 13575.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qpsk_tx-15p0.npy",
+  "stem": "qpsk_tx-15p0",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -15.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 400,
+  "candidates_v5": 0,
+  "candidates_legacy": 400,
+  "header_ok": 400,
+  "header_fail": 0,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 9.888018917947878,
+  "preamble_snr_db_median": 12.815595829354745,
+  "preamble_snr_db_iqr": 2.396307600824274,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 12.815595829354745,
+  "burst_snr_db_iqr": 2.396307600824274,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.79130314754013,
+  "decoded_burst_power_dbfs_median": -42.011577513253435,
+  "decoded_burst_wideband_snr_db": 9.296971636666287,
+  "decode_seconds": 2.2258106759982184,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 50000.3320399073,
+   "loo_jitter_samples_p50": 650.0,
+   "loo_jitter_samples_p99": 9238.054999999995,
+   "loo_jitter_samples_max": 15994.5,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qpsk_tx-17p5.npy",
+  "stem": "qpsk_tx-17p5",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -17.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 400,
+  "loss": 0.0,
+  "loss_ci95": [
+   0.0,
+   0.009512640599680667
+  ],
+  "preamble_missed": 0,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 403,
+  "candidates_v5": 0,
+  "candidates_legacy": 403,
+  "header_ok": 400,
+  "header_fail": 3,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 400,
+  "evm_snr_db_median": 8.10231985874751,
+  "preamble_snr_db_median": 10.259239508600889,
+  "preamble_snr_db_iqr": 2.316279835181877,
+  "preamble_snr_count": 400,
+  "burst_snr_db_median": 10.259239508600889,
+  "burst_snr_db_iqr": 2.316279835181877,
+  "burst_snr_count": 400,
+  "noise_floor_dbfs": -51.76159371390408,
+  "decoded_burst_power_dbfs_median": -44.08310277293236,
+  "decoded_burst_wideband_snr_db": 6.865777627345027,
+  "decode_seconds": 2.2771045429981314,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 0,
+   "attribution": "positions",
+   "spacing_samples": 49999.908407381365,
+   "loo_jitter_samples_p50": 601.25,
+   "loo_jitter_samples_p99": 7673.694999999958,
+   "loo_jitter_samples_max": 16283.0,
+   "window_samples": 10000,
+   "preamble_missed": 0,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": []
+  }
+ },
+ {
+  "file": "qpsk_tx-20p0.npy",
+  "stem": "qpsk_tx-20p0",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -20.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 396,
+  "loss": 0.010000000000000009,
+  "loss_ci95": [
+   0.0038954207932788126,
+   0.02542696699440824
+  ],
+  "preamble_missed": 3,
+  "sig_failed": 0,
+  "payload_failed": 1,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 397,
+  "candidates_v5": 0,
+  "candidates_legacy": 397,
+  "header_ok": 397,
+  "header_fail": 0,
+  "payload_fail": 1,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 396,
+  "evm_snr_db_median": 6.3321260503971315,
+  "preamble_snr_db_median": 7.824954097507972,
+  "preamble_snr_db_iqr": 2.338998316464525,
+  "preamble_snr_count": 397,
+  "burst_snr_db_median": 7.824954097507972,
+  "burst_snr_db_iqr": 2.338998316464525,
+  "burst_snr_count": 397,
+  "noise_floor_dbfs": -51.75542020559841,
+  "decoded_burst_power_dbfs_median": -45.89546293202734,
+  "decoded_burst_wideband_snr_db": 4.555674203168408,
+  "decode_seconds": 2.3869876420067158,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 4,
+   "attribution": "positions",
+   "spacing_samples": 49999.57490307553,
+   "loo_jitter_samples_p50": 681.5,
+   "loo_jitter_samples_p99": 8918.879999999996,
+   "loo_jitter_samples_max": 16374.0,
+   "window_samples": 10000,
+   "preamble_missed": 3,
+   "sig_failed": 0,
+   "payload_failed": 1,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     52,
+     "preamble_missed"
+    ],
+    [
+     189,
+     "preamble_missed"
+    ],
+    [
+     315,
+     "preamble_missed"
+    ],
+    [
+     357,
+     "payload_failed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "qpsk_tx-22p5.npy",
+  "stem": "qpsk_tx-22p5",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -22.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 343,
+  "loss": 0.14249999999999996,
+  "loss_ci95": [
+   0.11163780858819913,
+   0.18016372944057255
+  ],
+  "preamble_missed": 54,
+  "sig_failed": 1,
+  "payload_failed": 2,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 346,
+  "candidates_v5": 0,
+  "candidates_legacy": 346,
+  "header_ok": 345,
+  "header_fail": 1,
+  "payload_fail": 2,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 343,
+  "evm_snr_db_median": 4.725638265292959,
+  "preamble_snr_db_median": 5.9393665423875985,
+  "preamble_snr_db_iqr": 2.5824970549418884,
+  "preamble_snr_count": 346,
+  "burst_snr_db_median": 5.9393665423875985,
+  "burst_snr_db_iqr": 2.5824970549418884,
+  "burst_snr_count": 346,
+  "noise_floor_dbfs": -51.78223975442826,
+  "decoded_burst_power_dbfs_median": -47.48186394828183,
+  "decoded_burst_wideband_snr_db": 2.2834073393717547,
+  "decode_seconds": 2.398587588017108,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 57,
+   "attribution": "positions",
+   "spacing_samples": 49997.480652662794,
+   "loo_jitter_samples_p50": 713.0,
+   "loo_jitter_samples_p99": 3553.6000000000004,
+   "loo_jitter_samples_max": 7255.0,
+   "window_samples": 10000,
+   "preamble_missed": 54,
+   "sig_failed": 1,
+   "payload_failed": 2,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     11,
+     "payload_failed"
+    ],
+    [
+     12,
+     "preamble_missed"
+    ],
+    [
+     17,
+     "preamble_missed"
+    ],
+    [
+     24,
+     "preamble_missed"
+    ],
+    [
+     32,
+     "preamble_missed"
+    ],
+    [
+     48,
+     "preamble_missed"
+    ],
+    [
+     64,
+     "preamble_missed"
+    ],
+    [
+     65,
+     "preamble_missed"
+    ],
+    [
+     75,
+     "preamble_missed"
+    ],
+    [
+     83,
+     "preamble_missed"
+    ],
+    [
+     90,
+     "preamble_missed"
+    ],
+    [
+     98,
+     "preamble_missed"
+    ],
+    [
+     101,
+     "preamble_missed"
+    ],
+    [
+     112,
+     "preamble_missed"
+    ],
+    [
+     120,
+     "preamble_missed"
+    ],
+    [
+     125,
+     "preamble_missed"
+    ],
+    [
+     127,
+     "preamble_missed"
+    ],
+    [
+     128,
+     "preamble_missed"
+    ],
+    [
+     132,
+     "preamble_missed"
+    ],
+    [
+     136,
+     "preamble_missed"
+    ],
+    [
+     139,
+     "preamble_missed"
+    ],
+    [
+     152,
+     "preamble_missed"
+    ],
+    [
+     156,
+     "preamble_missed"
+    ],
+    [
+     159,
+     "preamble_missed"
+    ],
+    [
+     162,
+     "preamble_missed"
+    ],
+    [
+     173,
+     "payload_failed"
+    ],
+    [
+     183,
+     "preamble_missed"
+    ],
+    [
+     184,
+     "preamble_missed"
+    ],
+    [
+     185,
+     "preamble_missed"
+    ],
+    [
+     192,
+     "preamble_missed"
+    ],
+    [
+     196,
+     "preamble_missed"
+    ],
+    [
+     197,
+     "preamble_missed"
+    ],
+    [
+     212,
+     "preamble_missed"
+    ],
+    [
+     213,
+     "preamble_missed"
+    ],
+    [
+     256,
+     "preamble_missed"
+    ],
+    [
+     265,
+     "preamble_missed"
+    ],
+    [
+     267,
+     "sig_failed"
+    ],
+    [
+     270,
+     "preamble_missed"
+    ],
+    [
+     272,
+     "preamble_missed"
+    ],
+    [
+     276,
+     "preamble_missed"
+    ],
+    [
+     279,
+     "preamble_missed"
+    ],
+    [
+     282,
+     "preamble_missed"
+    ],
+    [
+     283,
+     "preamble_missed"
+    ],
+    [
+     285,
+     "preamble_missed"
+    ],
+    [
+     288,
+     "preamble_missed"
+    ],
+    [
+     319,
+     "preamble_missed"
+    ],
+    [
+     320,
+     "preamble_missed"
+    ],
+    [
+     325,
+     "preamble_missed"
+    ],
+    [
+     336,
+     "preamble_missed"
+    ],
+    [
+     343,
+     "preamble_missed"
+    ],
+    [
+     353,
+     "preamble_missed"
+    ],
+    [
+     366,
+     "preamble_missed"
+    ],
+    [
+     374,
+     "preamble_missed"
+    ],
+    [
+     375,
+     "preamble_missed"
+    ],
+    [
+     385,
+     "preamble_missed"
+    ],
+    [
+     390,
+     "preamble_missed"
+    ],
+    [
+     391,
+     "preamble_missed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "qpsk_tx-25p0.npy",
+  "stem": "qpsk_tx-25p0",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -25.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 75,
+  "loss": 0.8125,
+  "loss_ci95": [
+   0.7713431632142457,
+   0.847711436410954
+  ],
+  "preamble_missed": 231,
+  "sig_failed": 1,
+  "payload_failed": 93,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 169,
+  "candidates_v5": 0,
+  "candidates_legacy": 169,
+  "header_ok": 168,
+  "header_fail": 1,
+  "payload_fail": 93,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 75,
+  "evm_snr_db_median": 2.6978998256089257,
+  "preamble_snr_db_median": 3.963401706850289,
+  "preamble_snr_db_iqr": 2.686915626861679,
+  "preamble_snr_count": 169,
+  "burst_snr_db_median": 3.963401706850289,
+  "burst_snr_db_iqr": 2.686915626861679,
+  "burst_snr_count": 169,
+  "noise_floor_dbfs": -51.78823778114126,
+  "decoded_burst_power_dbfs_median": -48.74413867322875,
+  "decoded_burst_wideband_snr_db": 0.06733728926434587,
+  "decode_seconds": 2.2338304099976085,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 325,
+   "attribution": "positions",
+   "spacing_samples": 49998.26099088489,
+   "loo_jitter_samples_p50": 654.6666666665114,
+   "loo_jitter_samples_p99": 2791.6296957402683,
+   "loo_jitter_samples_max": 3070.2068965509534,
+   "window_samples": 10000,
+   "preamble_missed": 231,
+   "sig_failed": 1,
+   "payload_failed": 93,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     0,
+     "preamble_missed"
+    ],
+    [
+     2,
+     "payload_failed"
+    ],
+    [
+     5,
+     "preamble_missed"
+    ],
+    [
+     6,
+     "preamble_missed"
+    ],
+    [
+     7,
+     "preamble_missed"
+    ],
+    [
+     8,
+     "preamble_missed"
+    ],
+    [
+     9,
+     "preamble_missed"
+    ],
+    [
+     10,
+     "preamble_missed"
+    ],
+    [
+     11,
+     "preamble_missed"
+    ],
+    [
+     12,
+     "preamble_missed"
+    ],
+    [
+     13,
+     "preamble_missed"
+    ],
+    [
+     14,
+     "preamble_missed"
+    ],
+    [
+     15,
+     "preamble_missed"
+    ],
+    [
+     18,
+     "preamble_missed"
+    ],
+    [
+     19,
+     "preamble_missed"
+    ],
+    [
+     20,
+     "preamble_missed"
+    ],
+    [
+     21,
+     "preamble_missed"
+    ],
+    [
+     22,
+     "preamble_missed"
+    ],
+    [
+     24,
+     "preamble_missed"
+    ],
+    [
+     25,
+     "preamble_missed"
+    ],
+    [
+     26,
+     "preamble_missed"
+    ],
+    [
+     28,
+     "preamble_missed"
+    ],
+    [
+     29,
+     "preamble_missed"
+    ],
+    [
+     30,
+     "payload_failed"
+    ],
+    [
+     31,
+     "payload_failed"
+    ],
+    [
+     32,
+     "preamble_missed"
+    ],
+    [
+     33,
+     "preamble_missed"
+    ],
+    [
+     34,
+     "preamble_missed"
+    ],
+    [
+     36,
+     "preamble_missed"
+    ],
+    [
+     37,
+     "preamble_missed"
+    ],
+    [
+     38,
+     "preamble_missed"
+    ],
+    [
+     39,
+     "preamble_missed"
+    ],
+    [
+     41,
+     "preamble_missed"
+    ],
+    [
+     42,
+     "preamble_missed"
+    ],
+    [
+     43,
+     "preamble_missed"
+    ],
+    [
+     44,
+     "payload_failed"
+    ],
+    [
+     45,
+     "preamble_missed"
+    ],
+    [
+     46,
+     "payload_failed"
+    ],
+    [
+     47,
+     "preamble_missed"
+    ],
+    [
+     48,
+     "preamble_missed"
+    ],
+    [
+     49,
+     "preamble_missed"
+    ],
+    [
+     50,
+     "preamble_missed"
+    ],
+    [
+     51,
+     "preamble_missed"
+    ],
+    [
+     53,
+     "preamble_missed"
+    ],
+    [
+     55,
+     "preamble_missed"
+    ],
+    [
+     57,
+     "payload_failed"
+    ],
+    [
+     59,
+     "payload_failed"
+    ],
+    [
+     60,
+     "payload_failed"
+    ],
+    [
+     61,
+     "preamble_missed"
+    ],
+    [
+     62,
+     "preamble_missed"
+    ],
+    [
+     63,
+     "preamble_missed"
+    ],
+    [
+     64,
+     "preamble_missed"
+    ],
+    [
+     65,
+     "preamble_missed"
+    ],
+    [
+     66,
+     "payload_failed"
+    ],
+    [
+     67,
+     "preamble_missed"
+    ],
+    [
+     69,
+     "preamble_missed"
+    ],
+    [
+     70,
+     "preamble_missed"
+    ],
+    [
+     71,
+     "preamble_missed"
+    ],
+    [
+     72,
+     "preamble_missed"
+    ],
+    [
+     73,
+     "payload_failed"
+    ],
+    [
+     74,
+     "preamble_missed"
+    ],
+    [
+     75,
+     "preamble_missed"
+    ],
+    [
+     76,
+     "preamble_missed"
+    ],
+    [
+     77,
+     "preamble_missed"
+    ],
+    [
+     78,
+     "preamble_missed"
+    ],
+    [
+     80,
+     "preamble_missed"
+    ],
+    [
+     81,
+     "preamble_missed"
+    ],
+    [
+     82,
+     "preamble_missed"
+    ],
+    [
+     83,
+     "preamble_missed"
+    ],
+    [
+     84,
+     "preamble_missed"
+    ],
+    [
+     85,
+     "payload_failed"
+    ],
+    [
+     87,
+     "preamble_missed"
+    ],
+    [
+     88,
+     "preamble_missed"
+    ],
+    [
+     89,
+     "preamble_missed"
+    ],
+    [
+     90,
+     "preamble_missed"
+    ],
+    [
+     92,
+     "preamble_missed"
+    ],
+    [
+     94,
+     "payload_failed"
+    ],
+    [
+     95,
+     "preamble_missed"
+    ],
+    [
+     96,
+     "payload_failed"
+    ],
+    [
+     97,
+     "payload_failed"
+    ],
+    [
+     98,
+     "preamble_missed"
+    ],
+    [
+     99,
+     "preamble_missed"
+    ],
+    [
+     100,
+     "payload_failed"
+    ],
+    [
+     101,
+     "preamble_missed"
+    ],
+    [
+     102,
+     "preamble_missed"
+    ],
+    [
+     103,
+     "preamble_missed"
+    ],
+    [
+     106,
+     "payload_failed"
+    ],
+    [
+     107,
+     "preamble_missed"
+    ],
+    [
+     108,
+     "preamble_missed"
+    ],
+    [
+     109,
+     "preamble_missed"
+    ],
+    [
+     110,
+     "preamble_missed"
+    ],
+    [
+     112,
+     "payload_failed"
+    ],
+    [
+     113,
+     "preamble_missed"
+    ],
+    [
+     115,
+     "preamble_missed"
+    ],
+    [
+     116,
+     "preamble_missed"
+    ],
+    [
+     117,
+     "payload_failed"
+    ],
+    [
+     118,
+     "payload_failed"
+    ],
+    [
+     119,
+     "preamble_missed"
+    ],
+    [
+     120,
+     "preamble_missed"
+    ],
+    [
+     121,
+     "preamble_missed"
+    ],
+    [
+     122,
+     "payload_failed"
+    ],
+    [
+     123,
+     "preamble_missed"
+    ],
+    [
+     124,
+     "preamble_missed"
+    ],
+    [
+     125,
+     "payload_failed"
+    ],
+    [
+     126,
+     "payload_failed"
+    ],
+    [
+     127,
+     "preamble_missed"
+    ],
+    [
+     128,
+     "payload_failed"
+    ],
+    [
+     130,
+     "payload_failed"
+    ],
+    [
+     131,
+     "sig_failed"
+    ],
+    [
+     132,
+     "preamble_missed"
+    ],
+    [
+     133,
+     "preamble_missed"
+    ],
+    [
+     134,
+     "payload_failed"
+    ],
+    [
+     135,
+     "preamble_missed"
+    ],
+    [
+     136,
+     "preamble_missed"
+    ],
+    [
+     138,
+     "preamble_missed"
+    ],
+    [
+     139,
+     "payload_failed"
+    ],
+    [
+     140,
+     "payload_failed"
+    ],
+    [
+     141,
+     "preamble_missed"
+    ],
+    [
+     143,
+     "preamble_missed"
+    ],
+    [
+     146,
+     "preamble_missed"
+    ],
+    [
+     147,
+     "payload_failed"
+    ],
+    [
+     149,
+     "preamble_missed"
+    ],
+    [
+     150,
+     "preamble_missed"
+    ],
+    [
+     151,
+     "preamble_missed"
+    ],
+    [
+     152,
+     "preamble_missed"
+    ],
+    [
+     153,
+     "preamble_missed"
+    ],
+    [
+     154,
+     "payload_failed"
+    ],
+    [
+     155,
+     "preamble_missed"
+    ],
+    [
+     156,
+     "preamble_missed"
+    ],
+    [
+     160,
+     "preamble_missed"
+    ],
+    [
+     161,
+     "payload_failed"
+    ],
+    [
+     162,
+     "payload_failed"
+    ],
+    [
+     163,
+     "payload_failed"
+    ],
+    [
+     165,
+     "preamble_missed"
+    ],
+    [
+     166,
+     "preamble_missed"
+    ],
+    [
+     169,
+     "payload_failed"
+    ],
+    [
+     171,
+     "payload_failed"
+    ],
+    [
+     173,
+     "preamble_missed"
+    ],
+    [
+     174,
+     "payload_failed"
+    ],
+    [
+     175,
+     "preamble_missed"
+    ],
+    [
+     177,
+     "payload_failed"
+    ],
+    [
+     178,
+     "preamble_missed"
+    ],
+    [
+     179,
+     "payload_failed"
+    ],
+    [
+     180,
+     "preamble_missed"
+    ],
+    [
+     181,
+     "payload_failed"
+    ],
+    [
+     182,
+     "payload_failed"
+    ],
+    [
+     183,
+     "preamble_missed"
+    ],
+    [
+     184,
+     "preamble_missed"
+    ],
+    [
+     185,
+     "preamble_missed"
+    ],
+    [
+     186,
+     "preamble_missed"
+    ],
+    [
+     187,
+     "preamble_missed"
+    ],
+    [
+     188,
+     "payload_failed"
+    ],
+    [
+     190,
+     "preamble_missed"
+    ],
+    [
+     191,
+     "preamble_missed"
+    ],
+    [
+     193,
+     "payload_failed"
+    ],
+    [
+     194,
+     "payload_failed"
+    ],
+    [
+     195,
+     "payload_failed"
+    ],
+    [
+     196,
+     "payload_failed"
+    ],
+    [
+     197,
+     "preamble_missed"
+    ],
+    [
+     198,
+     "payload_failed"
+    ],
+    [
+     199,
+     "payload_failed"
+    ],
+    [
+     200,
+     "preamble_missed"
+    ],
+    [
+     203,
+     "preamble_missed"
+    ],
+    [
+     204,
+     "preamble_missed"
+    ],
+    [
+     206,
+     "preamble_missed"
+    ],
+    [
+     208,
+     "preamble_missed"
+    ],
+    [
+     209,
+     "payload_failed"
+    ],
+    [
+     210,
+     "preamble_missed"
+    ],
+    [
+     211,
+     "preamble_missed"
+    ],
+    [
+     212,
+     "payload_failed"
+    ],
+    [
+     213,
+     "payload_failed"
+    ],
+    [
+     214,
+     "preamble_missed"
+    ],
+    [
+     215,
+     "preamble_missed"
+    ],
+    [
+     216,
+     "preamble_missed"
+    ],
+    [
+     217,
+     "preamble_missed"
+    ],
+    [
+     218,
+     "preamble_missed"
+    ],
+    [
+     219,
+     "preamble_missed"
+    ],
+    [
+     220,
+     "preamble_missed"
+    ],
+    [
+     221,
+     "preamble_missed"
+    ],
+    [
+     222,
+     "preamble_missed"
+    ],
+    [
+     224,
+     "preamble_missed"
+    ],
+    [
+     225,
+     "payload_failed"
+    ],
+    [
+     226,
+     "preamble_missed"
+    ],
+    [
+     227,
+     "preamble_missed"
+    ],
+    [
+     228,
+     "preamble_missed"
+    ],
+    [
+     229,
+     "payload_failed"
+    ],
+    [
+     230,
+     "preamble_missed"
+    ],
+    [
+     231,
+     "payload_failed"
+    ],
+    [
+     232,
+     "payload_failed"
+    ],
+    [
+     233,
+     "preamble_missed"
+    ],
+    [
+     234,
+     "payload_failed"
+    ],
+    [
+     235,
+     "preamble_missed"
+    ],
+    [
+     237,
+     "payload_failed"
+    ],
+    [
+     238,
+     "preamble_missed"
+    ],
+    [
+     241,
+     "preamble_missed"
+    ],
+    [
+     243,
+     "preamble_missed"
+    ],
+    [
+     244,
+     "payload_failed"
+    ],
+    [
+     245,
+     "payload_failed"
+    ],
+    [
+     247,
+     "preamble_missed"
+    ],
+    [
+     248,
+     "preamble_missed"
+    ],
+    [
+     249,
+     "preamble_missed"
+    ],
+    [
+     250,
+     "preamble_missed"
+    ],
+    [
+     251,
+     "preamble_missed"
+    ],
+    [
+     253,
+     "preamble_missed"
+    ],
+    [
+     254,
+     "preamble_missed"
+    ],
+    [
+     255,
+     "preamble_missed"
+    ],
+    [
+     259,
+     "preamble_missed"
+    ],
+    [
+     260,
+     "payload_failed"
+    ],
+    [
+     261,
+     "payload_failed"
+    ],
+    [
+     263,
+     "payload_failed"
+    ],
+    [
+     264,
+     "payload_failed"
+    ],
+    [
+     265,
+     "preamble_missed"
+    ],
+    [
+     266,
+     "preamble_missed"
+    ],
+    [
+     267,
+     "preamble_missed"
+    ],
+    [
+     268,
+     "preamble_missed"
+    ],
+    [
+     269,
+     "preamble_missed"
+    ],
+    [
+     270,
+     "preamble_missed"
+    ],
+    [
+     271,
+     "payload_failed"
+    ],
+    [
+     272,
+     "payload_failed"
+    ],
+    [
+     273,
+     "preamble_missed"
+    ],
+    [
+     275,
+     "payload_failed"
+    ],
+    [
+     276,
+     "preamble_missed"
+    ],
+    [
+     279,
+     "preamble_missed"
+    ],
+    [
+     280,
+     "preamble_missed"
+    ],
+    [
+     281,
+     "preamble_missed"
+    ],
+    [
+     282,
+     "preamble_missed"
+    ],
+    [
+     283,
+     "preamble_missed"
+    ],
+    [
+     284,
+     "preamble_missed"
+    ],
+    [
+     285,
+     "preamble_missed"
+    ],
+    [
+     286,
+     "preamble_missed"
+    ],
+    [
+     287,
+     "payload_failed"
+    ],
+    [
+     288,
+     "preamble_missed"
+    ],
+    [
+     289,
+     "payload_failed"
+    ],
+    [
+     290,
+     "payload_failed"
+    ],
+    [
+     291,
+     "preamble_missed"
+    ],
+    [
+     292,
+     "preamble_missed"
+    ],
+    [
+     293,
+     "preamble_missed"
+    ],
+    [
+     295,
+     "preamble_missed"
+    ],
+    [
+     296,
+     "preamble_missed"
+    ],
+    [
+     297,
+     "preamble_missed"
+    ],
+    [
+     300,
+     "payload_failed"
+    ],
+    [
+     301,
+     "payload_failed"
+    ],
+    [
+     302,
+     "preamble_missed"
+    ],
+    [
+     303,
+     "payload_failed"
+    ],
+    [
+     304,
+     "preamble_missed"
+    ],
+    [
+     305,
+     "payload_failed"
+    ],
+    [
+     306,
+     "preamble_missed"
+    ],
+    [
+     309,
+     "preamble_missed"
+    ],
+    [
+     310,
+     "payload_failed"
+    ],
+    [
+     311,
+     "preamble_missed"
+    ],
+    [
+     312,
+     "preamble_missed"
+    ],
+    [
+     313,
+     "preamble_missed"
+    ],
+    [
+     314,
+     "preamble_missed"
+    ],
+    [
+     315,
+     "preamble_missed"
+    ],
+    [
+     316,
+     "preamble_missed"
+    ],
+    [
+     317,
+     "preamble_missed"
+    ],
+    [
+     318,
+     "preamble_missed"
+    ],
+    [
+     320,
+     "preamble_missed"
+    ],
+    [
+     321,
+     "payload_failed"
+    ],
+    [
+     323,
+     "payload_failed"
+    ],
+    [
+     325,
+     "preamble_missed"
+    ],
+    [
+     327,
+     "preamble_missed"
+    ],
+    [
+     328,
+     "preamble_missed"
+    ],
+    [
+     329,
+     "preamble_missed"
+    ],
+    [
+     330,
+     "preamble_missed"
+    ],
+    [
+     331,
+     "preamble_missed"
+    ],
+    [
+     332,
+     "preamble_missed"
+    ],
+    [
+     333,
+     "preamble_missed"
+    ],
+    [
+     334,
+     "preamble_missed"
+    ],
+    [
+     336,
+     "preamble_missed"
+    ],
+    [
+     338,
+     "preamble_missed"
+    ],
+    [
+     339,
+     "preamble_missed"
+    ],
+    [
+     340,
+     "payload_failed"
+    ],
+    [
+     342,
+     "payload_failed"
+    ],
+    [
+     343,
+     "payload_failed"
+    ],
+    [
+     344,
+     "payload_failed"
+    ],
+    [
+     346,
+     "preamble_missed"
+    ],
+    [
+     347,
+     "preamble_missed"
+    ],
+    [
+     348,
+     "preamble_missed"
+    ],
+    [
+     349,
+     "preamble_missed"
+    ],
+    [
+     350,
+     "preamble_missed"
+    ],
+    [
+     351,
+     "preamble_missed"
+    ],
+    [
+     352,
+     "preamble_missed"
+    ],
+    [
+     353,
+     "preamble_missed"
+    ],
+    [
+     354,
+     "preamble_missed"
+    ],
+    [
+     355,
+     "preamble_missed"
+    ],
+    [
+     356,
+     "preamble_missed"
+    ],
+    [
+     357,
+     "preamble_missed"
+    ],
+    [
+     358,
+     "preamble_missed"
+    ],
+    [
+     359,
+     "preamble_missed"
+    ],
+    [
+     360,
+     "payload_failed"
+    ],
+    [
+     361,
+     "preamble_missed"
+    ],
+    [
+     362,
+     "payload_failed"
+    ],
+    [
+     364,
+     "payload_failed"
+    ],
+    [
+     365,
+     "preamble_missed"
+    ],
+    [
+     366,
+     "payload_failed"
+    ],
+    [
+     367,
+     "preamble_missed"
+    ],
+    [
+     368,
+     "payload_failed"
+    ],
+    [
+     369,
+     "payload_failed"
+    ],
+    [
+     370,
+     "preamble_missed"
+    ],
+    [
+     371,
+     "payload_failed"
+    ],
+    [
+     372,
+     "payload_failed"
+    ],
+    [
+     373,
+     "preamble_missed"
+    ],
+    [
+     375,
+     "preamble_missed"
+    ],
+    [
+     376,
+     "payload_failed"
+    ],
+    [
+     377,
+     "preamble_missed"
+    ],
+    [
+     378,
+     "payload_failed"
+    ],
+    [
+     379,
+     "preamble_missed"
+    ],
+    [
+     380,
+     "preamble_missed"
+    ],
+    [
+     381,
+     "preamble_missed"
+    ],
+    [
+     382,
+     "preamble_missed"
+    ],
+    [
+     383,
+     "preamble_missed"
+    ],
+    [
+     384,
+     "preamble_missed"
+    ],
+    [
+     385,
+     "preamble_missed"
+    ],
+    [
+     386,
+     "preamble_missed"
+    ],
+    [
+     387,
+     "preamble_missed"
+    ],
+    [
+     388,
+     "payload_failed"
+    ],
+    [
+     389,
+     "payload_failed"
+    ],
+    [
+     390,
+     "preamble_missed"
+    ],
+    [
+     392,
+     "preamble_missed"
+    ],
+    [
+     393,
+     "payload_failed"
+    ],
+    [
+     394,
+     "payload_failed"
+    ],
+    [
+     397,
+     "preamble_missed"
+    ],
+    [
+     398,
+     "payload_failed"
+    ],
+    [
+     399,
+     "preamble_missed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "qpsk_tx-27p5.npy",
+  "stem": "qpsk_tx-27p5",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -27.5,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 0,
+  "loss": 1.0,
+  "loss_ci95": [
+   0.9904873594003194,
+   1.0
+  ],
+  "preamble_missed": 371,
+  "sig_failed": 1,
+  "payload_failed": 28,
+  "stage_attribution": "clusters",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 29,
+  "candidates_v5": 0,
+  "candidates_legacy": 29,
+  "header_ok": 28,
+  "header_fail": 1,
+  "payload_fail": 28,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": null,
+  "preamble_snr_db_median": 2.6850794511655325,
+  "preamble_snr_db_iqr": 2.203000694880853,
+  "preamble_snr_count": 29,
+  "burst_snr_db_median": null,
+  "burst_snr_db_iqr": null,
+  "burst_snr_count": 0,
+  "noise_floor_dbfs": -51.73983766026645,
+  "decoded_burst_power_dbfs_median": null,
+  "decoded_burst_wideband_snr_db": null,
+  "decode_seconds": 1.644690205983352,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 400,
+   "attribution": "clusters",
+   "payload_failed": 28,
+   "sig_failed": 1,
+   "preamble_missed": 371,
+   "clusters": 29
+  }
+ },
+ {
+  "file": "qpsk_tx-30p0.npy",
+  "stem": "qpsk_tx-30p0",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -30.0,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 0,
+  "loss": 1.0,
+  "loss_ci95": [
+   0.9904873594003194,
+   1.0
+  ],
+  "preamble_missed": 395,
+  "sig_failed": 3,
+  "payload_failed": 2,
+  "stage_attribution": "clusters",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 5,
+  "candidates_v5": 0,
+  "candidates_legacy": 5,
+  "header_ok": 2,
+  "header_fail": 3,
+  "payload_fail": 2,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": null,
+  "preamble_snr_db_median": 0.6671674480009336,
+  "preamble_snr_db_iqr": 2.585502693576645,
+  "preamble_snr_count": 5,
+  "burst_snr_db_median": null,
+  "burst_snr_db_iqr": null,
+  "burst_snr_count": 0,
+  "noise_floor_dbfs": -51.74725899111445,
+  "decoded_burst_power_dbfs_median": null,
+  "decoded_burst_wideband_snr_db": null,
+  "decode_seconds": 1.5385951520001981,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 400,
+   "attribution": "clusters",
+   "payload_failed": 2,
+   "sig_failed": 3,
+   "preamble_missed": 395,
+   "clusters": 5
+  }
+ },
+ {
+  "file": "qpsk_tx-18p8.npy",
+  "stem": "qpsk_tx-18p8",
+  "family": "legacy",
+  "mcs": "qpsk",
+  "mcs_index": null,
+  "tx_gain_db": -18.75,
+  "guards": null,
+  "scrambler": null,
+  "payload": "random",
+  "sets": [
+   "phy.rx.v5_acquisition=false"
+  ],
+  "sent": 400,
+  "decoded": 399,
+  "loss": 0.0024999999999999467,
+  "loss_ci95": [
+   0.00044143642943440895,
+   0.014023640967247855
+  ],
+  "preamble_missed": 1,
+  "sig_failed": 0,
+  "payload_failed": 0,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": null,
+  "candidates": 399,
+  "candidates_v5": 0,
+  "candidates_legacy": 399,
+  "header_ok": 399,
+  "header_fail": 0,
+  "payload_fail": 0,
+  "psdu_fcs_failures": 0,
+  "bursts_v5": 0,
+  "bursts_legacy": 399,
+  "evm_snr_db_median": 6.803254541010615,
+  "preamble_snr_db_median": 9.171157350002682,
+  "preamble_snr_db_iqr": 2.5081145821692425,
+  "preamble_snr_count": 399,
+  "burst_snr_db_median": 9.171157350002682,
+  "burst_snr_db_iqr": 2.5081145821692425,
+  "burst_snr_count": 399,
+  "noise_floor_dbfs": -51.659125572299445,
+  "decoded_burst_power_dbfs_median": -45.111866459977925,
+  "decoded_burst_wideband_snr_db": 5.460128741926825,
+  "decode_seconds": 2.377678418008145,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 1,
+   "attribution": "positions",
+   "spacing_samples": 49996.07808758378,
+   "loo_jitter_samples_p50": 601.0,
+   "loo_jitter_samples_p99": 8948.76000000003,
+   "loo_jitter_samples_max": 14973.5,
+   "window_samples": 10000,
+   "preamble_missed": 1,
+   "sig_failed": 0,
+   "payload_failed": 0,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     386,
+     "preamble_missed"
+    ]
+   ]
+  }
+ }
+]

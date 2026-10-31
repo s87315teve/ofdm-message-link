@@ -1,0 +1,39 @@
+{
+ "family": "v5",
+ "mcs": "qam64",
+ "mcs_index": 15,
+ "code_rate": "1/2",
+ "tx_gain_db": -11.25,
+ "tx_gain_readback_db": -11.25,
+ "rx_gain_db": 15.0,
+ "bursts_sent": 400,
+ "burst_rate_per_s": 100.0,
+ "payload_bytes": 900,
+ "payload": "random",
+ "scrambler": true,
+ "guards": [
+  16,
+  64
+ ],
+ "aggregation": false,
+ "burst_samples_with_guards": 4880,
+ "psdu_bytes": 947,
+ "tx_peak_to_mean_db_median": 9.686038970947266,
+ "sample_rate_sps": 5000000,
+ "center_frequency_hz": 2450000000.0,
+ "tx_serial": "104473541196000419000c00f2ff1e6e77",
+ "rx_serial": "10447354119600041b000b00f2ff1ef9c6",
+ "rx_overflow_events": 0,
+ "late_sends": 0,
+ "samples": 23461888,
+ "send_duration_s": 3.99146476801252,
+ "send_started_unix": 1793477931.162969,
+ "loadavg_at_start": [
+  1.4,
+  1.48,
+  1.35
+ ],
+ "radio_open_retries": 0,
+ "recorded_at": "2026-11-01T04:18:55+0800",
+ "stem": "v5m15_tx-11p25"
+}

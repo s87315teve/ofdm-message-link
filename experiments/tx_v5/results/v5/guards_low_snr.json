@@ -1,0 +1,1614 @@
+[
+ {
+  "file": "v5m8_tx-26p25_g0_32.npy",
+  "stem": "v5m8_tx-26p25_g0_32",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -26.25,
+  "guards": [
+   0,
+   32
+  ],
+  "scrambler": true,
+  "payload": "random",
+  "sets": [],
+  "sent": 2000,
+  "decoded": 1929,
+  "loss": 0.035499999999999976,
+  "loss_ci95": [
+   0.028239757624593097,
+   0.044541244626283415
+  ],
+  "preamble_missed": 29,
+  "sig_failed": 0,
+  "payload_failed": 42,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   1.66,
+   1.58,
+   1.41
+  ],
+  "candidates": 1971,
+  "candidates_v5": 1971,
+  "candidates_legacy": 0,
+  "header_ok": 1971,
+  "header_fail": 0,
+  "payload_fail": 42,
+  "psdu_fcs_failures": 42,
+  "bursts_v5": 1929,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": 4.2619534068996465,
+  "preamble_snr_db_median": 5.404694105751499,
+  "preamble_snr_db_iqr": 2.296570442385722,
+  "preamble_snr_count": 1971,
+  "burst_snr_db_median": 5.404694105751499,
+  "burst_snr_db_iqr": 2.296570442385722,
+  "burst_snr_count": 1971,
+  "noise_floor_dbfs": -51.72560853609748,
+  "decoded_burst_power_dbfs_median": -48.00942052719658,
+  "decoded_burst_wideband_snr_db": 1.312923596646117,
+  "decode_seconds": 17.995629201992415,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 71,
+   "attribution": "positions",
+   "spacing_samples": 49998.57453760237,
+   "loo_jitter_samples_p50": 659.6666666669771,
+   "loo_jitter_samples_p99": 5708.110000000001,
+   "loo_jitter_samples_max": 14364.5,
+   "window_samples": 10000,
+   "preamble_missed": 29,
+   "sig_failed": 0,
+   "payload_failed": 42,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     23,
+     "preamble_missed"
+    ],
+    [
+     24,
+     "preamble_missed"
+    ],
+    [
+     83,
+     "payload_failed"
+    ],
+    [
+     92,
+     "payload_failed"
+    ],
+    [
+     107,
+     "payload_failed"
+    ],
+    [
+     185,
+     "preamble_missed"
+    ],
+    [
+     269,
+     "preamble_missed"
+    ],
+    [
+     285,
+     "payload_failed"
+    ],
+    [
+     293,
+     "payload_failed"
+    ],
+    [
+     359,
+     "payload_failed"
+    ],
+    [
+     444,
+     "preamble_missed"
+    ],
+    [
+     484,
+     "preamble_missed"
+    ],
+    [
+     486,
+     "payload_failed"
+    ],
+    [
+     529,
+     "payload_failed"
+    ],
+    [
+     577,
+     "payload_failed"
+    ],
+    [
+     588,
+     "payload_failed"
+    ],
+    [
+     627,
+     "payload_failed"
+    ],
+    [
+     650,
+     "preamble_missed"
+    ],
+    [
+     653,
+     "payload_failed"
+    ],
+    [
+     691,
+     "preamble_missed"
+    ],
+    [
+     709,
+     "preamble_missed"
+    ],
+    [
+     738,
+     "payload_failed"
+    ],
+    [
+     741,
+     "payload_failed"
+    ],
+    [
+     777,
+     "preamble_missed"
+    ],
+    [
+     831,
+     "payload_failed"
+    ],
+    [
+     867,
+     "payload_failed"
+    ],
+    [
+     868,
+     "payload_failed"
+    ],
+    [
+     924,
+     "preamble_missed"
+    ],
+    [
+     957,
+     "payload_failed"
+    ],
+    [
+     1008,
+     "preamble_missed"
+    ],
+    [
+     1010,
+     "preamble_missed"
+    ],
+    [
+     1014,
+     "payload_failed"
+    ],
+    [
+     1031,
+     "preamble_missed"
+    ],
+    [
+     1041,
+     "preamble_missed"
+    ],
+    [
+     1043,
+     "payload_failed"
+    ],
+    [
+     1048,
+     "preamble_missed"
+    ],
+    [
+     1089,
+     "payload_failed"
+    ],
+    [
+     1121,
+     "preamble_missed"
+    ],
+    [
+     1146,
+     "payload_failed"
+    ],
+    [
+     1158,
+     "preamble_missed"
+    ],
+    [
+     1166,
+     "payload_failed"
+    ],
+    [
+     1184,
+     "payload_failed"
+    ],
+    [
+     1227,
+     "preamble_missed"
+    ],
+    [
+     1249,
+     "payload_failed"
+    ],
+    [
+     1285,
+     "payload_failed"
+    ],
+    [
+     1297,
+     "payload_failed"
+    ],
+    [
+     1309,
+     "preamble_missed"
+    ],
+    [
+     1375,
+     "payload_failed"
+    ],
+    [
+     1389,
+     "payload_failed"
+    ],
+    [
+     1412,
+     "payload_failed"
+    ],
+    [
+     1424,
+     "preamble_missed"
+    ],
+    [
+     1488,
+     "payload_failed"
+    ],
+    [
+     1497,
+     "payload_failed"
+    ],
+    [
+     1518,
+     "preamble_missed"
+    ],
+    [
+     1519,
+     "payload_failed"
+    ],
+    [
+     1568,
+     "payload_failed"
+    ],
+    [
+     1629,
+     "payload_failed"
+    ],
+    [
+     1636,
+     "preamble_missed"
+    ],
+    [
+     1667,
+     "preamble_missed"
+    ],
+    [
+     1727,
+     "payload_failed"
+    ],
+    [
+     1756,
+     "preamble_missed"
+    ],
+    [
+     1772,
+     "payload_failed"
+    ],
+    [
+     1785,
+     "payload_failed"
+    ],
+    [
+     1802,
+     "preamble_missed"
+    ],
+    [
+     1862,
+     "payload_failed"
+    ],
+    [
+     1867,
+     "payload_failed"
+    ],
+    [
+     1881,
+     "preamble_missed"
+    ],
+    [
+     1883,
+     "preamble_missed"
+    ],
+    [
+     1898,
+     "payload_failed"
+    ],
+    [
+     1920,
+     "payload_failed"
+    ],
+    [
+     1973,
+     "preamble_missed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "v5m8_tx-26p25_g16_64.npy",
+  "stem": "v5m8_tx-26p25_g16_64",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -26.25,
+  "guards": [
+   16,
+   64
+  ],
+  "scrambler": true,
+  "payload": "random",
+  "sets": [],
+  "sent": 2000,
+  "decoded": 1928,
+  "loss": 0.03600000000000003,
+  "loss_ci95": [
+   0.02868448710149568,
+   0.045094598031780314
+  ],
+  "preamble_missed": 13,
+  "sig_failed": 0,
+  "payload_failed": 59,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   2.35,
+   1.69,
+   1.44
+  ],
+  "candidates": 1987,
+  "candidates_v5": 1987,
+  "candidates_legacy": 0,
+  "header_ok": 1987,
+  "header_fail": 0,
+  "payload_fail": 59,
+  "psdu_fcs_failures": 59,
+  "bursts_v5": 1928,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": 4.19624997753427,
+  "preamble_snr_db_median": 5.172336242569337,
+  "preamble_snr_db_iqr": 2.162596800531195,
+  "preamble_snr_count": 1987,
+  "burst_snr_db_median": 5.172336242569337,
+  "burst_snr_db_iqr": 2.162596800531195,
+  "burst_snr_count": 1987,
+  "noise_floor_dbfs": -51.797780362294844,
+  "decoded_burst_power_dbfs_median": -48.04810335981176,
+  "decoded_burst_wideband_snr_db": 1.3709996405664144,
+  "decode_seconds": 17.001198198006023,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 72,
+   "attribution": "positions",
+   "spacing_samples": 49998.6286638273,
+   "loo_jitter_samples_p50": 609.0,
+   "loo_jitter_samples_p99": 5524.5625,
+   "loo_jitter_samples_max": 14559.5,
+   "window_samples": 10000,
+   "preamble_missed": 13,
+   "sig_failed": 0,
+   "payload_failed": 59,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     15,
+     "preamble_missed"
+    ],
+    [
+     31,
+     "payload_failed"
+    ],
+    [
+     61,
+     "payload_failed"
+    ],
+    [
+     90,
+     "payload_failed"
+    ],
+    [
+     142,
+     "preamble_missed"
+    ],
+    [
+     173,
+     "payload_failed"
+    ],
+    [
+     196,
+     "payload_failed"
+    ],
+    [
+     230,
+     "preamble_missed"
+    ],
+    [
+     232,
+     "payload_failed"
+    ],
+    [
+     233,
+     "payload_failed"
+    ],
+    [
+     359,
+     "payload_failed"
+    ],
+    [
+     362,
+     "payload_failed"
+    ],
+    [
+     426,
+     "payload_failed"
+    ],
+    [
+     486,
+     "payload_failed"
+    ],
+    [
+     487,
+     "payload_failed"
+    ],
+    [
+     494,
+     "payload_failed"
+    ],
+    [
+     502,
+     "payload_failed"
+    ],
+    [
+     508,
+     "payload_failed"
+    ],
+    [
+     527,
+     "payload_failed"
+    ],
+    [
+     611,
+     "preamble_missed"
+    ],
+    [
+     621,
+     "preamble_missed"
+    ],
+    [
+     756,
+     "payload_failed"
+    ],
+    [
+     825,
+     "payload_failed"
+    ],
+    [
+     859,
+     "preamble_missed"
+    ],
+    [
+     867,
+     "payload_failed"
+    ],
+    [
+     868,
+     "payload_failed"
+    ],
+    [
+     892,
+     "preamble_missed"
+    ],
+    [
+     904,
+     "payload_failed"
+    ],
+    [
+     955,
+     "payload_failed"
+    ],
+    [
+     973,
+     "payload_failed"
+    ],
+    [
+     992,
+     "payload_failed"
+    ],
+    [
+     994,
+     "payload_failed"
+    ],
+    [
+     1010,
+     "payload_failed"
+    ],
+    [
+     1038,
+     "preamble_missed"
+    ],
+    [
+     1100,
+     "preamble_missed"
+    ],
+    [
+     1121,
+     "payload_failed"
+    ],
+    [
+     1122,
+     "payload_failed"
+    ],
+    [
+     1137,
+     "payload_failed"
+    ],
+    [
+     1158,
+     "payload_failed"
+    ],
+    [
+     1163,
+     "payload_failed"
+    ],
+    [
+     1247,
+     "payload_failed"
+    ],
+    [
+     1248,
+     "payload_failed"
+    ],
+    [
+     1267,
+     "payload_failed"
+    ],
+    [
+     1340,
+     "payload_failed"
+    ],
+    [
+     1341,
+     "payload_failed"
+    ],
+    [
+     1367,
+     "preamble_missed"
+    ],
+    [
+     1373,
+     "payload_failed"
+    ],
+    [
+     1375,
+     "payload_failed"
+    ],
+    [
+     1376,
+     "payload_failed"
+    ],
+    [
+     1412,
+     "payload_failed"
+    ],
+    [
+     1420,
+     "payload_failed"
+    ],
+    [
+     1450,
+     "payload_failed"
+    ],
+    [
+     1460,
+     "payload_failed"
+    ],
+    [
+     1476,
+     "payload_failed"
+    ],
+    [
+     1516,
+     "preamble_missed"
+    ],
+    [
+     1518,
+     "payload_failed"
+    ],
+    [
+     1629,
+     "payload_failed"
+    ],
+    [
+     1645,
+     "payload_failed"
+    ],
+    [
+     1666,
+     "payload_failed"
+    ],
+    [
+     1675,
+     "payload_failed"
+    ],
+    [
+     1681,
+     "payload_failed"
+    ],
+    [
+     1756,
+     "payload_failed"
+    ],
+    [
+     1757,
+     "payload_failed"
+    ],
+    [
+     1793,
+     "payload_failed"
+    ],
+    [
+     1808,
+     "payload_failed"
+    ],
+    [
+     1839,
+     "payload_failed"
+    ],
+    [
+     1843,
+     "payload_failed"
+    ],
+    [
+     1872,
+     "preamble_missed"
+    ],
+    [
+     1883,
+     "payload_failed"
+    ],
+    [
+     1936,
+     "preamble_missed"
+    ],
+    [
+     1963,
+     "payload_failed"
+    ],
+    [
+     1982,
+     "payload_failed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "v5m8_tx-26p25_g16_64_rep.npy",
+  "stem": "v5m8_tx-26p25_g16_64_rep",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -26.25,
+  "guards": [
+   16,
+   64
+  ],
+  "scrambler": true,
+  "payload": "random",
+  "sets": [],
+  "sent": 2000,
+  "decoded": 1892,
+  "loss": 0.05400000000000005,
+  "loss_ci95": [
+   0.044922002716516085,
+   0.06478806618314145
+  ],
+  "preamble_missed": 50,
+  "sig_failed": 0,
+  "payload_failed": 58,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   1.37,
+   1.52,
+   1.4
+  ],
+  "candidates": 1950,
+  "candidates_v5": 1950,
+  "candidates_legacy": 0,
+  "header_ok": 1950,
+  "header_fail": 0,
+  "payload_fail": 58,
+  "psdu_fcs_failures": 58,
+  "bursts_v5": 1892,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": 4.290870804785321,
+  "preamble_snr_db_median": 5.272002318187612,
+  "preamble_snr_db_iqr": 2.1847418715940563,
+  "preamble_snr_count": 1950,
+  "burst_snr_db_median": 5.272002318187612,
+  "burst_snr_db_iqr": 2.1847418715940563,
+  "burst_snr_count": 1950,
+  "noise_floor_dbfs": -51.48478510504228,
+  "decoded_burst_power_dbfs_median": -47.93404927458767,
+  "decoded_burst_wideband_snr_db": 1.0210015251439033,
+  "decode_seconds": 20.46096393399057,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 108,
+   "attribution": "positions",
+   "spacing_samples": 49998.858664776846,
+   "loo_jitter_samples_p50": 681.0833333320916,
+   "loo_jitter_samples_p99": 7142.3999999999305,
+   "loo_jitter_samples_max": 17689.5,
+   "window_samples": 10000,
+   "preamble_missed": 50,
+   "sig_failed": 0,
+   "payload_failed": 58,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     15,
+     "payload_failed"
+    ],
+    [
+     18,
+     "payload_failed"
+    ],
+    [
+     26,
+     "preamble_missed"
+    ],
+    [
+     66,
+     "preamble_missed"
+    ],
+    [
+     116,
+     "preamble_missed"
+    ],
+    [
+     152,
+     "payload_failed"
+    ],
+    [
+     154,
+     "preamble_missed"
+    ],
+    [
+     158,
+     "payload_failed"
+    ],
+    [
+     230,
+     "payload_failed"
+    ],
+    [
+     232,
+     "payload_failed"
+    ],
+    [
+     233,
+     "payload_failed"
+    ],
+    [
+     270,
+     "preamble_missed"
+    ],
+    [
+     298,
+     "payload_failed"
+    ],
+    [
+     303,
+     "preamble_missed"
+    ],
+    [
+     317,
+     "payload_failed"
+    ],
+    [
+     323,
+     "payload_failed"
+    ],
+    [
+     357,
+     "payload_failed"
+    ],
+    [
+     359,
+     "payload_failed"
+    ],
+    [
+     396,
+     "payload_failed"
+    ],
+    [
+     408,
+     "preamble_missed"
+    ],
+    [
+     410,
+     "payload_failed"
+    ],
+    [
+     484,
+     "preamble_missed"
+    ],
+    [
+     486,
+     "preamble_missed"
+    ],
+    [
+     487,
+     "payload_failed"
+    ],
+    [
+     500,
+     "payload_failed"
+    ],
+    [
+     536,
+     "payload_failed"
+    ],
+    [
+     579,
+     "preamble_missed"
+    ],
+    [
+     613,
+     "payload_failed"
+    ],
+    [
+     614,
+     "preamble_missed"
+    ],
+    [
+     650,
+     "preamble_missed"
+    ],
+    [
+     668,
+     "preamble_missed"
+    ],
+    [
+     720,
+     "payload_failed"
+    ],
+    [
+     740,
+     "payload_failed"
+    ],
+    [
+     742,
+     "payload_failed"
+    ],
+    [
+     756,
+     "payload_failed"
+    ],
+    [
+     771,
+     "payload_failed"
+    ],
+    [
+     777,
+     "preamble_missed"
+    ],
+    [
+     793,
+     "preamble_missed"
+    ],
+    [
+     799,
+     "preamble_missed"
+    ],
+    [
+     823,
+     "preamble_missed"
+    ],
+    [
+     865,
+     "payload_failed"
+    ],
+    [
+     867,
+     "payload_failed"
+    ],
+    [
+     869,
+     "payload_failed"
+    ],
+    [
+     871,
+     "payload_failed"
+    ],
+    [
+     883,
+     "preamble_missed"
+    ],
+    [
+     884,
+     "preamble_missed"
+    ],
+    [
+     904,
+     "payload_failed"
+    ],
+    [
+     909,
+     "preamble_missed"
+    ],
+    [
+     914,
+     "preamble_missed"
+    ],
+    [
+     925,
+     "payload_failed"
+    ],
+    [
+     966,
+     "payload_failed"
+    ],
+    [
+     995,
+     "payload_failed"
+    ],
+    [
+     1006,
+     "payload_failed"
+    ],
+    [
+     1031,
+     "preamble_missed"
+    ],
+    [
+     1105,
+     "payload_failed"
+    ],
+    [
+     1121,
+     "payload_failed"
+    ],
+    [
+     1127,
+     "preamble_missed"
+    ],
+    [
+     1137,
+     "preamble_missed"
+    ],
+    [
+     1148,
+     "payload_failed"
+    ],
+    [
+     1158,
+     "payload_failed"
+    ],
+    [
+     1170,
+     "payload_failed"
+    ],
+    [
+     1187,
+     "preamble_missed"
+    ],
+    [
+     1246,
+     "preamble_missed"
+    ],
+    [
+     1248,
+     "preamble_missed"
+    ],
+    [
+     1253,
+     "preamble_missed"
+    ],
+    [
+     1264,
+     "payload_failed"
+    ],
+    [
+     1285,
+     "preamble_missed"
+    ],
+    [
+     1313,
+     "payload_failed"
+    ],
+    [
+     1373,
+     "preamble_missed"
+    ],
+    [
+     1375,
+     "payload_failed"
+    ],
+    [
+     1389,
+     "payload_failed"
+    ],
+    [
+     1391,
+     "preamble_missed"
+    ],
+    [
+     1401,
+     "preamble_missed"
+    ],
+    [
+     1412,
+     "payload_failed"
+    ],
+    [
+     1428,
+     "preamble_missed"
+    ],
+    [
+     1485,
+     "preamble_missed"
+    ],
+    [
+     1492,
+     "preamble_missed"
+    ],
+    [
+     1502,
+     "payload_failed"
+    ],
+    [
+     1509,
+     "payload_failed"
+    ],
+    [
+     1518,
+     "preamble_missed"
+    ],
+    [
+     1539,
+     "payload_failed"
+    ],
+    [
+     1545,
+     "payload_failed"
+    ],
+    [
+     1552,
+     "preamble_missed"
+    ],
+    [
+     1574,
+     "preamble_missed"
+    ],
+    [
+     1624,
+     "preamble_missed"
+    ],
+    [
+     1629,
+     "payload_failed"
+    ],
+    [
+     1630,
+     "preamble_missed"
+    ],
+    [
+     1643,
+     "preamble_missed"
+    ],
+    [
+     1653,
+     "payload_failed"
+    ],
+    [
+     1678,
+     "preamble_missed"
+    ],
+    [
+     1739,
+     "preamble_missed"
+    ],
+    [
+     1761,
+     "payload_failed"
+    ],
+    [
+     1769,
+     "preamble_missed"
+    ],
+    [
+     1772,
+     "payload_failed"
+    ],
+    [
+     1779,
+     "payload_failed"
+    ],
+    [
+     1793,
+     "payload_failed"
+    ],
+    [
+     1795,
+     "preamble_missed"
+    ],
+    [
+     1798,
+     "preamble_missed"
+    ],
+    [
+     1805,
+     "payload_failed"
+    ],
+    [
+     1806,
+     "preamble_missed"
+    ],
+    [
+     1881,
+     "preamble_missed"
+    ],
+    [
+     1883,
+     "preamble_missed"
+    ],
+    [
+     1884,
+     "payload_failed"
+    ],
+    [
+     1899,
+     "payload_failed"
+    ],
+    [
+     1905,
+     "payload_failed"
+    ],
+    [
+     1920,
+     "payload_failed"
+    ],
+    [
+     1936,
+     "payload_failed"
+    ],
+    [
+     1970,
+     "preamble_missed"
+    ]
+   ]
+  }
+ },
+ {
+  "file": "v5m8_tx-26p25_g256_256.npy",
+  "stem": "v5m8_tx-26p25_g256_256",
+  "family": "v5",
+  "mcs": "qpsk",
+  "mcs_index": 8,
+  "tx_gain_db": -26.25,
+  "guards": [
+   256,
+   256
+  ],
+  "scrambler": true,
+  "payload": "random",
+  "sets": [],
+  "sent": 2000,
+  "decoded": 1916,
+  "loss": 0.04200000000000004,
+  "loss_ci95": [
+   0.03405148346729877,
+   0.05170459625477109
+  ],
+  "preamble_missed": 34,
+  "sig_failed": 0,
+  "payload_failed": 50,
+  "stage_attribution": "positions",
+  "rx_overflow_events": 0,
+  "loadavg_at_capture": [
+   1.4,
+   1.54,
+   1.4
+  ],
+  "candidates": 1968,
+  "candidates_v5": 1968,
+  "candidates_legacy": 0,
+  "header_ok": 1967,
+  "header_fail": 1,
+  "payload_fail": 51,
+  "psdu_fcs_failures": 51,
+  "bursts_v5": 1916,
+  "bursts_legacy": 0,
+  "evm_snr_db_median": 4.356644591935374,
+  "preamble_snr_db_median": 5.061307115930279,
+  "preamble_snr_db_iqr": 2.0477311803281983,
+  "preamble_snr_count": 1967,
+  "burst_snr_db_median": 5.061510615853097,
+  "burst_snr_db_iqr": 2.049214943357102,
+  "burst_snr_count": 1966,
+  "noise_floor_dbfs": -51.644179428331014,
+  "decoded_burst_power_dbfs_median": -47.97296483543218,
+  "decoded_burst_wideband_snr_db": 1.2344080880900208,
+  "decode_seconds": 17.10830256799818,
+  "workers": 1,
+  "stage_detail": {
+   "lost": 84,
+   "attribution": "positions",
+   "spacing_samples": 49998.64793023554,
+   "loo_jitter_samples_p50": 589.75,
+   "loo_jitter_samples_p99": 9726.869999999999,
+   "loo_jitter_samples_max": 23918.0,
+   "window_samples": 10000,
+   "preamble_missed": 34,
+   "sig_failed": 0,
+   "payload_failed": 50,
+   "decoded_elsewhere": 0,
+   "lost_detail": [
+    [
+     0,
+     "preamble_missed"
+    ],
+    [
+     10,
+     "payload_failed"
+    ],
+    [
+     30,
+     "preamble_missed"
+    ],
+    [
+     84,
+     "preamble_missed"
+    ],
+    [
+     92,
+     "preamble_missed"
+    ],
+    [
+     103,
+     "payload_failed"
+    ],
+    [
+     105,
+     "payload_failed"
+    ],
+    [
+     106,
+     "preamble_missed"
+    ],
+    [
+     142,
+     "preamble_missed"
+    ],
+    [
+     230,
+     "payload_failed"
+    ],
+    [
+     232,
+     "payload_failed"
+    ],
+    [
+     271,
+     "payload_failed"
+    ],
+    [
+     313,
+     "preamble_missed"
+    ],
+    [
+     346,
+     "payload_failed"
+    ],
+    [
+     357,
+     "preamble_missed"
+    ],
+    [
+     359,
+     "preamble_missed"
+    ],
+    [
+     375,
+     "payload_failed"
+    ],
+    [
+     394,
+     "preamble_missed"
+    ],
+    [
+     437,
+     "preamble_missed"
+    ],
+    [
+     456,
+     "preamble_missed"
+    ],
+    [
+     500,
+     "payload_failed"
+    ],
+    [
+     533,
+     "payload_failed"
+    ],
+    [
+     569,
+     "preamble_missed"
+    ],
+    [
+     595,
+     "payload_failed"
+    ],
+    [
+     610,
+     "payload_failed"
+    ],
+    [
+     613,
+     "payload_failed"
+    ],
+    [
+     650,
+     "payload_failed"
+    ],
+    [
+     687,
+     "preamble_missed"
+    ],
+    [
+     740,
+     "payload_failed"
+    ],
+    [
+     756,
+     "payload_failed"
+    ],
+    [
+     777,
+     "payload_failed"
+    ],
+    [
+     818,
+     "payload_failed"
+    ],
+    [
+     856,
+     "payload_failed"
+    ],
+    [
+     865,
+     "payload_failed"
+    ],
+    [
+     868,
+     "preamble_missed"
+    ],
+    [
+     883,
+     "payload_failed"
+    ],
+    [
+     899,
+     "preamble_missed"
+    ],
+    [
+     904,
+     "preamble_missed"
+    ],
+    [
+     958,
+     "payload_failed"
+    ],
+    [
+     994,
+     "payload_failed"
+    ],
+    [
+     1010,
+     "payload_failed"
+    ],
+    [
+     1021,
+     "payload_failed"
+    ],
+    [
+     1031,
+     "payload_failed"
+    ],
+    [
+     1111,
+     "payload_failed"
+    ],
+    [
+     1117,
+     "preamble_missed"
+    ],
+    [
+     1135,
+     "payload_failed"
+    ],
+    [
+     1158,
+     "payload_failed"
+    ],
+    [
+     1174,
+     "preamble_missed"
+    ],
+    [
+     1194,
+     "preamble_missed"
+    ],
+    [
+     1195,
+     "preamble_missed"
+    ],
+    [
+     1202,
+     "preamble_missed"
+    ],
+    [
+     1248,
+     "payload_failed"
+    ],
+    [
+     1249,
+     "payload_failed"
+    ],
+    [
+     1278,
+     "preamble_missed"
+    ],
+    [
+     1281,
+     "payload_failed"
+    ],
+    [
+     1357,
+     "payload_failed"
+    ],
+    [
+     1373,
+     "payload_failed"
+    ],
+    [
+     1412,
+     "preamble_missed"
+    ],
+    [
+     1418,
+     "payload_failed"
+    ],
+    [
+     1469,
+     "payload_failed"
+    ],
+    [
+     1500,
+     "preamble_missed"
+    ],
+    [
+     1502,
+     "preamble_missed"
+    ],
+    [
+     1503,
+     "payload_failed"
+    ],
+    [
+     1516,
+     "payload_failed"
+    ],
+    [
+     1519,
+     "payload_failed"
+    ],
+    [
+     1564,
+     "preamble_missed"
+    ],
+    [
+     1593,
+     "preamble_missed"
+    ],
+    [
+     1629,
+     "preamble_missed"
+    ],
+    [
+     1630,
+     "payload_failed"
+    ],
+    [
+     1643,
+     "preamble_missed"
+    ],
+    [
+     1666,
+     "payload_failed"
+    ],
+    [
+     1723,
+     "preamble_missed"
+    ],
+    [
+     1756,
+     "payload_failed"
+    ],
+    [
+     1772,
+     "payload_failed"
+    ],
+    [
+     1793,
+     "preamble_missed"
+    ],
+    [
+     1808,
+     "preamble_missed"
+    ],
+    [
+     1825,
+     "preamble_missed"
+    ],
+    [
+     1881,
+     "payload_failed"
+    ],
+    [
+     1882,
+     "payload_failed"
+    ],
+    [
+     1883,
+     "payload_failed"
+    ],
+    [
+     1899,
+     "payload_failed"
+    ],
+    [
+     1920,
+     "payload_failed"
+    ],
+    [
+     1932,
+     "payload_failed"
+    ],
+    [
+     1946,
+     "payload_failed"
+    ]
+   ]
+  }
+ }
+]
