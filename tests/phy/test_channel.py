@@ -473,3 +473,100 @@ def test_normalized_evm_rejects_inputs_it_cannot_compare() -> None:
     assert normalized_evm(reference, reference[:-1]) == (None, None)
     assert normalized_evm(reference[:0], reference[:0]) == (None, None)
     assert normalized_evm(reference, np.zeros_like(reference)) == (None, None)
+
+
+def _averaged_ls(rng: np.random.Generator, noise_variance: float, symbols: int):
+    from ofdm_link.phy.channel import ChannelEstimate
+
+    numerology = OfdmNumerology()
+    carriers = np.asarray(numerology.active_carriers)
+    taps = np.array([0.9, 0.3 - 0.2j, 0.1j])
+    truth = np.exp(-2j * np.pi * np.outer(carriers, np.arange(3)) / 64) @ taps
+    noise = rng.standard_normal((symbols, carriers.size)) + 1j * rng.standard_normal(
+        (symbols, carriers.size)
+    )
+    measured = truth + np.sqrt(noise_variance / 2) * noise.mean(axis=0)
+    return ChannelEstimate(measured.astype(np.complex64), numerology.active_carriers)
+
+
+def test_averaged_symbols_reports_the_noise_per_sample_not_per_estimate() -> None:
+    """The LTF pair's LS estimate carries half the noise of one symbol.
+
+    Its residual therefore measures sigma^2 / 2; scaled back by the symbol
+    count and pooled with the per-sample LTF-difference estimate it must
+    come out at sigma^2.  Without the scaling the pooled value lands near
+    0.8 sigma^2 and the smoothing test compares against the wrong limit.
+    """
+
+    from ofdm_link.phy.channel import refine_channel_estimate
+
+    rng = np.random.default_rng(20261101)
+    variance = 0.02
+    scaled, unscaled = [], []
+    for _ in range(300):
+        estimate = _averaged_ls(rng, variance, 2)
+        scaled.append(
+            refine_channel_estimate(
+                estimate,
+                preamble_noise_variance=variance,
+                preamble_degrees_of_freedom=52,
+                averaged_symbols=2,
+            )
+        )
+        unscaled.append(
+            refine_channel_estimate(
+                estimate, preamble_noise_variance=variance, preamble_degrees_of_freedom=52
+            ).noise_variance
+        )
+    assert all(item.smoothed for item in scaled)
+    assert np.mean([item.noise_variance for item in scaled]) == pytest.approx(variance, rel=0.03)
+    assert np.mean(unscaled) < 0.85 * variance
+
+
+def test_averaged_symbols_without_a_preamble_estimate_scales_the_residual() -> None:
+    from ofdm_link.phy.channel import refine_channel_estimate
+
+    rng = np.random.default_rng(7)
+    readings = [
+        refine_channel_estimate(_averaged_ls(rng, 0.05, 2), averaged_symbols=2).noise_variance
+        for _ in range(300)
+    ]
+
+    assert np.mean(readings) == pytest.approx(0.05, rel=0.05)
+
+
+@pytest.mark.parametrize("count", [0, -1, 1.5, True])
+def test_averaged_symbols_must_be_a_positive_integer(count: object) -> None:
+    from ofdm_link.phy.channel import ChannelEstimationError, refine_channel_estimate
+
+    with pytest.raises(ChannelEstimationError):
+        refine_channel_estimate(
+            _averaged_ls(np.random.default_rng(1), 0.01, 1),
+            averaged_symbols=count,  # type: ignore[arg-type]
+        )
+
+
+def test_common_phase_only_equalization_removes_one_phase_and_reports_no_slope() -> None:
+    from ofdm_link.phy.channel import ChannelEstimate
+
+    numerology = OfdmNumerology()
+    rng = np.random.default_rng(9)
+    symbols = (rng.choice([-1.0, 1.0], 48 * 3)).astype(np.complex64)
+    waveform = modulate_ofdm(symbols, numerology).samples * np.exp(1j * 0.9)
+    gains = (0.5 + rng.random(52)) * np.exp(1j * rng.uniform(-np.pi, np.pi, 52))
+    # Apply the per-carrier channel in the frequency domain, symbol by symbol.
+    blocks = waveform.reshape(3, 80)[:, 16:]
+    spectrum = np.fft.fft(blocks, axis=1, norm="ortho")
+    bins = np.asarray(numerology.active_carriers) % 64
+    spectrum[:, bins] *= gains
+    useful = np.fft.ifft(spectrum, axis=1, norm="ortho")
+    received = np.concatenate((useful[:, -16:], useful), axis=1).reshape(-1)
+    estimate = ChannelEstimate(gains.astype(np.complex64), numerology.active_carriers)
+
+    batch = equalize_with_pilots(received, estimate, numerology, common_phase_only=True)
+
+    assert np.allclose(batch.common_phase_rad, 0.9, atol=1e-5)
+    assert not batch.phase_slope_rad_per_carrier.any()
+    assert np.allclose(batch.data_symbols.reshape(-1), symbols, atol=1e-4)
+    with pytest.raises(ChannelEstimationError):
+        equalize_with_pilots(received, estimate, numerology, common_phase_only=1)  # type: ignore[arg-type]
