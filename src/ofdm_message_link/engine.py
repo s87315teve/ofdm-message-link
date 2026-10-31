@@ -70,6 +70,7 @@ class _EventSink:
         self.sent = _Signal(self, "sent")
         self.level = _Signal(self, "level")
         self.failed = _Signal(self, "failed")
+        self.link_snr = _Signal(self, "link_snr")
 
     def put(self, kind: str, value: object) -> None:
         try:
@@ -400,6 +401,8 @@ class ProcessReceiveWorker:
             self._bridge.level.emit(value)
         elif kind == "failed":
             self._bridge.failed.emit(value)
+        elif kind == "link_snr":
+            self._bridge.link_snr.emit(value)
         elif kind == "samples":
             self._plot_buffers.set_samples(value)
         elif kind == "symbols":

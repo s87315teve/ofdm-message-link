@@ -180,6 +180,20 @@ def test_snr_is_the_mean_of_the_last_two_seconds():
     assert view.snr_2s is None
 
 
+def test_preamble_snr_counts_every_acquired_burst_and_feeds_the_trend():
+    board = RxDashboard()
+    board.observe_burst(1.0, 12.0)
+    # Two more bursts were acquired but lost; their preamble SNR still counts.
+    for t, value in ((0.5, 9.0), (1.0, 15.0), (1.5, 6.0)):
+        board.observe_link_snr(t, value)
+    view = board.refresh(1.5, _counters(1, 2), mcs_index=0)
+    assert view.link_snr_2s == pytest.approx(10.0)
+    assert view.snr_2s == pytest.approx(12.0)
+    assert view.trend[-1].secondary == pytest.approx(10.0)
+    board.reset(2.0, _counters(1, 2))
+    assert board.refresh(2.5, _counters(1, 2), mcs_index=0).link_snr_2s is None
+
+
 def test_a_rising_decode_counter_counts_as_a_burst_for_the_light():
     board = RxDashboard()
     board.refresh(0.0, _counters(0, 0), mcs_index=None)

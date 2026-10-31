@@ -274,11 +274,14 @@ class Baseline:
 class RxView:
     goodput_bps: float
     loss_10s: float | None
+    # Decision-directed SNR of decoded bursts; the light's thresholds use it.
     snr_2s: float | None
     light: Light
     recent: dict[str, int]
     totals: dict[str, int]
     trend: tuple[TrendPoint, ...]
+    # Preamble SNR of every burst acquired in the window, decoded or not.
+    link_snr_2s: float | None = None
 
 
 class RxDashboard:
@@ -293,6 +296,7 @@ class RxDashboard:
         self._goodput = RateMeter(GOODPUT_WINDOW_S)
         self._window = WindowedCounters(LOSS_WINDOW_S)
         self._snr = SampleWindow(SNR_WINDOW_S)
+        self._link_snr = SampleWindow(SNR_WINDOW_S)
         self._trend = Trend()
         self._baseline = Baseline()
         self._last_burst_at: float | None = None
@@ -306,6 +310,11 @@ class RxDashboard:
         )
         if snr_db is not None:
             self._snr.add(now, snr_db)
+
+    def observe_link_snr(self, now: float, snr_db: float) -> None:
+        """Record one acquired burst's preamble SNR, whether or not it decoded."""
+
+        self._link_snr.add(now, snr_db)
 
     def refresh(self, now: float, counters: Mapping[str, int], *, mcs_index: int | None) -> RxView:
         previous = self._previous
@@ -327,8 +336,9 @@ class RxDashboard:
         expected = recent.get("bursts_decoded", 0) + recent.get("missing_bursts", 0)
         loss = None if expected <= 0 else recent.get("missing_bursts", 0) / expected
         snr = self._snr.mean(now)
+        link_snr = self._link_snr.mean(now)
         goodput = self._goodput.bits_per_second
-        self._trend.append(TrendPoint(now, goodput, snr, lost_now))
+        self._trend.append(TrendPoint(now, goodput, link_snr, lost_now))
         light = rx_light(
             now=now,
             last_burst_at=self._last_burst_at,
@@ -336,7 +346,7 @@ class RxDashboard:
             snr_2s=snr,
             mcs_index=mcs_index,
         )
-        return RxView(goodput, loss, snr, light, recent, totals, self._trend.points())
+        return RxView(goodput, loss, snr, light, recent, totals, self._trend.points(), link_snr)
 
     def reset(self, now: float, counters: Mapping[str, int]) -> None:
         """Make the current counter values the new zero.
@@ -351,6 +361,7 @@ class RxDashboard:
         self._goodput = RateMeter(GOODPUT_WINDOW_S)
         self._window.clear()
         self._snr.clear()
+        self._link_snr.clear()
         self._trend.clear()
         self._previous = dict(counters)
 

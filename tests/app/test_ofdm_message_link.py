@@ -2310,6 +2310,7 @@ class _RecordingBridge:
         self.sent = _RecordingSignal()
         self.level = _RecordingSignal()
         self.failed = _RecordingSignal()
+        self.link_snr = _RecordingSignal()
 
 
 def test_process_engines_carry_ingress_to_egress_and_leave_no_process_behind():
@@ -2383,6 +2384,10 @@ def test_process_engines_carry_ingress_to_egress_and_leave_no_process_behind():
         assert len(tx_bridge.sent.values) == 2
         assert all(item.payload_symbols.size == 0 for item in rx_bridge.message.values)
         assert "chunks_dropped_overflow" in receiver.source.snapshot()
+        # Every acquired burst's preamble SNR crosses the process boundary;
+        # with no noise added it sits at the estimator's 60 dB ceiling.
+        snrs = [value for batch in rx_bridge.link_snr.values for value in batch]
+        assert len(snrs) >= 2 and all(50.0 < value < 61.0 for value in snrs)
         assert not rx_bridge.failed.values and not tx_bridge.failed.values
     finally:
         transmitter.stop()

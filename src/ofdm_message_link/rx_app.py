@@ -50,6 +50,8 @@ class _Bridge(QtCore.QObject):
     message = QtCore.pyqtSignal(object)
     level = QtCore.pyqtSignal(float)
     failed = QtCore.pyqtSignal(str)
+    # Preamble SNR in dB of each burst acquired, decoded or not.
+    link_snr = QtCore.pyqtSignal(object)
 
 
 class ReceiveWorker:
@@ -145,6 +147,10 @@ class ReceiveWorker:
                 self._bridge.failed.emit(f"{type(error).__name__}: {error}")
                 continue
             self._plot_buffers.set_samples(chunk)
+            drain_snr = getattr(self._receiver, "drain_link_snr_db", None)
+            snrs = () if drain_snr is None else drain_snr()
+            if snrs:
+                self._bridge.link_snr.emit(snrs)
             observations = self._receiver.drain_observations()
             for observation in observations:
                 self._plot_buffers.add_symbols(
@@ -248,7 +254,10 @@ class ReceiveWindow(QtWidgets.QWidget):
         self._goodput_now = RateMeter()
         self._latencies: deque[float] = deque(maxlen=_LATENCY_HISTORY)
         self._evms: deque[float] = deque(maxlen=_LATENCY_HISTORY)
-        self._snrs: deque[float] = deque(maxlen=_LATENCY_HISTORY)
+        # Decision-directed SNR of decoded bursts, kept beside the preamble
+        # SNR until the latter has been checked against it on the air.
+        self._evm_snrs: deque[float] = deque(maxlen=_LATENCY_HISTORY)
+        self._link_snrs: deque[float] = deque(maxlen=_LATENCY_HISTORY)
         self._same_clock_domain: bool | None = None
         self._bursts_seen = 0
         self._mcs_counts: Counter[int] = Counter()
@@ -267,6 +276,7 @@ class ReceiveWindow(QtWidgets.QWidget):
         self._bridge.message.connect(self._on_message)
         self._bridge.level.connect(self._on_level)
         self._bridge.failed.connect(self._on_failed)
+        self._bridge.link_snr.connect(self._on_link_snr)
 
         self._worker.start()
         self._status.setText(f"forwarding delivered messages to {self._egress_address}")
@@ -431,7 +441,15 @@ class ReceiveWindow(QtWidgets.QWidget):
         if observation.evm is not None:
             self._evms.append(observation.evm)
         if observation.effective_snr_db is not None:
-            self._snrs.append(observation.effective_snr_db)
+            self._evm_snrs.append(observation.effective_snr_db)
+
+    def _on_link_snr(self, values) -> None:
+        """Record the preamble SNR of bursts acquired, including lost ones."""
+
+        now = time.monotonic()
+        for value in values:
+            self._dashboard.observe_link_snr(now, value)
+            self._link_snrs.append(value)
 
     def _on_message(self, received: ReceivedMessage) -> None:
         if received.latency_s is not None:
@@ -535,10 +553,11 @@ class ReceiveWindow(QtWidgets.QWidget):
         else:
             missing = view.recent.get("missing_bursts", 0)
             self._loss_card.set_value(f"{view.loss_10s * 100:.2f} %", f"{missing} bursts missing")
-        if view.snr_2s is None:
-            self._snr_card.set_value("\u2014", "no burst in 2 s")
+        evm = "EVM \u2014" if view.snr_2s is None else f"EVM-based {view.snr_2s:.1f} dB"
+        if view.link_snr_2s is None:
+            self._snr_card.set_value("\u2014", f"no burst in 2 s; {evm}")
         else:
-            self._snr_card.set_value(f"{view.snr_2s:.1f} dB", "effective SNR")
+            self._snr_card.set_value(f"{view.link_snr_2s:.1f} dB", f"preamble; {evm}")
         if self._last_mcs is None:
             self._mcs_card.set_value("\u2014", "from burst header")
         else:
@@ -558,7 +577,8 @@ class ReceiveWindow(QtWidgets.QWidget):
         self._started = now
         self._latencies.clear()
         self._evms.clear()
-        self._snrs.clear()
+        self._evm_snrs.clear()
+        self._link_snrs.clear()
         self._mcs_counts.clear()
         self._level_floor_dbfs = self._level_dbfs
         self._level_peak_dbfs = self._level_dbfs
@@ -608,7 +628,10 @@ class ReceiveWindow(QtWidgets.QWidget):
             f"delivered goodput    {totals.get('message_bytes_delivered', 0) * 8 / elapsed:10.0f}"
             " bit/s   (average since reset)",
             f"mean EVM             {_mean(self._evms, '{:10.4f}')}",
-            f"mean effective SNR   {_mean(self._snrs, '{:10.1f}')} dB   (last 64 bursts)",
+            f"mean SNR (preamble)  {_mean(self._link_snrs, '{:10.1f}')} dB"
+            "   (last 64 bursts, lost ones included)",
+            f"mean SNR (EVM)       {_mean(self._evm_snrs, '{:10.1f}')} dB"
+            "   (last 64 decoded bursts)",
             f"mean one-way latency {self._latency_text()}",
             f"last burst           {self._last_burst_text()}",
             f"last burst MCS       {self._last_mcs_text()}",
@@ -673,9 +696,9 @@ class ReceiveWindow(QtWidgets.QWidget):
             "receiver": asdict(stats),
             "goodput_now_bps": self._goodput_now.bits_per_second,
             "decoder": None if decoder is None else asdict(decoder),
-            "mean_effective_snr_db": (
-                sum(self._snrs) / len(self._snrs) if self._snrs else None
-            ),
+            "snr_method": "preamble",
+            "mean_effective_snr_db": _mean_or_none(self._link_snrs),
+            "mean_evm_snr_db": _mean_or_none(self._evm_snrs),
             "egress_datagrams": self._worker.egress_datagrams,
             "transport": transport,
             # Dashboard view, added for the GUI; the fields above keep their
@@ -683,7 +706,8 @@ class ReceiveWindow(QtWidgets.QWidget):
             "link_state": view.light.state,
             "link_reason": view.light.reason,
             "loss_10s": view.loss_10s,
-            "snr_2s": view.snr_2s,
+            "snr_2s": view.link_snr_2s,
+            "evm_snr_2s": view.snr_2s,
             "mcs_index": None if self._last_mcs is None else self._last_mcs.index,
         }
         self._stats_log.write(json.dumps(record, default=str) + "\n")
@@ -739,6 +763,10 @@ class ReceiveWindow(QtWidgets.QWidget):
 
 def _dbfs(value: float | None) -> str:
     return "       n/a" if value is None else f"{value:10.1f} dBFS"
+
+
+def _mean_or_none(values) -> float | None:
+    return sum(values) / len(values) if values else None
 
 
 def _mean(values, template: str) -> str:

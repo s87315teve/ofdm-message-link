@@ -447,6 +447,15 @@ class MessageReceiver:
         self._observations.clear()
         return drained
 
+    def drain_link_snr_db(self) -> tuple[float, ...]:
+        """Preamble SNR, in dB, of every burst acquired since the last call.
+
+        Unlike a burst's EVM, this is measured whether or not the burst then
+        decoded, so it keeps describing the channel while bursts are lost.
+        """
+
+        return self._decoder.drain_link_snr_db()
+
     def decoder_snapshot(self):
         """Return bounded acquisition/header/payload counters for observers."""
 
