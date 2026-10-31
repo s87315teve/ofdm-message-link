@@ -229,13 +229,13 @@
         <rect x="1178" y="416" width="124" height="88" rx="10"/>
         <text class="t-title" x="1240" y="446" text-anchor="middle">Acquisition</text>
         <text class="t-sub" x="1240" y="468" text-anchor="middle">Schmidl–Cox</text>
-        <text class="t-sub" x="1240" y="484" text-anchor="middle">CFO + gain</text>
+        <text class="t-sub" x="1240" y="484" text-anchor="middle">CFO, gain, SNR</text>
       </g>
       <g class="blk rx" data-id="rx-header" tabindex="0" role="button">
         <rect x="1034" y="416" width="124" height="88" rx="10"/>
         <text class="t-title" x="1096" y="446" text-anchor="middle">Header decode</text>
-        <text class="t-sub" x="1096" y="468" text-anchor="middle">channel estimate</text>
-        <text class="t-sub" x="1096" y="484" text-anchor="middle">3× repeat + CRC</text>
+        <text class="t-sub" x="1096" y="468" text-anchor="middle">smoothed channel</text>
+        <text class="t-sub" x="1096" y="484" text-anchor="middle">CRC, then ML list</text>
       </g>
       <g class="blk rx" data-id="rx-eq" tabindex="0" role="button">
         <rect x="890" y="416" width="124" height="88" rx="10"/>
@@ -247,7 +247,7 @@
         <rect x="746" y="416" width="124" height="88" rx="10"/>
         <text class="t-title" x="808" y="446" text-anchor="middle">Demapper</text>
         <text class="t-sub" x="808" y="468" text-anchor="middle">Turbo: soft LLR</text>
-        <text class="t-sub" x="808" y="484" text-anchor="middle">QPSK / 16QAM</text>
+        <text class="t-sub" x="808" y="484" text-anchor="middle">noise from header</text>
       </g>
       <g class="blk rx" data-id="rx-fec" tabindex="0" role="button">
         <rect x="602" y="416" width="124" height="88" rx="10"/>
@@ -285,7 +285,7 @@
       <!-- RX control: the header selects demapper and decoder -->
       <path class="ctlp" d="M1096,416 V398 H808 V414" marker-end="url(#ah-ctl)"/>
       <path class="ctlp" d="M808,398 H664 V414" marker-end="url(#ah-ctl)"/>
-      <text class="t-ctl" x="952" y="392" text-anchor="middle">header → MCS、wire version、length</text>
+      <text class="t-ctl" x="952" y="392" text-anchor="middle">header → MCS、wire version、length、noise</text>
 
       <!-- GUI instruments -->
       <g class="blk ins" data-id="gui-spectrum" tabindex="0" role="button">

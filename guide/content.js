@@ -188,19 +188,23 @@ window.GUIDE_CONTENT = (function () {
         {
           name: "Acquisition",
           does: ["這個 block 用 Schmidl–Cox metric 找 preamble。", "Preamble 在 time domain 有兩個相同的 halves。",
-            "這個 block 同時估計 fractional CFO 與 gain。"],
-          input: "Sample stream", output: "Burst 起點、CFO、gain",
+            "這個 block 同時估計 fractional CFO 與 gain。",
+            "兩個 halves 相同的部分是 signal，不同的部分是 noise。它只看 data carriers 所在的頻帶，所以每個 burst 都有一個 SNR，就算後面 decode 失敗也一樣。"],
+          input: "Sample stream", output: "Burst 起點、CFO、gain、SNR",
           code: ["<code>ofdm_link.phy.sync</code>：<code>acquire_preamble</code>", "<code>ofdm_link.phy.streaming</code>：<code>StreamingBurstDecoder</code>"],
           opts: ["Profile 的 <code>sync.detection_threshold</code>、<code>correlation_threshold</code>"],
-          gui: "RX 的 <code>Decode</code> tab：decode funnel。"
+          gui: "RX 的 <code>Decode</code> tab：decode funnel；<code>SNR (2 s)</code> card。"
         },
         {
           name: "Header decode",
-          does: ["這個 block 用 training symbol 做 channel estimation。", "然後它用 3× repetition 的 majority vote 與 CRC 解出 3 個 header symbols。",
+          does: ["這個 block 用 training symbol 做 channel estimation。Channel 的 impulse response 比 cyclic prefix 短，所以它把 estimate 平滑成 20 個 taps，去掉大部分的 noise。",
+            "然後它用 3× repetition 的 majority vote 與 CRC 解出 3 個 header symbols。",
             "CRC 失敗時，它改用 soft combining 再試一次。",
+            "還是失敗時，它從所有合法的 header 中選出最接近的一個（maximum likelihood）。",
+            "Header 解出來之後，它的 symbols 是已知的。這個 block 用它們量出 payload 會遇到的 noise。",
             "Header 提供 MCS、wire version 與 length。所以你不需要在 RX 設定 MCS。"],
-          input: "Training 與 header symbols", output: "Channel estimate、MCS、length",
-          code: ["<code>ofdm_link.phy.channel</code>：<code>estimate_channel</code>", "<code>ofdm_link.phy.burst_header</code>：<code>decode_burst_header</code>、<code>decode_burst_header_soft</code>"],
+          input: "Training 與 header symbols", output: "Channel estimate、noise variance、MCS、length",
+          code: ["<code>ofdm_link.phy.channel</code>：<code>estimate_channel</code>、<code>refine_channel_estimate</code>", "<code>ofdm_link.phy.burst_header</code>：<code>decode_burst_header</code>、<code>decode_burst_header_soft</code>、<code>decode_burst_header_list</code>"],
           opts: ["—"],
           gui: "RX message list 的每一行顯示 MCS。"
         },
@@ -215,7 +219,7 @@ window.GUIDE_CONTENT = (function () {
         },
         {
           name: "Demapper",
-          does: ["這個 block 把 symbols 變回 bits。", "Turbo（MCS 0 與 MCS 4）使用 soft demapping：它計算每個 bit 的 LLR。",
+          does: ["這個 block 把 symbols 變回 bits。", "Turbo（MCS 0 與 MCS 4）使用 soft demapping：它用 header 量到的 noise 計算每個 bit 的 LLR。",
             "Header 的 wire version 決定使用哪一種 demapper。"],
           input: "Equalized symbols", output: "Bits 或 LLRs",
           code: ["<code>ofdm_link.phy.soft</code>：<code>soft_demap_symbols</code>", "<code>ofdm_link.runtime.factory</code>：<code>select_frame_decoder</code>"],

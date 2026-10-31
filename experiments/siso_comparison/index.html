@@ -115,7 +115,7 @@ svg text { font-family: var(--font-mono); fill: var(--ink-2); }
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
 
 /* chain */
-.chain { display: grid; gap: 8px; }
+.chain { display: grid; gap: 8px; align-content: start; }
 .chain-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chip {
   font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
@@ -216,6 +216,10 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   <h1>SISO 為什麼看起來在低 SNR 比較穩？</h1>
   <p class="lede">我把兩個專案的 TX／RX 程式碼逐行讀過，再把 SISO 的 PHY 用 numpy 照原始碼移植，和你的 PHY 放進同一組 AWGN／multipath channel 裡掃 SNR。下面是兩個架構的差異、SISO 做了哪些強化，以及模擬量到的數字。</p>
   <p class="verdict"><strong>結論：</strong>SISO 的 PHY 其實沒有比你的強。在同樣的真實 SNR 下，它的 50% 成功點在 6.4 dB（AWGN）與 7.4 dB（multipath），你的 link 目前是 7.4 與 10.0 dB。差距來自你 RX 的兩個問題：Turbo decoder 拿到的 LLR 全部飽和，以及 header 只靠一個沒放大的 training symbol 做 channel estimate。兩個都只要改 RX。修掉之後，你的 link 在模擬中降到 3.5 與 5.5 dB，比 SISO 好 2–3 dB。另外兩邊顯示的 SNR 定義不同：你的 meter 比真實 SNR 低 3–5 dB，SISO 的幾乎等於真實值，所以拿畫面上的數字直接比會誤判。</p>
+  <div class="callout">
+    <p><b>後續（2026-11-01，<code>improve-rx</code> 分支）：</b>這份報告指出的兩個 RX 問題都修了，而且只改接收端、wire format 不變。另外也做了第 07 節的 noise variance、channel 平滑、header 強化與 SNR meter，並降低 acquisition 門檻。兩台 Pluto 在 2.45 GHz 實測，同一份錄音用新舊 RX 各解一次：遺失率低於 1% 所需的 TX gain，MCS 0 從 −10 dB 降到 −20 dB、MCS 4 從 −7.5 dB 降到 −12.5 dB。即時跑真的 app，MCS 0 在 TX −20 dB 從 76–77% 遺失變成 0.8–1.3%。做法與數據見 <code>experiments/rx_improvement/</code> 與 <code>docs/08-measurements.md</code> 8.7。</p>
+    <p>報告本身保留當時的分析與數字；下面只在處理鏈與建議清單加上修改後的狀態。</p>
+  </div>
   <div class="facts" id="facts"></div>
 </header>
 
@@ -374,6 +378,18 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
         <span class="chip k">Turbo max-log-MAP ×8</span><span class="arrow">→</span>
         <span class="chip">CRC → reassembly</span>
       </div>
+      <div class="lane-label">RX · improve-rx 之後（phy/sync.py, channel.py, burst.py, burst_header.py）</div>
+      <div class="chain-row">
+        <span class="chip k">Schmidl–Cox，門檻 0.25／0.30</span><span class="arrow">→</span>
+        <span class="chip k">preamble 兩半：in-band SNR</span><span class="arrow">→</span>
+        <span class="chip">CFO 修正</span><span class="arrow">→</span>
+        <span class="chip k">training LS → 20-tap 平滑</span><span class="arrow">→</span>
+        <span class="chip k">header：多數決 → soft → ML 清單</span><span class="arrow">→</span>
+        <span class="chip">pilot 修相位 ＋ SFO 追蹤</span><span class="arrow">→</span>
+        <span class="chip k">LLR：用 header 量到的 noise</span><span class="arrow">→</span>
+        <span class="chip k">Turbo max-log-MAP ×8</span><span class="arrow">→</span>
+        <span class="chip">CRC → reassembly</span>
+      </div>
     </div>
   </div>
 </section>
@@ -382,7 +398,7 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   <div class="sec-head">
     <div class="eyebrow">04 · SISO 的強化手段</div>
     <h2>它做了哪些事讓連線比較穩</h2>
-    <p class="prose">以下每一項都附上原始碼位置，以及對照你的實作。標 <span class="pill gain">gain</span> 的是它真正賺到的地方，<span class="pill cost">cost</span> 是它為此付出、或留下的弱點。</p>
+    <div class="prose"><p>以下每一項都附上原始碼位置，以及對照你的實作。標 <span class="pill gain">gain</span> 的是它真正賺到的地方，<span class="pill cost">cost</span> 是它為此付出、或留下的弱點。</p></div>
   </div>
   <div class="techs">
     <div class="tech">
@@ -520,11 +536,11 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
     <h2>依效益排序的修改建議</h2>
   </div>
   <div class="recs">
-    <div class="rec"><div class="body"><h3>把真實的 noise variance 傳給 soft demapper</h3><p>在 RX 端估 σ²：用 preamble 兩個相同半段的差（<code>r[n] − r[n+32]</code> 的功率 ÷ 2）、guard tone 或 null subcarrier 的能量，或 pilot 殘差。估好後傳給 <code>StreamingBurstDecoder(input_noise_variance=…)</code>，或改成每個 burst 自己估。只改 RX，不動 wire format。</p></div><div class="gainv">MCS 0 +2.2–2.7 dB<br>MCS 4 +4.8 dB</div></div>
-    <div class="rec"><div class="body"><h3>平滑 channel estimate</h3><p>把 52 個 LS 值擬合成 CP 長度內的時域 channel（DFT-based／LS fit），或把 3 個 header symbol 解出來後當作已知 symbol 再估一次。SISO 的做法是加強 pilot，但那要改 wire format，也會吃掉功率。</p></div><div class="gainv">再 +1.7 dB</div></div>
-    <div class="rec"><div class="body"><h3>Header 改用真的 FEC</h3><p>把 96 bit 用 K=7 r1/3 convolutional（你已經有 native Viterbi）或短 Turbo 編碼取代 3 次重複，並以 |H|² 加權 soft combining。重複碼幾乎沒有 coding gain，這一步可以讓 header 比 payload 更耐 noise，而不是反過來。</p></div><div class="gainv">header +3 dB 以上（估計）</div></div>
-    <div class="rec"><div class="body"><h3>讓 SNR meter 可以和別人比</h3><p>另外顯示 pre-equalization SNR，例如照 SISO 用 preamble 兩半的正規化 correlation ρ 算 ρ/(1−ρ)。現在的 EVM-SNR 比真實低 3–5 dB，又只在解碼成功時才更新，衰落時看起來還是很好。</p></div><div class="gainv">診斷</div></div>
-    <div class="rec"><div class="body"><h3>較長的 preamble 或兩段 training</h3><p>Schmidl–Cox 半段從 32 拉長到 64 或重複兩次，timing metric 的雜訊降 3 dB，可以把門檻從 0.40 調低。第二個 training symbol 也讓 channel estimate 平均兩次。代價是每個 burst 多 80–160 sample（不到 1%）。</p></div><div class="gainv">acquisition +3 dB</div></div>
+    <div class="rec"><div class="body"><h3>把真實的 noise variance 傳給 soft demapper</h3><p>在 RX 端估 σ²：用 preamble 兩個相同半段的差（<code>r[n] − r[n+32]</code> 的功率 ÷ 2）、guard tone 或 null subcarrier 的能量，或 pilot 殘差。估好後傳給 <code>StreamingBurstDecoder(input_noise_variance=…)</code>，或改成每個 burst 自己估。只改 RX，不動 wire format。</p><p><b>狀態：</b>已完成。最後的做法不是只用 preamble 量熱雜訊：解出來的 header symbols 是已知的，用它們的誤差當 noise，連 channel 估計誤差與硬體缺陷都算進去。只用熱雜訊時 LLR 太有自信，在實機上反而多掉約 1%。</p></div><div class="gainv">MCS 0 +2.2–2.7 dB<br>MCS 4 +4.8 dB</div></div>
+    <div class="rec"><div class="body"><h3>平滑 channel estimate</h3><p>把 52 個 LS 值擬合成 CP 長度內的時域 channel（DFT-based／LS fit），或把 3 個 header symbol 解出來後當作已知 symbol 再估一次。SISO 的做法是加強 pilot，但那要改 wire format，也會吃掉功率。</p><p><b>狀態：</b>已完成：52 個 LS 值投影到 20 個 tap。殘差太大時退回原本的 LS。</p></div><div class="gainv">再 +1.7 dB</div></div>
+    <div class="rec"><div class="body"><h3>Header 改用真的 FEC</h3><p>把 96 bit 用 K=7 r1/3 convolutional（你已經有 native Viterbi）或短 Turbo 編碼取代 3 次重複，並以 |H|² 加權 soft combining。重複碼幾乎沒有 coding gain，這一步可以讓 header 比 payload 更耐 noise，而不是反過來。</p><p><b>狀態：</b>用只改 RX 的方式做到了：CRC 失敗時，從約 8 200 個合法的 header 中以 maximum likelihood 選最接近的。實測中 header 不再是遺失的原因。真的 FEC 或頻率分集要改 wire format，寫在 <code>experiments/rx_improvement/tx-proposal.md</code>。</p></div><div class="gainv">header +3 dB 以上（估計）</div></div>
+    <div class="rec"><div class="body"><h3>讓 SNR meter 可以和別人比</h3><p>另外顯示 pre-equalization SNR，例如照 SISO 用 preamble 兩半的正規化 correlation ρ 算 ρ/(1−ρ)。現在的 EVM-SNR 比真實低 3–5 dB，又只在解碼成功時才更新，衰落時看起來還是很好。</p><p><b>狀態：</b>已完成：畫面上的 SNR 改由 preamble 在 data carrier 的頻帶內估計，沒解出來的 burst 也算。Pluto 的 guard band 雜訊比 data carrier 高約 10 dB，所以只看頻帶內。</p></div><div class="gainv">診斷</div></div>
+    <div class="rec"><div class="body"><h3>較長的 preamble 或兩段 training</h3><p>Schmidl–Cox 半段從 32 拉長到 64 或重複兩次，timing metric 的雜訊降 3 dB，可以把門檻從 0.40 調低。第二個 training symbol 也讓 channel estimate 平均兩次。代價是每個 burst 多 80–160 sample（不到 1%）。</p><p><b>狀態：</b>門檻已從 0.40 降到 0.25／0.30（空中雜訊最高 0.20）。現在 MCS 0 在最低 SNR 時主要是 preamble 沒抓到，加長 preamble 是下一步，要改 wire format，見 <code>tx-proposal.md</code>。</p></div><div class="gainv">acquisition +3 dB</div></div>
     <div class="rec"><div class="body"><h3>補一個 r≈1/2 的 Turbo MCS</h3><p>用 LTE 的 rate matching（puncture parity）在 MCS 0 與 MCS 4 之間補 QPSK r1/2、r2/3，就能在 SISO 的操作點拿到接近的 bit/sample，同時保有 soft Turbo 的增益。<code>mcs_table.py</code> 已經預留了 index 空間。</p></div><div class="gainv">+50% throughput</div></div>
     <div class="rec"><div class="body"><h3>降低 sample rate 換 SNR</h3><p>Pluto↔N210 這種 link budget 吃緊的組合，2.5 或 3.2 MS/s 的 profile 會直接多 2–3 dB。最便宜、立刻可以試。</p></div><div class="gainv">+1.9–3 dB</div></div>
   </div>
