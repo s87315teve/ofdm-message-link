@@ -101,10 +101,10 @@ datagram 上限與 bitrate 來自 B210 → NI USRP-2901 的實測（8.2），都
 
 | 接收端 `SNR (2 s)` | 設定 | 752-byte datagram 的上限 | 建議影片 bitrate |
 |---|---|---|---|
-| ≥ 11 dB | **MCS 4**（16QAM Turbo 1/3） | 2.41 Mbit/s（mux rate） | **1.3 Mbit/s**（mux 1.44，約 60%） |
-| 約 5–11 dB，或 MCS 4 出現 `bursts missing` | **MCS 0**（QPSK Turbo 1/3） | 1.38 Mbit/s | 0.75 Mbit/s（mux 0.83） |
+| ≥ 15 dB | **MCS 4**（16QAM Turbo 1/3） | 2.41 Mbit/s（mux rate） | **1.3 Mbit/s**（mux 1.44，約 60%） |
+| 約 9–15 dB，或 MCS 4 出現 `bursts missing` | **MCS 0**（QPSK Turbo 1/3） | 1.38 Mbit/s | 0.75 Mbit/s（mux 0.83） |
 
-SNR 低於 11 dB 請退回 `--mcs-index 0`（Link light 會提示 `try MCS 0`）。長時間請讓 bitrate 留在
+SNR 低於 15 dB 請退回 `--mcs-index 0`（Link light 會提示 `try MCS 0`）。長時間請讓 bitrate 留在
 上限的 60% 左右。這裡的 SNR 是 `improve-rx` 之後的 preamble 估計值（定義見 [2.6](02-gui.md#26-統計數字的意義與限制)）。
 
 ### 用真的 SDR：一鍵腳本

@@ -31,7 +31,7 @@ usage: scripts/run_ota_video_demo.sh --enable-rf [options]
   --keep-runs N        keep only the newest N run directories under
                        /tmp/ofdm_ota_video_demo, this one included; 0 = never delete
                        (default: 5; ignored with --out)
-  --mcs-index N        TX MCS (default: 4; use 0 when RX effective SNR < 11 dB)
+  --mcs-index N        TX MCS (default: 4; use 0 when the RX SNR (2 s) is below 15 dB)
   --video-kbps N       H.264 bit rate (default: 1300; use 750 with --mcs-index 0)
   --auto-start         start both radios with the serials and gains below instead of
                        waiting for the operator to choose them in the windows;

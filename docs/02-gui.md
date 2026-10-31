@@ -43,7 +43,7 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 | 紅 `DOWN` | 超過 2 秒沒有 burst | `No bursts for 3 s` |
 | 紅 `LOSSY` | 最近 10 秒遺失率 ≥ 1 % | `Loss 4.2 % in the last 10 s` |
 | 黃 `LOSS` | 最近 10 秒遺失率 > 0 | `Loss 0.3 % in the last 10 s` |
-| 黃 `MARGINAL` | SNR < 門檻 + 1 dB | `SNR 11.4 dB is within 1 dB of 11 dB needed for MCS 4` |
+| 黃 `MARGINAL` | SNR < 門檻 + 1 dB | `SNR 15.4 dB is within 1 dB of 15 dB needed for MCS 4` |
 | 綠 `GOOD` | 其餘 | `No loss, SNR 2.3 dB above MCS 4 threshold` |
 
 **黃燈 `LOSS` 在真的 radio 上很常見，不代表設定有問題。** 規則是「10 秒內掉 1 個 burst 就變黃」，
@@ -51,8 +51,9 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 實測中遺失率 0.05% 時燈號有一半時間是黃的，畫面看起來完全正常。需要處理的是紅燈 `LOSSY`
 （≥ 1%），或是畫面持續破圖。模擬環境沒有干擾，所以在模擬裡看到黃燈就值得追查。
 
-SNR 門檻只有兩個有實測值：MCS 4 為 11 dB、MCS 0 為 5 dB（來源見[實測紀錄 8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz)）。
-v1.0.0 的門檻是 11 dB 與 8 dB，但那是舊的 SNR 定義（見 2.6），兩組數字不能直接比較。
+SNR 門檻只有兩個有實測值：MCS 4 為 15 dB、MCS 0 為 9 dB（來源見[實測紀錄 8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz)）。
+v1.0.0 的門檻是 11 dB 與 8 dB，但那是舊的 SNR 定義（見 2.6），比現在的低 2–4 dB，兩組數字不能直接比較。
+用發射功率比較才公平：同一組 Pluto，新的 RX 在 MCS 0 少發約 10 dB、MCS 4 少發約 5 dB 仍然不掉包。
 其他 MCS 只依遺失率判斷，原因會註明 `no SNR threshold measured for MCS N`。紅燈或黃燈且 SNR
 已低於目前 MCS 的門檻時，原因後面會附上 `— try MCS 0`。
 
@@ -125,14 +126,15 @@ SNR 附近突然從接近 0 升到接近 100%。換一個 MCS 再做一次，比
 | `burst loss ratio` | missing ÷ (decoded + missing) | 即 PER |
 | `incomplete messages` | 缺 fragment 而被丟棄的訊息 | 永遠無法修復 |
 | `foreign bursts` | CRC 有效但不是這個專案的格式 | 同一 channel 上的其他應用，不是 link 故障 |
-| `mean SNR` | 由 preamble 估計：兩個重複的半段相同的部分是訊號，不同的部分是雜訊 | 每個 burst 單獨估約有 ±0.8 dB 的誤差，畫面上的 2 秒平均穩定得多。量的是熱雜訊，IQ imbalance 之類的固定失真不算在內 |
+| `mean SNR` | 由 preamble 估計：兩個重複的半段相同的部分是訊號，不同的部分是雜訊，只看資料 carrier 所在的頻帶 | 每個 burst 單獨估約有 ±1 dB 的誤差，畫面上的 2 秒平均穩定得多。量的是熱雜訊，IQ imbalance、相位雜訊之類的失真不算在內，所以實機上同樣的 SNR 會比模擬難解 |
 | `mean EVM` | Decision-directed：以最近的 constellation 點為參考算出的誤差 | Error rate 一高就**會飽和**。只從解得出來的 burst 計算 |
 | `mean one-way latency` | End-to-end latency | **只在收發同機時顯示**。跨主機沒有共同時間基準，所以直接顯示 `n/a` 而不是給假數字 |
 | `delivered goodput` | Application bits ÷ wall clock | 包含打字等待時間，只是觀察用 |
 
 **SNR 的定義在 `improve-rx` 之後改了。** 以前畫面上的 SNR 是由 EVM 推算的，只從成功解出的 burst
 計算，所以 link 很差時反而偏樂觀，而且比真實 SNR 低 3–5 dB。現在的 SNR 由每個 burst 的 preamble
-估計，**沒解出來的 burst 也算**，在模擬中 0–20 dB 與真實 SNR 的差距在 ±0.75 dB 內。
+估計，**沒解出來的 burst 也算**，在模擬中 0–20 dB 與真實 SNR 的差距在 ±0.62 dB 內。
+它只看資料 carrier 所在的頻帶：Pluto 在頻帶邊緣的雜訊是資料 carrier 上的 10 倍，用整個頻寬估會低估約 4 dB。
 定義是「burst 的平均 sample 功率 ÷ noise variance」，和 udp transport 的 `--snr-db` 相同，
 所以模擬時畫面上的數字會接近你設定的值。
 

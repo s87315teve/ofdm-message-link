@@ -24,7 +24,7 @@ def _light(**overrides):
         "now": 100.0,
         "last_burst_at": 99.5,
         "loss_10s": 0.0,
-        "snr_2s": 15.0,
+        "snr_2s": 19.0,
         "mcs_index": 4,
     }
     values.update(overrides)
@@ -35,7 +35,7 @@ def _light(**overrides):
 
 
 def test_threshold_table_holds_the_measured_mcs_thresholds():
-    assert dashboard.SNR_THRESHOLD_DB == {0: 5.0, 4: 11.0}
+    assert dashboard.SNR_THRESHOLD_DB == {0: 9.0, 4: 15.0}
 
 
 # -- receive light, in rule order -----------------------------------------
@@ -86,19 +86,19 @@ def test_yellow_loss_just_below_one_percent():
 
 
 def test_yellow_marginal_within_one_db_of_the_threshold():
-    light = _light(snr_2s=11.4)
+    light = _light(snr_2s=15.4)
     assert (light.state, light.colour) == ("MARGINAL", "yellow")
-    assert light.reason == "SNR 11.4 dB is within 1 dB of 11 dB needed for MCS 4"
+    assert light.reason == "SNR 15.4 dB is within 1 dB of 15 dB needed for MCS 4"
 
 
 def test_exactly_threshold_plus_one_db_is_good():
-    light = _light(snr_2s=12.0)
+    light = _light(snr_2s=16.0)
     assert (light.state, light.colour) == ("GOOD", "green")
     assert light.reason == "No loss, SNR 1.0 dB above MCS 4 threshold"
 
 
 def test_green_good_reports_the_margin():
-    assert _light(snr_2s=13.3).reason == "No loss, SNR 2.3 dB above MCS 4 threshold"
+    assert _light(snr_2s=17.3).reason == "No loss, SNR 2.3 dB above MCS 4 threshold"
 
 
 def test_mcs_without_a_measured_threshold_is_judged_on_loss_only():
@@ -114,28 +114,28 @@ def test_mcs_without_a_measured_threshold_is_judged_on_loss_only():
 
 
 def test_lossy_below_the_mcs4_threshold_suggests_mcs0():
-    light = _light(loss_10s=0.05, snr_2s=9.5)
+    light = _light(loss_10s=0.05, snr_2s=13.5)
     assert light.reason == "Loss 5.0 % in the last 10 s — try MCS 0"
 
 
 def test_marginal_below_the_threshold_suggests_mcs0():
-    light = _light(snr_2s=10.6)
+    light = _light(snr_2s=14.6)
     assert light.state == "MARGINAL"
     assert light.reason.endswith("— try MCS 0")
 
 
 def test_no_suggestion_while_snr_meets_the_current_threshold():
-    assert "try MCS" not in _light(snr_2s=11.4).reason
-    assert "try MCS" not in _light(loss_10s=0.05, snr_2s=14.0).reason
+    assert "try MCS" not in _light(snr_2s=15.4).reason
+    assert "try MCS" not in _light(loss_10s=0.05, snr_2s=18.0).reason
 
 
 def test_no_suggestion_when_already_on_the_most_robust_measured_mcs():
-    light = _light(mcs_index=0, loss_10s=0.05, snr_2s=6.0)
+    light = _light(mcs_index=0, loss_10s=0.05, snr_2s=8.0)
     assert "try MCS" not in light.reason
 
 
 def test_no_suggestion_for_a_green_light():
-    assert "try MCS" not in _light(mcs_index=0, snr_2s=10.0).reason
+    assert "try MCS" not in _light(mcs_index=0, snr_2s=14.0).reason
 
 
 # -- receive dashboard: windows, reset, trend ------------------------------
