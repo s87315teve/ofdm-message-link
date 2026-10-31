@@ -12,6 +12,8 @@ from numbers import Real
 import numpy as np
 
 _MAX_CACHED_CFO_SAMPLES = 100_000
+# Windowed-sinc interpolator for the SFO resampler: 32 Blackman-windowed taps.
+_RESAMPLER_TAPS = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,10 +87,15 @@ def apply_simulation_channel(
     """Apply impairments and return a new complex128 vector plus diagnostics.
 
     Operations have a stable order: complex scalar gain, full FIR convolution,
-    linear-interpolation SFO resampling, CFO rotation, then complex AWGN. For an
-    FIR/SFO input of length ``N``, resampling returns
+    band-limited (windowed-sinc) SFO resampling, CFO rotation, then complex
+    AWGN. For an FIR/SFO input of length ``N``, resampling returns
     ``floor((N - 1) * (1 + sfo_ppm / 1e6)) + 1`` samples. The local seeded RNG
     never reads or modifies NumPy's process-global RNG state.
+
+    The resampler used to interpolate linearly, which at a half-sample offset
+    attenuates a carrier at 0.375 cycles/sample by 8 dB and adds as much
+    distortion; a long burst sweeps through every offset, so SFO simulations
+    were pessimistic for reasons a real radio does not share.
     """
 
     if not isinstance(config, SimulationChannelConfig):
@@ -113,8 +120,7 @@ def apply_simulation_channel(
         exact_ratio = Fraction(1) + Fraction(str(config.sample_rate_offset_ppm)) / 1_000_000
         output_length = (len(output) - 1) * exact_ratio.numerator // exact_ratio.denominator + 1
         source_positions = np.arange(output_length, dtype=np.float64) / sample_rate_ratio
-        input_positions = np.arange(len(output), dtype=np.float64)
-        output = np.interp(source_positions, input_positions, output)
+        output = _band_limited_resample(output, source_positions)
     normalized_cfo = config.cfo_subcarriers / config.fft_size
     if config.cfo_subcarriers != 0.0:
         output *= _cfo_rotation(len(output), normalized_cfo)
@@ -158,6 +164,27 @@ def apply_simulation_channel(
         seed=config.seed,
     )
     return output, diagnostics
+
+
+def _band_limited_resample(samples: np.ndarray, positions: np.ndarray) -> np.ndarray:
+    """Evaluate ``samples`` at fractional ``positions`` with a windowed sinc.
+
+    Samples outside the input count as zero, so the ends taper over half the
+    filter length instead of being extrapolated.  The loop runs over the 32
+    taps, each a vectorized pass over every output sample.
+    """
+
+    half = _RESAMPLER_TAPS // 2
+    base = np.floor(positions).astype(np.int64)
+    fraction = positions - base
+    padded = np.concatenate((np.zeros(half), samples, np.zeros(half + 1)))
+    output = np.zeros(positions.size, dtype=np.complex128)
+    for k in range(-half + 1, half + 1):
+        distance = k - fraction
+        phase = np.pi * distance / half
+        window = 0.42 + 0.5 * np.cos(phase) + 0.08 * np.cos(2.0 * phase)
+        output += np.sinc(distance) * window * padded[base + k + half]
+    return output
 
 
 def _cfo_rotation(sample_count: int, normalized_cfo: float) -> np.ndarray:
