@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -19,7 +20,33 @@ from .burst import (
     _decode_burst_with_acquisition,
 )
 from .codec import DEFAULT_DUAL_VERSION_FRAME_DECODER, demap_symbols
+from .ofdm import OfdmNumerology
 from .sync import AcquisitionResult, _acquisition_candidates
+
+# Preamble SNR readings kept between two drains; a caller that stops draining
+# loses the oldest rather than growing the decoder without bound.
+LINK_SNR_HISTORY = 4096
+
+
+def link_snr_db(
+    acquisition: AcquisitionResult,
+    numerology: OfdmNumerology,
+) -> float | None:
+    """SNR of one burst in dB, from its preamble, or ``None`` if not measured.
+
+    The preamble's power is one per sample, while an OFDM symbol puts unit
+    power on each active carrier and so averages ``active / fft_size`` per
+    sample.  Scaling by that ratio states the SNR of the payload samples --
+    the mean burst power over the noise variance, which is also what the udp
+    transport's ``--snr-db`` sets.  It needs no successful decode, so a burst
+    whose header or payload failed still reports what the channel was.
+    """
+
+    snr = acquisition.preamble_snr
+    if snr is None or not snr > 0.0:
+        return None
+    ratio = len(numerology.active_carriers) / numerology.fft_size
+    return float(10.0 * np.log10(snr * ratio))
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +158,8 @@ class StreamingBurstDecoder:
         self._valid_decoded_bursts = 0
         self._unclassified_decode_failures = 0
         self._mode: str | None = None
+        self._link_snrs: deque[float] = deque(maxlen=LINK_SNR_HISTORY)
+        self._last_snr_start: int | None = None
 
     @property
     def config(self) -> BurstConfig:
@@ -157,6 +186,36 @@ class StreamingBurstDecoder:
             valid_decoded_bursts=self._valid_decoded_bursts,
             unclassified_decode_failures=self._unclassified_decode_failures,
         )
+
+    def drain_link_snr_db(self) -> tuple[float, ...]:
+        """Take the preamble SNR, in dB, of every burst acquired since the last call.
+
+        One reading per physical preamble, whether or not the burst then
+        decoded: see :func:`link_snr_db`.
+        """
+
+        drained = tuple(self._link_snrs)
+        self._link_snrs.clear()
+        return drained
+
+    def _note_acquisition(self, acquisition: AcquisitionResult) -> None:
+        """Record one acquisition's SNR, once per physical preamble.
+
+        After a failed header the stream steps forward a sample and can find
+        the same preamble again further along its cyclic prefix; those repeats
+        lie within one preamble length and are not counted twice.
+        """
+
+        start = self._buffer_start + acquisition.preamble_start
+        if (
+            self._last_snr_start is not None
+            and start - self._last_snr_start < self._config.sync.preamble_length
+        ):
+            return
+        self._last_snr_start = start
+        snr = link_snr_db(acquisition, self._config.numerology)
+        if snr is not None:
+            self._link_snrs.append(snr)
 
     def feed(self, complex_chunk: ArrayLike) -> tuple[DecodedBurst, ...]:
         """Consume one contiguous sample chunk and emit every complete burst."""
@@ -210,6 +269,7 @@ class StreamingBurstDecoder:
                 self._pending_acquisition = first
                 self._header_validated = False
                 self._detected_burst_candidates += 1
+                self._note_acquisition(first)
 
             fixed_sample_count = self._fixed_sample_count
             if self._buffer.size < fixed_sample_count:
@@ -433,6 +493,7 @@ class StreamingBurstDecoder:
         self._pending_acquisition = first
         self._header_validated = False
         self._detected_burst_candidates += 1
+        self._note_acquisition(first)
         return True
 
     def _reject_acquisition(self, error: BurstDecodeError) -> None:

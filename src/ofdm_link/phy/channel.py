@@ -304,6 +304,125 @@ def estimate_channel(
     return ChannelEstimate(coefficients, numerology.active_carriers)
 
 
+# How far before the FFT window a smoothed channel may reach.  Acquisition
+# lands on the strongest correlation, so a few samples of pre-cursor cover the
+# filter skirt ahead of it; the cyclic prefix bounds the far end.
+SMOOTHING_PRECURSOR_TAPS = 4
+# The smoothed estimate is kept only while what it leaves out looks like noise.
+# The two variance estimates each rest on 32 complex degrees of freedom, so
+# their ratio is F(64, 64)-distributed and exceeds 3 by chance about once in
+# 100 000 bursts; a false fallback costs only that burst's smoothing.
+SMOOTHING_RESIDUAL_LIMIT = 3.0
+
+
+@dataclass(frozen=True, slots=True)
+class RefinedChannel:
+    """A channel estimate and the noise variance that goes with it.
+
+    ``noise_variance`` is the complex noise variance per sample, which with the
+    unitary FFT is also the noise variance on every carrier.  ``smoothed`` says
+    whether ``estimate`` is the delay-limited fit or the raw per-carrier
+    least-squares estimate it fell back to.
+    """
+
+    estimate: ChannelEstimate
+    noise_variance: float
+    smoothed: bool
+
+
+def refine_channel_estimate(
+    least_squares: ChannelEstimate,
+    numerology: OfdmNumerology = _DEFAULT_NUMEROLOGY,
+    *,
+    preamble_noise_variance: float | None = None,
+    preamble_degrees_of_freedom: int | None = None,
+) -> RefinedChannel:
+    """Fit a delay-limited channel to one training symbol and estimate noise.
+
+    A channel whose impulse response fits inside the cyclic prefix has at most
+    ``SMOOTHING_PRECURSOR_TAPS + cp_length`` taps, fewer than the active
+    carriers that measure it.  Projecting the per-carrier least-squares
+    estimate onto those taps keeps the channel and discards the part of the
+    noise outside them -- 20 of 52 dimensions with the default numerology, so
+    the estimation error falls by about 4 dB.  What the projection discards is
+    noise too, which gives a second variance estimate from the training symbol.
+
+    ``preamble_noise_variance`` comes from the repeated preamble halves.  The
+    two are pooled by their degrees of freedom.  When the residual exceeds the
+    preamble estimate by ``SMOOTHING_RESIDUAL_LIMIT``, the channel does not fit
+    the delay window -- a timing error, or a delay spread longer than the
+    prefix -- so the raw estimate is kept and only the preamble variance used.
+    """
+
+    _require_numerology(numerology)
+    if not isinstance(least_squares, ChannelEstimate):
+        raise ChannelEstimationError("least_squares must be a ChannelEstimate")
+    if least_squares.active_carriers != numerology.active_carriers:
+        raise ChannelEstimationError(
+            "least_squares active carriers do not match numerology"
+        )
+    if preamble_noise_variance is not None:
+        preamble_noise_variance = _positive_finite_scalar(
+            preamble_noise_variance,
+            "preamble_noise_variance",
+        )
+        if preamble_degrees_of_freedom is None:
+            preamble_degrees_of_freedom = numerology.fft_size // 2
+        if type(preamble_degrees_of_freedom) is not int or preamble_degrees_of_freedom < 1:
+            raise ChannelEstimationError(
+                "preamble_degrees_of_freedom must be a positive integer"
+            )
+
+    projection, residual_dof = _smoothing_projection(numerology)
+    measured = least_squares.coefficients.astype(np.complex128)
+    smoothed = projection @ measured
+    residual = measured - smoothed
+    residual_variance = float(np.vdot(residual, residual).real) / residual_dof
+
+    if preamble_noise_variance is None:
+        if not residual_variance > 0.0:
+            # A noiseless training symbol: nothing to weigh, nothing to clip.
+            residual_variance = float(np.mean(np.abs(measured) ** 2)) * 1e-6
+        return RefinedChannel(
+            ChannelEstimate(smoothed.astype(np.complex64), least_squares.active_carriers),
+            residual_variance,
+            True,
+        )
+    if residual_variance > SMOOTHING_RESIDUAL_LIMIT * preamble_noise_variance:
+        return RefinedChannel(least_squares, preamble_noise_variance, False)
+    pooled = (
+        preamble_degrees_of_freedom * preamble_noise_variance
+        + residual_dof * residual_variance
+    ) / (preamble_degrees_of_freedom + residual_dof)
+    return RefinedChannel(
+        ChannelEstimate(smoothed.astype(np.complex64), least_squares.active_carriers),
+        pooled,
+        True,
+    )
+
+
+@lru_cache(maxsize=8)
+def _smoothing_projection(
+    numerology: OfdmNumerology,
+) -> tuple[NDArray[np.complex128], int]:
+    """Projection onto delay-limited responses, and the residual's dimension."""
+
+    carriers = np.asarray(numerology.active_carriers, dtype=np.float64)
+    lags = np.arange(
+        -SMOOTHING_PRECURSOR_TAPS,
+        numerology.cp_length,
+        dtype=np.float64,
+    )
+    if lags.size >= carriers.size:
+        raise ChannelEstimationError(
+            "the delay window must have fewer taps than there are active carriers"
+        )
+    basis = np.exp(-2j * np.pi * np.outer(carriers, lags) / numerology.fft_size)
+    projection = basis @ np.linalg.pinv(basis)
+    projection.setflags(write=False)
+    return projection, int(carriers.size - lags.size)
+
+
 def equalize_with_pilots(
     received_samples: ArrayLike,
     channel_estimate: ChannelEstimate,

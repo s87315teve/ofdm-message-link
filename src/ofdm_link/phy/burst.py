@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -23,8 +24,10 @@ from .burst_header import (
     BurstHeader,
     BurstHeaderDescriptor,
     BurstHeaderIntegrityError,
+    HeaderCandidates,
     TurboBurstHeader,
     decode_burst_header,
+    decode_burst_header_list,
     decode_burst_header_soft,
     encode_burst_header,
 )
@@ -36,12 +39,15 @@ from .channel import (
     equalize_with_pilots,
     estimate_channel,
     generate_training_symbol,
+    refine_channel_estimate,
 )
 from .codec import (
     DEFAULT_DUAL_VERSION_FRAME_DECODER,
     MAX_CODED_FRAME_BITS,
+    MAX_INFORMATION_FRAME_BITS,
     MAX_TURBO_CODED_FRAME_BITS,
     MCS,
+    MIN_INFORMATION_FRAME_BITS,
     Frame,
     FrameDecodeFailure,
     FrameDecodeResult,
@@ -151,8 +157,20 @@ class BurstConfig:
     max_coded_payload_bits: int = MAX_CODED_FRAME_BITS
     max_burst_samples: int = 900_000
     max_input_samples: int = 2_000_000
+    # Frames up to this payload size get the maximum-likelihood header
+    # fallback; larger ones still decode through the CRC-checked paths.  The
+    # list holds every legal header of that size, so it is kept to what the
+    # link sends: the app's default frame payload is 996 bytes.  0 disables it.
+    header_list_max_payload_bytes: int = 1024
 
     def __post_init__(self) -> None:
+        if (
+            type(self.header_list_max_payload_bytes) is not int
+            or not 0 <= self.header_list_max_payload_bytes <= 4096
+        ):
+            raise BurstValidationError(
+                "header_list_max_payload_bytes must be an integer in [0, 4096]"
+            )
         if not isinstance(self.numerology, OfdmNumerology):
             raise BurstValidationError("numerology must be an OfdmNumerology")
         if not isinstance(self.sync, SyncConfig):
@@ -657,7 +675,13 @@ def _decode_acquired_burst(
     training_samples = corrected_fixed[:block_length]
     header_samples = corrected_fixed[block_length:]
     try:
-        channel = estimate_channel(training_samples, settings.numerology)
+        refined = refine_channel_estimate(
+            estimate_channel(training_samples, settings.numerology),
+            settings.numerology,
+            preamble_noise_variance=acquisition.noise_variance,
+            preamble_degrees_of_freedom=settings.sync.half_length,
+        )
+        channel = refined.estimate
         equalized_header = equalize_with_pilots(
             header_samples,
             channel,
@@ -670,7 +694,24 @@ def _decode_acquired_burst(
         try:
             header = decode_burst_header(header_bits)
         except BurstHeaderIntegrityError:
-            header = decode_burst_header_soft(_header_llrs(header_symbols))
+            header_llrs = _header_llrs(
+                header_symbols,
+                equalized_header.noise_enhancement.reshape(-1)
+                if refined.smoothed
+                else None,
+            )
+            try:
+                header = decode_burst_header_soft(header_llrs)
+            except BurstHeaderIntegrityError:
+                if not settings.header_list_max_payload_bytes:
+                    raise
+                header = decode_burst_header_list(
+                    header_llrs,
+                    _header_candidates(
+                        settings.header_list_max_payload_bytes,
+                        settings.max_coded_payload_bits,
+                    ),
+                )
     except ValueError as error:
         raise BurstDecodeError(f"fixed signaling header decode failed: {error}") from error
 
@@ -760,7 +801,9 @@ def _decode_acquired_burst(
             )
         else:
             noise_variance = (
-                1e-6 if input_noise_variance is None else float(input_noise_variance)
+                refined.noise_variance
+                if input_noise_variance is None
+                else float(input_noise_variance)
             )
             post_equalization_variance = equalized_payload.post_equalization_noise_variance(
                 noise_variance
@@ -1057,6 +1100,41 @@ def _validate_coded_payload_size(
 _MIN_FRAME_INFORMATION_BITS = 11 * 8
 
 
+@lru_cache(maxsize=4)
+def _header_candidates(
+    max_payload_bytes: int,
+    max_coded_payload_bits: int,
+) -> HeaderCandidates:
+    """Every header of a frame carrying at most ``max_payload_bytes``.
+
+    Each wire version, each MCS, and each frame length the codec produces for
+    that payload range, less any that ``_validate_coded_payload_size`` would
+    reject: about 8 200 headers for 1024 bytes.
+    """
+
+    information_counts = range(
+        MIN_INFORMATION_FRAME_BITS,
+        min(
+            MIN_INFORMATION_FRAME_BITS + 8 * max_payload_bytes,
+            MAX_INFORMATION_FRAME_BITS,
+        )
+        + 1,
+        8,
+    )
+    headers: list[BurstHeaderDescriptor] = []
+    for mcs in MCS:
+        for version in SUPPORTED_WIRE_VERSIONS:
+            for count in information_counts:
+                if version == TURBO_BURST_HEADER_VERSION:
+                    header: BurstHeaderDescriptor = TurboBurstHeader(version, mcs, count)
+                else:
+                    profile = frame_codec_for_wire_version(version).fec_profile
+                    header = BurstHeader(version, mcs, profile.coded_bit_count(count))
+                if header.coded_payload_bit_count <= max_coded_payload_bits:
+                    headers.append(header)
+    return HeaderCandidates.from_headers(tuple(headers))
+
+
 def _is_legacy_v1(header: BurstHeaderDescriptor) -> bool:
     """Whether this burst uses the original single-version decoder call.
 
@@ -1109,16 +1187,26 @@ def _map_with_backend(
     return converted
 
 
-def _header_llrs(symbols: NDArray[np.complex64]) -> NDArray[np.float64]:
-    """Unweighted fixed-QPSK header LLRs; positive selects bit 0.
+def _header_llrs(
+    symbols: NDArray[np.complex64],
+    noise_enhancement: NDArray[np.float64] | None = None,
+) -> NDArray[np.float64]:
+    """Fixed-QPSK header LLRs up to one common scale; positive selects bit 0.
 
-    The single-symbol training estimate makes per-carrier reliability weights
-    noisy, so the soft header fallback combines equalized amplitudes directly.
+    With ``noise_enhancement`` each symbol is weighted by the inverse of it,
+    the channel power ``|H|^2``, so the repetition combining that follows is
+    maximal-ratio: a copy on a faded carrier counts for less.  The weights are
+    only as good as the channel estimate, so a caller holding the raw
+    single-symbol estimate passes ``None`` and gets equal weights.
     """
 
     llrs = np.empty(symbols.size * 2, dtype=np.float64)
     llrs[0::2] = symbols.real
     llrs[1::2] = symbols.imag
+    if noise_enhancement is not None:
+        weights = 1.0 / np.asarray(noise_enhancement, dtype=np.float64)
+        llrs[0::2] *= weights
+        llrs[1::2] *= weights
     return llrs
 
 

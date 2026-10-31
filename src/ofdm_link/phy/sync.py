@@ -20,6 +20,10 @@ from numpy.typing import ArrayLike, NDArray
 
 from ._arrays import all_finite
 
+# Floor on the preamble noise estimate, as a fraction of the received power:
+# caps the reported SNR at 60 dB when the input carries no noise at all.
+_MINIMUM_NOISE_FRACTION = 1e-6
+
 
 class SyncError(ValueError):
     """Raised when synchronization configuration or input is malformed."""
@@ -105,6 +109,15 @@ class AcquisitionResult:
     magnitude of a scalar least-squares channel estimate; ``signal_power`` is
     its square. ``metric`` is the Schmidl--Cox repeated-half metric and
     ``confidence`` is the normalized coherent preamble correlation.
+
+    ``noise_variance`` and ``repeated_signal_power`` split the received power
+    of the two repeated halves into the part they share and the part they do
+    not.  The channel and the CFO treat both halves alike, so whatever differs
+    between them is noise: with ``C`` the half-to-half correlation and ``R``
+    the mean half energy, ``|C|`` estimates the signal energy and ``R - |C|``
+    the noise energy over one half.  Both are per complex sample.  Unlike
+    ``signal_power`` this needs no channel model, so multipath does not bias
+    it.  ``None`` only when a caller builds the result by hand.
     """
 
     preamble_start: int
@@ -114,6 +127,16 @@ class AcquisitionResult:
     signal_power: float
     metric: float
     confidence: float
+    noise_variance: float | None = None
+    repeated_signal_power: float | None = None
+
+    @property
+    def preamble_snr(self) -> float | None:
+        """Linear signal-to-noise ratio over the preamble, or ``None``."""
+
+        if self.noise_variance is None or self.repeated_signal_power is None:
+            return None
+        return self.repeated_signal_power / self.noise_variance
 
 
 def generate_preamble(config: SyncConfig | None = None) -> NDArray[np.complex64]:
@@ -300,6 +323,17 @@ def _acquisition_candidates(
     selected_coherent = coherent[accepted]
     scalar_gain = selected_coherent / reference_energy
     amplitude_gain = np.abs(scalar_gain)
+    shared_energy = np.sqrt(
+        np.square(candidate_real[accepted]) + np.square(candidate_imag[accepted])
+    )
+    half_energy = candidate_energy[accepted]
+    repeated_power = shared_energy / half_length
+    # A noiseless input makes the two energies equal to rounding; keep the
+    # variance positive so a ratio built from it stays finite.
+    noise_variance = np.maximum(
+        (half_energy - shared_energy) / half_length,
+        half_energy / half_length * _MINIMUM_NOISE_FRACTION,
+    )
     return tuple(
         AcquisitionResult(
             preamble_start=int(start),
@@ -309,15 +343,19 @@ def _acquisition_candidates(
             signal_power=float(amplitude * amplitude),
             metric=float(candidate_metric),
             confidence=float(candidate_confidence),
+            noise_variance=float(noise),
+            repeated_signal_power=float(power),
         )
         for start, useful_start, normalized_cfo, amplitude, candidate_metric,
-        candidate_confidence in zip(
+        candidate_confidence, noise, power in zip(
             starts,
             useful_starts,
             cfo,
             amplitude_gain,
             selected_metric,
             selected_confidence,
+            noise_variance,
+            repeated_power,
             strict=True,
         )
     )
