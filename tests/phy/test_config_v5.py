@@ -66,6 +66,7 @@ def test_burst_config_carries_every_receive_key() -> None:
             "llr_noise_source": "ltf",
             "max_psdu_bytes": 9000,
             "turbo_max_iterations": 4,
+            "fft_backoff_samples": 5,
         }
     )
 
@@ -81,6 +82,7 @@ def test_burst_config_carries_every_receive_key() -> None:
     assert not rx.ltf_average and not rx.channel_smoothing
     assert rx.llr_noise_source == "ltf"
     assert rx.max_psdu_bytes == 9000 and rx.turbo_max_iterations == 4
+    assert rx.fft_backoff_samples == 5
 
 
 @pytest.mark.parametrize(
@@ -95,6 +97,8 @@ def test_burst_config_carries_every_receive_key() -> None:
         ("rx", "llr_noise_source", "median"),
         ("rx", "turbo_max_iterations", 5),
         ("rx", "max_psdu_bytes", 10),
+        ("rx", "fft_backoff_samples", 9),
+        ("rx", "fft_backoff_samples", -1),
         ("rx", "unknown", True),
     ],
 )

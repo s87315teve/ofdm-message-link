@@ -66,6 +66,9 @@ phy:
     # Largest PSDU a v5 SIG may signal, and the Turbo iteration cap.
     max_psdu_bytes: 16384
     turbo_max_iterations: 8
+    # Samples every v5 FFT window (LTF, SIG, payload) starts inside its
+    # cyclic prefix: tolerance for late timing and clock drift (0-8).
+    fft_backoff_samples: 3
 
 mac:
   duplex: tdd

@@ -94,6 +94,7 @@ class RxConfigSection:
     llr_noise_source: str = "max"
     max_psdu_bytes: int = 16384
     turbo_max_iterations: int = 8
+    fft_backoff_samples: int = 3
 
 
 @dataclass(frozen=True)
@@ -755,7 +756,12 @@ def _rx_section(phy_raw: Mapping[str, Any]) -> RxConfigSection:
         "phy.rx",
         optional=booleans
         | set(numbers)
-        | {"llr_noise_source", "max_psdu_bytes", "turbo_max_iterations"},
+        | {
+            "llr_noise_source",
+            "max_psdu_bytes",
+            "turbo_max_iterations",
+            "fft_backoff_samples",
+        },
     )
     values: dict[str, Any] = {}
     for key in booleans & set(raw):
@@ -775,6 +781,8 @@ def _rx_section(phy_raw: Mapping[str, Any]) -> RxConfigSection:
         )
         if values["turbo_max_iterations"] not in {2, 4, 6, 8}:
             raise ConfigError("phy.rx.turbo_max_iterations must be one of: 2, 4, 6, 8")
+    if "fft_backoff_samples" in raw:
+        values["fft_backoff_samples"] = _bounded_int(raw, "fft_backoff_samples", "phy.rx", 0, 8)
     section = RxConfigSection(**{**asdict(defaults), **values})
     if not (section.legacy_acquisition or section.v5_acquisition):
         raise ConfigError("phy.rx must leave at least one acquisition family enabled")

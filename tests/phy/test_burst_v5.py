@@ -25,7 +25,7 @@ from ofdm_link.phy import (
     v5_entries,
     v5_payload_geometry,
 )
-from ofdm_link.phy.burst import _header_candidates
+from ofdm_link.phy.burst import _decode_burst_with_acquisition, _header_candidates
 from ofdm_link.phy.burst_header import (
     _CRC,
     _PREFIX,
@@ -35,6 +35,9 @@ from ofdm_link.phy.burst_header import (
     TurboBurstHeader,
     _parse_header_bits,
 )
+from ofdm_link.phy.codec import DEFAULT_DUAL_VERSION_FRAME_DECODER, demap_symbols
+from ofdm_link.phy.sync import acquire_all
+from ofdm_link.phy.sync_v5 import V5SyncConfig
 from ofdm_link.radio.simulation import SimulationChannelConfig, apply_simulation_channel
 
 ALL_V5 = v5_entries(include_hidden=True)
@@ -127,6 +130,50 @@ def test_multipath_with_sample_clock_offset_decodes(mcs_index: int) -> None:
     assert decoded.fcs_ok and decoded.body == body
     assert decoded.diagnostics.wire_version == 5
     assert decoded.diagnostics.active_fec_profile == f"lte-turbo-rm r{entry.rate}"
+
+
+@pytest.mark.parametrize("late", [1, 2, 3])
+def test_fft_backoff_absorbs_late_timing_without_isi(late: int) -> None:
+    # A window that starts at the CP end takes samples of the next symbol as
+    # soon as the timing is late; three samples of backoff keep it inside
+    # the symbol, and the LTF estimate absorbs the linear phase.
+    entry = mcs_entry(14)
+    body = _body(2000, 77)
+    burst = encode_burst_v5(body, entry, scrambler_seed=9)
+    framed = _framed(burst.samples, before=200, after=300)
+    stream = _awgn(framed, 35.0, np.random.default_rng(7), 0.8)
+    acquisition = acquire_all(stream, None, V5SyncConfig())[0]
+    assert acquisition.stf_start == 200
+    late_acquisition = replace(
+        acquisition, stf_start=200 + late, ltf_start=acquisition.ltf_start + late
+    )
+    reference = decode_burst(stream).payload_symbols
+
+    def evm_db(backoff: int) -> tuple[float, bool]:
+        decoded = _decode_burst_with_acquisition(
+            stream,
+            BurstConfig(v5=V5RxConfig(fft_backoff_samples=backoff)),
+            late_acquisition,
+            frame_decoder=DEFAULT_DUAL_VERSION_FRAME_DECODER,
+            symbol_demapper=demap_symbols,
+            soft_symbol_demapper=None,
+            input_noise_variance=None,
+        )
+        error = np.mean(np.abs(decoded.payload_symbols - reference) ** 2)
+        return float(10 * np.log10(error)), decoded.fcs_ok
+
+    default_evm, default_ok = evm_db(V5RxConfig().fft_backoff_samples)
+    no_backoff_evm, _ = evm_db(0)
+    assert default_ok and default_evm < -28.0
+    assert no_backoff_evm > -20.0
+
+
+def test_fft_backoff_is_validated() -> None:
+    with pytest.raises(ValueError):
+        V5RxConfig(fft_backoff_samples=9)
+    with pytest.raises(ValueError):
+        V5RxConfig(fft_backoff_samples=-1)
+    assert V5RxConfig().fft_backoff_samples == 3
 
 
 def test_truncated_burst_asks_for_the_signalled_length() -> None:

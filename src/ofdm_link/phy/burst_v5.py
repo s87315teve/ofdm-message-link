@@ -270,9 +270,15 @@ def _decode_v5_acquired(
     fixed_end = stf_start + V5_FIXED_LENGTH
     if fixed_end > values.size:
         raise BurstDecodeError("truncated burst before the fixed signaling header")
+    # Every FFT window -- LTF, SIG, payload -- starts this many samples into
+    # its cyclic prefix, so the linear phase it costs is the same everywhere
+    # and the LTF channel estimate carries it to the data.
+    backoff = rx.fft_backoff_samples
 
     try:
-        ltf = measure_ltf_pair(values, acquisition, numerology, average=rx.ltf_average)
+        ltf = measure_ltf_pair(
+            values, acquisition, numerology, average=rx.ltf_average, backoff=backoff
+        )
         if ltf is None:
             raise BurstDecodeError(
                 "fixed signaling header decode failed: the LTF pair is unusable"
@@ -290,7 +296,9 @@ def _decode_v5_acquired(
         )
         channel = refined.estimate
         corrected_sig = correct_v5_cfo(
-            values[sig_start:fixed_end], start=sig_start, acquisition=acquisition
+            values[sig_start - backoff : fixed_end - backoff],
+            start=sig_start - backoff,
+            acquisition=acquisition,
         )
         equalized_sig = equalize_with_pilots(
             corrected_sig,
@@ -342,7 +350,9 @@ def _decode_v5_acquired(
 
     payload_source_end = min(values.size, logical_burst_end + timing_margin)
     corrected_source = correct_v5_cfo(
-        values[fixed_end:payload_source_end], start=fixed_end, acquisition=acquisition
+        values[fixed_end - backoff : payload_source_end],
+        start=fixed_end - backoff,
+        acquisition=acquisition,
     )
     corrected_payload = corrected_source[:payload_sample_count]
     if corrected_payload.size < payload_sample_count:

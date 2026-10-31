@@ -92,6 +92,9 @@ _MINIMUM_NOISE_FRACTION = 1e-6
 _DEFAULT_NUMEROLOGY = OfdmNumerology()
 
 LlrNoiseSource = Literal["max", "header", "ltf"]
+#: Largest FFT backoff into the 16-sample CP; the rest is left for the
+#: channel's delay spread.
+MAX_FFT_BACKOFF_SAMPLES = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +177,14 @@ class V5RxConfig:
     the header-measured and LTF-measured values (default), or one of them.
     ``max_psdu_bytes`` bounds the PSDU length a SIG may signal, and
     ``turbo_max_iterations`` the payload decoder.
+
+    ``fft_backoff_samples`` starts every v5 FFT window -- LTF, SIG and
+    payload alike -- that many samples inside the cyclic prefix instead of
+    at its end.  A window that starts late takes samples of the next symbol
+    (ISI) the moment fine timing is a sample late or the sample clock drifts
+    the burst later; starting early only costs a linear phase, which the
+    LTF-based channel estimate absorbs because every window moves alike.  It
+    must stay well below the 16-sample CP minus the channel's delay spread.
     """
 
     acquisition: V5SyncConfig = field(default_factory=V5SyncConfig)
@@ -184,6 +195,7 @@ class V5RxConfig:
     llr_noise_source: LlrNoiseSource = "max"
     max_psdu_bytes: int = 16384
     turbo_max_iterations: int = 8
+    fft_backoff_samples: int = 3
 
     def __post_init__(self) -> None:
         if not isinstance(self.acquisition, V5SyncConfig):
@@ -199,6 +211,13 @@ class V5RxConfig:
             self.turbo_max_iterations
         ) is not int:
             raise SyncError("turbo_max_iterations must be one of 2, 4, 6, 8")
+        if (
+            type(self.fft_backoff_samples) is not int
+            or not 0 <= self.fft_backoff_samples <= MAX_FFT_BACKOFF_SAMPLES
+        ):
+            raise SyncError(
+                f"fft_backoff_samples must be an integer in [0, {MAX_FFT_BACKOFF_SAMPLES}]"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -656,6 +675,7 @@ def measure_ltf_pair(
     numerology: OfdmNumerology = _DEFAULT_NUMEROLOGY,
     *,
     average: bool = True,
+    backoff: int = 0,
 ) -> LtfMeasurement | None:
     """Channel estimate, noise and signal power from the two LTF symbols.
 
@@ -664,13 +684,15 @@ def measure_ltf_pair(
     receiver's guard-band noise does not enter), and the LS estimate
     ``(Y1 + Y2) / (2 l_k)`` carries half the noise of one symbol.
     ``average=False`` (experiment) estimates from L1 alone; the noise still
-    comes from the pair.  ``None`` when the samples do not hold both symbols
+    comes from the pair.  ``backoff`` starts both FFT windows that many
+    samples early, inside the guard and L1 respectively, as the decoder does
+    for every v5 window.  ``None`` when the samples do not hold both symbols
     or the estimate is unusable.
     """
 
     _require_numerology(numerology)
     values = _as_complex_samples(samples, "samples")
-    start = acquisition.ltf_start
+    start = acquisition.ltf_start - backoff
     if start < 0 or start + 128 > values.size:
         return None
     corrected = correct_v5_cfo(values[start : start + 128], start=start, acquisition=acquisition)
