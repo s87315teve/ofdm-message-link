@@ -35,6 +35,9 @@ from ofdm_link.phy.soft import soft_demap_symbols
 from ofdm_link.phy.sync import generate_preamble
 from ofdm_link.radio import SimulationChannelConfig, apply_simulation_channel
 
+# v1-v4 carry only these; 64QAM exists for wire v5 alone.
+LEGACY_MCS = (MCS.QPSK, MCS.QAM16)
+
 
 def _frame(mcs: MCS, payload_size: int = 73) -> Frame:
     return Frame(
@@ -46,7 +49,7 @@ def _frame(mcs: MCS, payload_size: int = 73) -> Frame:
     )
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 @pytest.mark.parametrize("payload_size", [0, 1, 47, 48, 49, 512])
 def test_complete_burst_round_trip_supports_soft_llr_fec(
     mcs: MCS,
@@ -70,7 +73,7 @@ def test_complete_burst_round_trip_supports_soft_llr_fec(
     assert decoded.diagnostics.decoder_latency_seconds >= 0.0
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_burst_round_trip_finds_one_frame_inside_a_finite_buffer(mcs: MCS) -> None:
     frame = _frame(mcs)
     transmitted = encode_burst(frame)
@@ -114,7 +117,7 @@ def test_burst_config_is_explicit_and_validated() -> None:
         SampleClockTrackingConfig(minimum_payload_symbols=1)
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_burst_layout_uses_one_training_and_three_fixed_qpsk_header_symbols(
     mcs: MCS,
 ) -> None:
@@ -185,7 +188,7 @@ def test_burst_rejects_invalid_preencoded_frame_bits(coded: np.ndarray) -> None:
         encode_burst(_frame(MCS.QPSK), preencoded_frame_bits=coded)
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 @pytest.mark.parametrize("normalized_cfo", [-0.2, 0.2])
 @pytest.mark.parametrize("gain", [0.5, 2.0])
 def test_burst_compensates_scalar_gain_and_edge_cfo(
@@ -218,7 +221,7 @@ def test_burst_compensates_scalar_gain_and_edge_cfo(
     )
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_burst_equalizes_three_tap_multipath_within_cp(mcs: MCS) -> None:
     frame = _frame(mcs, payload_size=80)
     transmitted = encode_burst(frame)
@@ -271,7 +274,7 @@ def test_burst_decodes_deterministic_nominal_awgn(mcs: MCS, snr_db: float) -> No
     assert decoded.burst_start == leading
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 @pytest.mark.parametrize("sfo_ppm", [-20.0, 20.0])
 def test_burst_tracks_representative_sample_clock_offset(
     mcs: MCS,
@@ -576,7 +579,7 @@ def test_burst_rejects_invalid_frame_decoder_contract() -> None:
         )
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_burst_round_trip_uses_selected_symbol_mapper_for_header_and_payload(
     mcs: MCS,
 ) -> None:
@@ -596,7 +599,7 @@ def test_burst_round_trip_uses_selected_symbol_mapper_for_header_and_payload(
     assert observed[1][0].size >= transmitted.header.coded_payload_bit_count
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_burst_round_trip_uses_selected_symbol_demapper_for_header_and_payload(
     mcs: MCS,
 ) -> None:

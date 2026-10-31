@@ -28,6 +28,44 @@ phy:
     code_rate: "1/3"
     decision_mode: turbo
     max_iterations: 8
+  # Wire-v5 transmit settings.  All three are experiment toggles kept
+  # settable until the hardware sweeps have confirmed the defaults.
+  v5:
+    # Zeros pushed before and after each v5 burst (0-256).  The STF absorbs
+    # the radio's switch-on transient; the trailing zeros flush the TX
+    # filters.  Legacy bursts keep their 256 + 256.
+    guard_pre_samples: 16
+    guard_post_samples: 64
+    # false sends scrambler seed 0 (identity).  Experiment only: the payload
+    # bits then shape the constellation statistics, PAPR and TX power.
+    scrambler: true
+  # Receiver settings.  The receiver decodes v1-v4 and v5 bursts in one
+  # stream; every key here except the last two is an experiment toggle or a
+  # threshold to be set from signal-free air captures.
+  rx:
+    # Switch either acquisition family off (CPU, cross-family A/B).
+    legacy_acquisition: true
+    v5_acquisition: true
+    # v5 detector: M128 gate, coherent STF check, LTF-pair correlation and the
+    # L1/L2 balance test that keeps legacy bursts from being acquired as v5.
+    # Predictions until measured on air.
+    v5_detection_threshold: 0.10
+    v5_stf_threshold: 0.20
+    v5_correlation_threshold: 0.25
+    v5_balance_ratio: 0.5
+    # Low-pass the acquisition copy of the samples to the occupied band
+    # (both families).  Experiment only.
+    acquisition_prefilter: false
+    # v5 channel estimate from both LTF symbols (false: L1 only), and the
+    # delay-limited smoothing of it (false: raw LS).  Experiment only.
+    ltf_average: true
+    channel_smoothing: true
+    # Noise variance behind the v5 payload LLRs: max of the SIG-measured and
+    # LTF-measured values, or one of them.  Experiment only.
+    llr_noise_source: max
+    # Largest PSDU a v5 SIG may signal, and the Turbo iteration cap.
+    max_psdu_bytes: 16384
+    turbo_max_iterations: 8
 
 mac:
   duplex: tdd
@@ -43,6 +81,17 @@ mac:
     guard_duration_s: 0.001
     uplink_duration_s: 0.015
     beacon_timeout_s: 0.132
+  # How a v5 transmitter packs queued datagrams into one burst: whatever is
+  # queued when the radio can take the next burst, up to these caps.  The
+  # airtime cap bounds clock drift, peak-normalization loss and decode
+  # latency per burst.  enabled: false (one datagram per burst) and the wait
+  # are experiment toggles.
+  aggregation:
+    enabled: true
+    max_wait_ms: 0.0
+    max_subframes: 16
+    max_psdu_bytes: 8192
+    max_burst_airtime_ms: 10.0
 
 radio:
   adapter: simulation

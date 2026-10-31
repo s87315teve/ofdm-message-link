@@ -236,7 +236,7 @@ def _candidates():
 def test_header_list_holds_every_header_the_link_sends():
     candidates = _candidates()
     for wire_version in (1, 2, 3, 4):
-        for mcs in MCS:
+        for mcs in (MCS.QPSK, MCS.QAM16):  # the modulations v1-v4 carry
             for size in (0, 1, 900, 996):
                 frame = _frame(size, mcs, size)
                 header = encode_burst(frame, wire_version=wire_version).header

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -13,20 +14,32 @@ from .burst import (
     BurstConfig,
     BurstDecodeError,
     BurstValidationError,
-    DecodedBurst,
     FrameDecoder,
     SoftSymbolDemapper,
     SymbolDemapper,
     _decode_burst_with_acquisition,
 )
 from .codec import DEFAULT_DUAL_VERSION_FRAME_DECODER, demap_symbols
+from .mcs_table import V5_WIRE_VERSION
 from .ofdm import OfdmNumerology
 from .sync import (
-    AcquisitionResult,
     PreambleMeasurement,
-    _acquisition_candidates,
+    acquire_all,
     measure_preamble,
+    separated_candidates,
 )
+from .sync_v5 import (
+    V5_FIXED_LENGTH,
+    V5_PREAMBLE_LENGTH,
+    V5_RETAIN_SAMPLES,
+    AnyAcquisition,
+    LtfMeasurement,
+    V5Acquisition,
+    measure_ltf_pair,
+)
+
+if TYPE_CHECKING:
+    from .burst_v5 import AnyDecodedBurst
 
 # Preamble SNR readings kept between two drains; a caller that stops draining
 # loses the oldest rather than growing the decoder without bound.
@@ -34,7 +47,7 @@ LINK_SNR_HISTORY = 4096
 
 
 def link_snr_db(
-    measurement: PreambleMeasurement | None,
+    measurement: PreambleMeasurement | LtfMeasurement | None,
     numerology: OfdmNumerology,
 ) -> float | None:
     """SNR of one burst in dB, from its preamble, or ``None`` if not measured.
@@ -45,7 +58,8 @@ def link_snr_db(
     burst power over the noise variance, which is also what the udp
     transport's ``--snr-db`` sets when the noise is white.  It needs no
     successful decode, so a burst whose header or payload failed still
-    reports what the channel was.
+    reports what the channel was.  A v5 burst's LTF-pair measurement reads
+    the same way, on twice the degrees of freedom.
     """
 
     if measurement is None:
@@ -67,7 +81,7 @@ class BurstSegment:
     """
 
     samples: NDArray[np.complex64]
-    acquisition: AcquisitionResult
+    acquisition: AnyAcquisition
     stream_offset: int
 
 
@@ -77,6 +91,7 @@ class PayloadFailure:
 
     diagnosed: bool
     crc_failed: bool
+    v5: bool = False
 
     @classmethod
     def from_error(cls, error: BurstDecodeError) -> PayloadFailure:
@@ -84,7 +99,20 @@ class PayloadFailure:
         return cls(
             diagnosed=diagnostics is not None,
             crc_failed=diagnostics is not None and diagnostics.outer_crc_ok is False,
+            v5=diagnostics is not None and diagnostics.wire_version == V5_WIRE_VERSION,
         )
+
+    @classmethod
+    def from_burst(cls, burst: AnyDecodedBurst) -> PayloadFailure | None:
+        """The failure a returned burst stands for: a v5 PSDU whose FCS failed.
+
+        A v5 payload whose FCS fails is still returned (its CRC-valid
+        subframes are delivered), but it counts as a payload CRC failure.
+        """
+
+        if getattr(burst, "fcs_ok", True):
+            return None
+        return cls(diagnosed=True, crc_failed=True, v5=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +133,15 @@ class StreamingDecoderSnapshot:
     crc_failures: int = 0
     valid_decoded_bursts: int = 0
     unclassified_decode_failures: int = 0
+    # Per-family counts.  ``valid_decoded_bursts`` keeps counting every
+    # payload that checked, of either family; a v5 PSDU whose FCS failed is
+    # a ``crc_failures`` and a ``psdu_fcs_failures`` even though its burst is
+    # still returned for its CRC-valid subframes.
+    detected_legacy_candidates: int = 0
+    detected_v5_candidates: int = 0
+    bursts_legacy: int = 0
+    bursts_v5: int = 0
+    psdu_fcs_failures: int = 0
 
 
 class StreamingBurstDecoder:
@@ -151,7 +188,7 @@ class StreamingBurstDecoder:
         self._input_noise_variance = input_noise_variance
         self._buffer = np.empty(0, dtype=np.complex64)
         self._buffer_start = 0
-        self._pending_acquisition: AcquisitionResult | None = None
+        self._pending_acquisition: AnyAcquisition | None = None
         self._required_sample_count: int | None = None
         self._next_candidate_start: int | None = None
         self._header_validated = False
@@ -163,6 +200,14 @@ class StreamingBurstDecoder:
         self._crc_failures = 0
         self._valid_decoded_bursts = 0
         self._unclassified_decode_failures = 0
+        self._detected_legacy_candidates = 0
+        self._detected_v5_candidates = 0
+        self._bursts_legacy = 0
+        self._bursts_v5 = 0
+        self._psdu_fcs_failures = 0
+        rx = config.v5
+        self._legacy_sync = config.sync if rx.legacy_acquisition else None
+        self._v5_sync = rx.acquisition if rx.v5_acquisition else None
         self._mode: str | None = None
         self._link_snrs: deque[float] = deque(maxlen=LINK_SNR_HISTORY)
         self._last_snr_start: int | None = None
@@ -191,6 +236,11 @@ class StreamingBurstDecoder:
             crc_failures=self._crc_failures,
             valid_decoded_bursts=self._valid_decoded_bursts,
             unclassified_decode_failures=self._unclassified_decode_failures,
+            detected_legacy_candidates=self._detected_legacy_candidates,
+            detected_v5_candidates=self._detected_v5_candidates,
+            bursts_legacy=self._bursts_legacy,
+            bursts_v5=self._bursts_v5,
+            psdu_fcs_failures=self._psdu_fcs_failures,
         )
 
     def drain_link_snr_db(self) -> tuple[float, ...]:
@@ -204,35 +254,49 @@ class StreamingBurstDecoder:
         self._link_snrs.clear()
         return drained
 
-    def _note_acquisition(self, acquisition: AcquisitionResult) -> None:
-        """Record one acquisition's SNR, once per physical preamble.
+    def _note_acquisition(self, acquisition: AnyAcquisition) -> None:
+        """Count one acquisition and record its SNR, once per physical preamble.
 
         After a failed header the stream steps forward a sample and can find
         the same preamble again further along its cyclic prefix; those repeats
-        lie within one preamble length and are not counted twice.
+        lie within one preamble length and are not counted twice.  A v5
+        preamble is measured on its LTF pair, a legacy one on its halves.
         """
 
+        self._detected_burst_candidates += 1
+        is_v5 = isinstance(acquisition, V5Acquisition)
+        if is_v5:
+            self._detected_v5_candidates += 1
+        else:
+            self._detected_legacy_candidates += 1
         start = self._buffer_start + acquisition.preamble_start
-        if (
-            self._last_snr_start is not None
-            and start - self._last_snr_start < self._config.sync.preamble_length
-        ):
+        length = V5_PREAMBLE_LENGTH if is_v5 else self._config.sync.preamble_length
+        if self._last_snr_start is not None and start - self._last_snr_start < length:
             return
         self._last_snr_start = start
         numerology = self._config.numerology
-        measurement = measure_preamble(
-            self._buffer, acquisition, numerology.active_carriers, self._config.sync
-        )
+        measurement: PreambleMeasurement | LtfMeasurement | None
+        if is_v5:
+            measurement = measure_ltf_pair(self._buffer, acquisition, numerology)
+        else:
+            measurement = measure_preamble(
+                self._buffer, acquisition, numerology.active_carriers, self._config.sync
+            )
         snr = link_snr_db(measurement, numerology)
         if snr is not None:
             self._link_snrs.append(snr)
 
-    def feed(self, complex_chunk: ArrayLike) -> tuple[DecodedBurst, ...]:
-        """Consume one contiguous sample chunk and emit every complete burst."""
+    def feed(self, complex_chunk: ArrayLike) -> tuple[AnyDecodedBurst, ...]:
+        """Consume one contiguous sample chunk and emit every complete burst.
+
+        Legacy bursts come back as :class:`DecodedBurst`, v5 bursts as
+        :class:`~ofdm_link.phy.burst_v5.DecodedPsduBurst` -- including one
+        whose FCS failed, for its CRC-valid subframes.
+        """
 
         self._enter_mode("decode")
         values = _stream_samples(complex_chunk)
-        decoded: list[DecodedBurst] = []
+        decoded: list[AnyDecodedBurst] = []
         cursor = 0
         while cursor < values.size:
             decoded.extend(self._drain())
@@ -249,37 +313,11 @@ class StreamingBurstDecoder:
         decoded.extend(self._drain())
         return tuple(decoded)
 
-    def _drain(self) -> list[DecodedBurst]:
-        decoded: list[DecodedBurst] = []
+    def _drain(self) -> list[AnyDecodedBurst]:
+        decoded: list[AnyDecodedBurst] = []
         while True:
-            if self._pending_acquisition is None:
-                candidates = _separated_candidates(
-                    _acquisition_candidates(self._buffer, self._config.sync),
-                    self._config.sync.preamble_length,
-                )
-                if not candidates:
-                    self._retain_possible_preamble_prefix()
-                    return decoded
-                first = candidates[0]
-                discarded = first.preamble_start
-                if discarded:
-                    self._discard(discarded)
-                    # The scan ran before the discard, so rebase the result
-                    # onto the buffer the decoder will actually be handed.
-                    first = replace(
-                        first,
-                        preamble_start=0,
-                        useful_start=first.useful_start - discarded,
-                    )
-                self._next_candidate_start = (
-                    None
-                    if len(candidates) < 2
-                    else candidates[1].preamble_start - discarded
-                )
-                self._pending_acquisition = first
-                self._header_validated = False
-                self._detected_burst_candidates += 1
-                self._note_acquisition(first)
+            if self._pending_acquisition is None and not self._acquire_next():
+                return decoded
 
             fixed_sample_count = self._fixed_sample_count
             if self._buffer.size < fixed_sample_count:
@@ -331,10 +369,7 @@ class StreamingBurstDecoder:
                     continue
                 if error.diagnostics is not None:
                     self._record_header_success()
-                    self._payload_decode_attempts += 1
-                    self._payload_decode_failure += 1
-                    if error.diagnostics.outer_crc_ok is False:
-                        self._crc_failures += 1
+                    self.record_payload_outcome(PayloadFailure.from_error(error))
                 elif self._header_validated:
                     self._payload_decode_attempts += 1
                     self._payload_decode_failure += 1
@@ -363,8 +398,7 @@ class StreamingBurstDecoder:
                 continue
 
             self._record_header_success()
-            self._payload_decode_attempts += 1
-            self._valid_decoded_bursts += 1
+            self.record_payload_outcome(PayloadFailure.from_burst(burst), burst)
             absolute = replace(
                 burst,
                 burst_start=self._buffer_start + burst.burst_start,
@@ -407,18 +441,39 @@ class StreamingBurstDecoder:
         segments.extend(self._drain_segments())
         return tuple(segments)
 
-    def record_payload_outcome(self, failure: PayloadFailure | None) -> None:
-        """Count one segment's payload result exactly as :meth:`feed` would."""
+    def record_payload_outcome(
+        self,
+        failure: PayloadFailure | None,
+        burst: AnyDecodedBurst | None = None,
+    ) -> None:
+        """Count one segment's payload result exactly as :meth:`feed` would.
+
+        Pass the decoded ``burst`` when there is one: it names the family for
+        the per-family counters.  For a v5 burst whose FCS failed, pass
+        ``PayloadFailure.from_burst(burst)`` as ``failure``.
+        """
 
         self._payload_decode_attempts += 1
+        is_v5 = (
+            failure.v5
+            if failure is not None
+            else burst is not None and burst.diagnostics.wire_version == V5_WIRE_VERSION
+        )
         if failure is None:
             self._valid_decoded_bursts += 1
+            if burst is not None:
+                if is_v5:
+                    self._bursts_v5 += 1
+                else:
+                    self._bursts_legacy += 1
             return
         self._payload_decode_failure += 1
         if not failure.diagnosed:
             self._unclassified_decode_failures += 1
         elif failure.crc_failed:
             self._crc_failures += 1
+            if failure.v5:
+                self._psdu_fcs_failures += 1
 
     def _enter_mode(self, mode: str) -> None:
         if self._mode is None:
@@ -481,10 +536,7 @@ class StreamingBurstDecoder:
             self._header_validated = False
 
     def _acquire_next(self) -> bool:
-        candidates = _separated_candidates(
-            _acquisition_candidates(self._buffer, self._config.sync),
-            self._config.sync.preamble_length,
-        )
+        candidates = acquire_all(self._buffer, self._legacy_sync, self._v5_sync)
         if not candidates:
             self._retain_possible_preamble_prefix()
             return False
@@ -492,17 +544,14 @@ class StreamingBurstDecoder:
         discarded = first.preamble_start
         if discarded:
             self._discard(discarded)
-            first = replace(
-                first,
-                preamble_start=0,
-                useful_start=first.useful_start - discarded,
-            )
+            # The scan ran before the discard, so rebase the result onto the
+            # buffer the decoder will actually be handed.
+            first = _rebased(first, discarded)
         self._next_candidate_start = (
             None if len(candidates) < 2 else candidates[1].preamble_start - discarded
         )
         self._pending_acquisition = first
         self._header_validated = False
-        self._detected_burst_candidates += 1
         self._note_acquisition(first)
         return True
 
@@ -527,6 +576,8 @@ class StreamingBurstDecoder:
 
     @property
     def _fixed_sample_count(self) -> int:
+        if isinstance(self._pending_acquisition, V5Acquisition):
+            return V5_FIXED_LENGTH
         block_length = (
             self._config.numerology.fft_size + self._config.numerology.cp_length
         )
@@ -534,7 +585,23 @@ class StreamingBurstDecoder:
         return self._config.sync.preamble_length + 4 * block_length
 
     def _retain_possible_preamble_prefix(self) -> None:
+        # A v5 candidate is judged only once its whole M128 run and LTF
+        # search fit in the buffer, so keep enough tail for that; legacy-only
+        # keeps exactly what it always kept.
         keep = self._config.sync.preamble_length - 1
+        if self._v5_sync is not None:
+            # Only from the first non-zero sample of that tail: exact-zero
+            # idle cannot hold an STF start, so an idle stream stays as small
+            # as it always was.  Capped at half the input bound so a tiny
+            # configured buffer still makes progress.
+            tail = self._buffer[-V5_RETAIN_SAMPLES:]
+            nonzero = np.flatnonzero(tail)
+            if nonzero.size:
+                v5_keep = min(
+                    int(tail.size - nonzero[0]),
+                    self._config.max_input_samples // 2,
+                )
+                keep = max(keep, v5_keep)
         if self._buffer.size > keep:
             self._discard(self._buffer.size - keep)
 
@@ -551,7 +618,7 @@ def decode_burst_segment(
     symbol_demapper: SymbolDemapper = demap_symbols,
     soft_symbol_demapper: SoftSymbolDemapper | None = None,
     input_noise_variance: float | None = None,
-) -> DecodedBurst:
+) -> AnyDecodedBurst:
     """Decode one segment; burst offsets in the result are absolute."""
 
     if not isinstance(segment, BurstSegment):
@@ -584,17 +651,21 @@ def _stream_samples(complex_chunk: ArrayLike) -> NDArray[np.complex64]:
     return converted
 
 
-def _separated_candidates(
-    candidates: tuple[AcquisitionResult, ...],
-    preamble_length: int,
-) -> tuple[AcquisitionResult, ...]:
-    """Keep the strongest candidate for each physical preamble."""
+def _rebased(acquisition: AnyAcquisition, discarded: int) -> AnyAcquisition:
+    """The same acquisition indexed into a buffer ``discarded`` samples shorter."""
 
-    selected: list[AcquisitionResult] = []
-    for candidate in sorted(candidates, key=lambda item: item.confidence, reverse=True):
-        if all(
-            abs(candidate.preamble_start - other.preamble_start) >= preamble_length
-            for other in selected
-        ):
-            selected.append(candidate)
-    return tuple(sorted(selected, key=lambda item: item.preamble_start))
+    if isinstance(acquisition, V5Acquisition):
+        return replace(
+            acquisition,
+            stf_start=acquisition.stf_start - discarded,
+            ltf_start=acquisition.ltf_start - discarded,
+        )
+    return replace(
+        acquisition,
+        preamble_start=acquisition.preamble_start - discarded,
+        useful_start=acquisition.useful_start - discarded,
+    )
+
+
+# Kept for callers of the old private name.
+_separated_candidates = separated_candidates

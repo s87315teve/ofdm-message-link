@@ -58,6 +58,45 @@ class SyncConfigSection:
 
 
 @dataclass(frozen=True)
+class V5TxConfigSection:
+    """Wire-v5 transmit settings (``phy.v5``); all are experiment toggles.
+
+    The guards are zeros around each pushed burst.  The STF absorbs the
+    radio's leading transient, so 16 samples before suffice; 64 after flush
+    the TX filters.  Both stay settable until the hardware guard sweep (H2)
+    has confirmed them.  ``scrambler: false`` sends seed 0, which the SIG
+    signals, so receivers need no matching setting.
+    """
+
+    guard_pre_samples: int = 16
+    guard_post_samples: int = 64
+    scrambler: bool = True
+
+
+@dataclass(frozen=True)
+class RxConfigSection:
+    """Receive settings for the dual-family receiver (``phy.rx``).
+
+    Everything except ``max_psdu_bytes`` and ``turbo_max_iterations`` is an
+    experiment toggle or a threshold to be set from measurements: the v5
+    thresholds are predictions until signal-free air has been scanned (H1).
+    """
+
+    legacy_acquisition: bool = True
+    v5_acquisition: bool = True
+    v5_detection_threshold: float = 0.10
+    v5_stf_threshold: float = 0.20
+    v5_correlation_threshold: float = 0.25
+    v5_balance_ratio: float = 0.5
+    acquisition_prefilter: bool = False
+    ltf_average: bool = True
+    channel_smoothing: bool = True
+    llr_noise_source: str = "max"
+    max_psdu_bytes: int = 16384
+    turbo_max_iterations: int = 8
+
+
+@dataclass(frozen=True)
 class PhyConfig:
     sample_rate: int
     fft_len: int
@@ -66,6 +105,8 @@ class PhyConfig:
     center_frequency: int
     fec: FecConfig
     sync: SyncConfigSection
+    v5: V5TxConfigSection = V5TxConfigSection()
+    rx: RxConfigSection = RxConfigSection()
 
     @property
     def subcarrier_spacing(self) -> float:
@@ -92,6 +133,23 @@ class TddConfig:
 
 
 @dataclass(frozen=True)
+class AggregationConfigSection:
+    """How a v5 transmitter packs queued datagrams into one burst.
+
+    Opportunistic by default: whatever is queued when the radio can take the
+    next burst goes into it, up to the caps, with no added wait.  The airtime
+    cap bounds sample-clock drift, peak-normalization loss and decode latency
+    per burst; ``enabled: false`` sends one datagram per burst (experiment).
+    """
+
+    enabled: bool = True
+    max_wait_ms: float = 0.0
+    max_subframes: int = 16
+    max_psdu_bytes: int = 8192
+    max_burst_airtime_ms: float = 10.0
+
+
+@dataclass(frozen=True)
 class MacConfig:
     duplex: str
     arq_window: int
@@ -100,6 +158,7 @@ class MacConfig:
     max_pending_sdus: int
     retransmission_timeout_s: float
     tdd: TddConfig
+    aggregation: AggregationConfigSection = AggregationConfigSection()
 
 
 @dataclass(frozen=True)
@@ -221,9 +280,11 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         root,
         "phy",
         {"sample_rate", "fft_len", "cyclic_prefix_len", "mcs", "center_frequency", "fec"},
-        optional={"sync"},
+        optional={"sync", "v5", "rx"},
     )
     sync = _sync_section(phy_raw)
+    v5_tx = _v5_tx_section(phy_raw)
+    rx = _rx_section(phy_raw)
     fec_raw = _mapping(phy_raw.get("fec"), "phy.fec")
     _only_keys(
         fec_raw,
@@ -236,9 +297,11 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
             fec_raw,
             "scheme",
             "phy.fec",
-            {"convolutional", "turbo", "uncoded"},
+            {"convolutional", "turbo", "uncoded", "turbo_rm"},
         ),
-        code_rate=_choice(fec_raw, "code_rate", "phy.fec", {"1", "1/2", "1/3"}),
+        code_rate=_choice(
+            fec_raw, "code_rate", "phy.fec", {"1", "1/2", "1/3", "2/3", "3/4"}
+        ),
         decision_mode=_choice(
             fec_raw,
             "decision_mode",
@@ -264,6 +327,15 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         fec.code_rate != "1/3" or fec.decision_mode != "turbo"
     ):
         raise ConfigError("Turbo FEC requires code_rate 1/3 and turbo decision_mode")
+    if fec.scheme == "turbo_rm" and (
+        fec.code_rate not in {"1/3", "1/2", "2/3", "3/4"} or fec.decision_mode != "turbo"
+    ):
+        raise ConfigError(
+            "rate-matched Turbo FEC (wire v5) requires code_rate 1/3, 1/2, 2/3 or 3/4 "
+            "and turbo decision_mode"
+        )
+    if fec.scheme != "turbo_rm" and fec.code_rate in {"2/3", "3/4"}:
+        raise ConfigError("code_rate 2/3 and 3/4 exist only for the turbo_rm scheme")
     if fec.scheme == "uncoded" and (
         fec.code_rate != "1" or fec.decision_mode not in {"hard", "soft"}
     ):
@@ -280,13 +352,17 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         sample_rate=_bounded_int(phy_raw, "sample_rate", "phy", 100_000, 61_440_000),
         fft_len=fft_len,
         cyclic_prefix_len=cyclic_prefix_len,
-        mcs=_choice(phy_raw, "mcs", "phy", {"qpsk", "qam16"}),
+        mcs=_choice(phy_raw, "mcs", "phy", {"qpsk", "qam16", "qam64"}),
         center_frequency=_bounded_int(
             phy_raw, "center_frequency", "phy", 1_000_000, 10_000_000_000
         ),
         fec=fec,
         sync=sync,
+        v5=v5_tx,
+        rx=rx,
     )
+    if phy.mcs == "qam64" and fec.scheme != "turbo_rm":
+        raise ConfigError("phy.mcs qam64 is carried only by the turbo_rm scheme (wire v5)")
 
     mac_raw = _section(
         root,
@@ -300,6 +376,7 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
             "retransmission_timeout_s",
             "tdd",
         },
+        optional={"aggregation"},
     )
     tdd_raw = _section(
         mac_raw,
@@ -336,6 +413,7 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
             mac_raw, "retransmission_timeout_s", "mac"
         ),
         tdd=tdd,
+        aggregation=_aggregation_section(mac_raw),
     )
 
     radio_raw = _section(
@@ -614,6 +692,130 @@ def _sync_section(phy_raw: Mapping[str, Any]) -> SyncConfigSection:
         detection_threshold=detection,
         correlation_threshold=correlation,
     )
+
+
+def _v5_tx_section(phy_raw: Mapping[str, Any]) -> V5TxConfigSection:
+    """Validate the optional ``phy.v5`` block; absent keys take the defaults."""
+
+    defaults = V5TxConfigSection()
+    if "v5" not in phy_raw:
+        return defaults
+    raw = _mapping(phy_raw.get("v5"), "phy.v5")
+    _only_keys(
+        raw,
+        set(),
+        "phy.v5",
+        optional={"guard_pre_samples", "guard_post_samples", "scrambler"},
+    )
+    return V5TxConfigSection(
+        guard_pre_samples=(
+            _bounded_int(raw, "guard_pre_samples", "phy.v5", 0, 256)
+            if "guard_pre_samples" in raw
+            else defaults.guard_pre_samples
+        ),
+        guard_post_samples=(
+            _bounded_int(raw, "guard_post_samples", "phy.v5", 0, 256)
+            if "guard_post_samples" in raw
+            else defaults.guard_post_samples
+        ),
+        scrambler=(
+            _boolean(raw, "scrambler", "phy.v5") if "scrambler" in raw else defaults.scrambler
+        ),
+    )
+
+
+def _rx_section(phy_raw: Mapping[str, Any]) -> RxConfigSection:
+    """Validate the optional ``phy.rx`` block; absent keys take the defaults.
+
+    The v5 coherent thresholds share the legacy floor's reasoning: below
+    about 0.2 the coherent stages stop separating a preamble from noise, so
+    they are bounded well away from zero.
+    """
+
+    defaults = RxConfigSection()
+    if "rx" not in phy_raw:
+        return defaults
+    raw = _mapping(phy_raw.get("rx"), "phy.rx")
+    booleans = {
+        "legacy_acquisition",
+        "v5_acquisition",
+        "acquisition_prefilter",
+        "ltf_average",
+        "channel_smoothing",
+    }
+    numbers = {
+        "v5_detection_threshold": (0.02, 1.0),
+        "v5_stf_threshold": (0.10, 1.0),
+        "v5_correlation_threshold": (0.10, 1.0),
+        "v5_balance_ratio": (0.05, 1.0),
+    }
+    _only_keys(
+        raw,
+        set(),
+        "phy.rx",
+        optional=booleans
+        | set(numbers)
+        | {"llr_noise_source", "max_psdu_bytes", "turbo_max_iterations"},
+    )
+    values: dict[str, Any] = {}
+    for key in booleans & set(raw):
+        values[key] = _boolean(raw, key, "phy.rx")
+    for key, (low, high) in numbers.items():
+        if key in raw:
+            values[key] = _bounded_number(raw, key, "phy.rx", low, high)
+    if "llr_noise_source" in raw:
+        values["llr_noise_source"] = _choice(
+            raw, "llr_noise_source", "phy.rx", {"max", "header", "ltf"}
+        )
+    if "max_psdu_bytes" in raw:
+        values["max_psdu_bytes"] = _bounded_int(raw, "max_psdu_bytes", "phy.rx", 19, 65535)
+    if "turbo_max_iterations" in raw:
+        values["turbo_max_iterations"] = _bounded_int(
+            raw, "turbo_max_iterations", "phy.rx", 2, 8
+        )
+        if values["turbo_max_iterations"] not in {2, 4, 6, 8}:
+            raise ConfigError("phy.rx.turbo_max_iterations must be one of: 2, 4, 6, 8")
+    section = RxConfigSection(**{**asdict(defaults), **values})
+    if not (section.legacy_acquisition or section.v5_acquisition):
+        raise ConfigError("phy.rx must leave at least one acquisition family enabled")
+    return section
+
+
+def _aggregation_section(mac_raw: Mapping[str, Any]) -> AggregationConfigSection:
+    """Validate the optional ``mac.aggregation`` block (wire-v5 transmitters)."""
+
+    defaults = AggregationConfigSection()
+    if "aggregation" not in mac_raw:
+        return defaults
+    raw = _mapping(mac_raw.get("aggregation"), "mac.aggregation")
+    _only_keys(
+        raw,
+        set(),
+        "mac.aggregation",
+        optional={
+            "enabled",
+            "max_wait_ms",
+            "max_subframes",
+            "max_psdu_bytes",
+            "max_burst_airtime_ms",
+        },
+    )
+    values: dict[str, Any] = {}
+    if "enabled" in raw:
+        values["enabled"] = _boolean(raw, "enabled", "mac.aggregation")
+    if "max_wait_ms" in raw:
+        values["max_wait_ms"] = _bounded_number(raw, "max_wait_ms", "mac.aggregation", 0.0, 1000.0)
+    if "max_subframes" in raw:
+        values["max_subframes"] = _bounded_int(raw, "max_subframes", "mac.aggregation", 1, 64)
+    if "max_psdu_bytes" in raw:
+        values["max_psdu_bytes"] = _bounded_int(
+            raw, "max_psdu_bytes", "mac.aggregation", 19, 65535
+        )
+    if "max_burst_airtime_ms" in raw:
+        values["max_burst_airtime_ms"] = _bounded_number(
+            raw, "max_burst_airtime_ms", "mac.aggregation", 0.1, 100.0
+        )
+    return AggregationConfigSection(**{**asdict(defaults), **values})
 
 
 def _bounded_number(

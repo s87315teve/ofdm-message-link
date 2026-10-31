@@ -40,6 +40,10 @@ SUPPORTED_WIRE_VERSIONS = tuple(
     sorted((*CODED_LENGTH_WIRE_VERSIONS, TURBO_BURST_HEADER_VERSION))
 )
 BURST_HEADER_REPETITION_FACTOR = 3
+# The constellations a v1-v4 header may name.  Later ones (64QAM for wire v5)
+# are rejected on both sides so the legacy header's candidate list and its
+# false-accept rate stay exactly what they were.
+LEGACY_HEADER_MODULATIONS = (MCS.QPSK, MCS.QAM16)
 BURST_HEADER_SIGNALING_BITS_PER_SYMBOL = 2  # Fixed QPSK, not payload MCS.
 OFDM_DATA_CARRIER_COUNT = 48
 # Receiver-only soft-decision bounds; the wire format is unchanged.
@@ -99,6 +103,10 @@ class BurstHeader:
             )
         if not isinstance(self.mcs, MCS):
             raise BurstHeaderValidationError("mcs must be an MCS")
+        if self.mcs not in LEGACY_HEADER_MODULATIONS:
+            raise BurstHeaderValidationError(
+                f"{self.mcs.name} has no v1-v4 header encoding; it exists only for wire v5"
+            )
         if (
             type(self.coded_payload_bit_count) is not int
             or not 1 <= self.coded_payload_bit_count <= 0xFFFFFFFF
@@ -156,6 +164,10 @@ class TurboBurstHeader:
             )
         if not isinstance(self.mcs, MCS):
             raise BurstHeaderValidationError("mcs must be an MCS")
+        if self.mcs not in LEGACY_HEADER_MODULATIONS:
+            raise BurstHeaderValidationError(
+                f"{self.mcs.name} has no v1-v4 header encoding; it exists only for wire v5"
+            )
         count = self.information_frame_bit_count
         if (
             type(count) is not int
@@ -371,10 +383,9 @@ def _parse_header_bits(information_bits: NDArray[np.bool_]) -> BurstHeaderDescri
     magic, version, mcs_value, length_field = _PREFIX.unpack(prefix)
     if magic != BURST_HEADER_MAGIC:
         raise BurstHeaderDecodeError("burst header magic mismatch")
-    try:
-        mcs = MCS(mcs_value)
-    except ValueError as error:
-        raise BurstHeaderDecodeError(f"unknown MCS {mcs_value}") from error
+    if mcs_value not in LEGACY_HEADER_MODULATIONS:
+        raise BurstHeaderDecodeError(f"unknown MCS {mcs_value}")
+    mcs = MCS(mcs_value)
     try:
         if version in CODED_LENGTH_WIRE_VERSIONS:
             return BurstHeader(version, mcs, length_field)
