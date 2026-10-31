@@ -161,10 +161,10 @@ def _v5(
 
 
 # Wire v5, same grouping rule.  Hidden entries stay decodable but are not
-# offered for transmit: 11 has the spectral efficiency of 10 and only the
-# better of the two will survive measurement; 64QAM needs an effective SNR
-# above the Pluto's 20-22 dB EVM floor and stays a candidate until hardware
-# shows otherwise.
+# offered for transmit: 11 has the spectral efficiency of 10 and the same
+# simulated threshold, so only 10 is offered.  64QAM is offered: on two
+# Plutos every 64QAM entry lost under 1 % at least 6 dB below the best SNR
+# the setup reached (docs/08-measurements.md, 8.8).
 V5_MCS_TABLE: tuple[McsTableEntry, ...] = (
     _v5(8, MCS.QPSK, Fraction(1, 3)),
     _v5(9, MCS.QPSK, Fraction(1, 2)),
@@ -173,9 +173,9 @@ V5_MCS_TABLE: tuple[McsTableEntry, ...] = (
     _v5(12, MCS.QAM16, Fraction(1, 2)),
     _v5(13, MCS.QAM16, Fraction(2, 3)),
     _v5(14, MCS.QAM16, Fraction(3, 4)),
-    _v5(15, MCS.QAM64, Fraction(1, 2), tx_visible=False),
-    _v5(16, MCS.QAM64, Fraction(2, 3), tx_visible=False),
-    _v5(17, MCS.QAM64, Fraction(3, 4), tx_visible=False),
+    _v5(15, MCS.QAM64, Fraction(1, 2)),
+    _v5(16, MCS.QAM64, Fraction(2, 3)),
+    _v5(17, MCS.QAM64, Fraction(3, 4)),
 )
 
 ALL_MCS_ENTRIES: tuple[McsTableEntry, ...] = MCS_TABLE + V5_MCS_TABLE

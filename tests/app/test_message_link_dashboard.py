@@ -41,12 +41,16 @@ def test_threshold_table_holds_the_measured_mcs_thresholds():
     }
 
 
-def test_threshold_table_holds_the_v5_placeholders_and_no_64qam():
+def test_threshold_table_holds_the_measured_v5_thresholds():
+    # Measured on two Plutos (docs/08, 8.8); hidden MCS 11 has none.
     assert {
         index: threshold
         for index, threshold in dashboard.SNR_THRESHOLD_DB.items()
         if index >= 8
-    } == {8: 9.0, 9: 11.5, 10: 13.5, 11: 13.5, 12: 17.5, 13: 20.5, 14: 22.5}
+    } == {
+        8: 7.5, 9: 9.0, 10: 11.0, 12: 14.0, 13: 15.5, 14: 17.5,
+        15: 16.5, 16: 21.0, 17: 22.0,
+    }
 
 
 # -- receive light, in rule order -----------------------------------------
@@ -148,9 +152,11 @@ def test_no_suggestion_when_already_on_the_most_robust_measured_mcs():
 def test_suggestions_stay_in_the_family_and_skip_hidden_entries():
     # A legacy transmitter cannot switch to a v5 index, and MCS 11 is hidden.
     assert dashboard.suggested_mcs(13.5, 4) == 0
-    assert dashboard.suggested_mcs(16.0, 12) == 10
-    assert dashboard.suggested_mcs(12.0, 12) == 9
+    assert dashboard.suggested_mcs(12.0, 12) == 10
+    assert dashboard.suggested_mcs(10.0, 12) == 9
     assert dashboard.suggested_mcs(5.0, 9) == 8
+    # A same-rate entry that needs less SNR is offered: 64QAM 1/2 under 16QAM 3/4.
+    assert dashboard.suggested_mcs(17.0, 14) == 15
 
 
 def test_no_suggestion_for_a_green_light():

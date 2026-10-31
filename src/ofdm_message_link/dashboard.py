@@ -27,20 +27,24 @@ from .link import RateMeter
 # MCS missing here has no measured threshold, and its light is judged on
 # loss alone.
 #
-# The wire-v5 values (8-14) are placeholders predicted from AWGN simulation
-# plus the 3.5 dB hardware penalty seen at 8.7, under a 21-22 dB EVM floor,
-# then the same +1 dB rounded to 0.5 dB (it reproduces 9.0 dB for QPSK 1/3).
-# Replace them with the H4 ladder measurements.  64QAM (15-17) has none.
+# The wire-v5 values (8-17) come from the v5 captures in docs/08-measurements.md
+# (8.8), same rule; the SNR is the in-band SNR of the two LTF symbols.  At the
+# same TX gain it reads about 3 dB above the legacy preamble's, because the
+# scrambled v5 waveform has about 3 dB less PAPR and so leaves more mean power
+# after peak normalization; at equal SNR, v5 MCS 8 needs about 3 dB less than
+# MCS 0.  MCS 14 needs more than MCS 15 for the same 3 bits per symbol.
 SNR_THRESHOLD_DB: Mapping[int, float] = {
     0: 9.0,
     4: 15.0,
-    8: 9.0,
-    9: 11.5,
-    10: 13.5,
-    11: 13.5,
-    12: 17.5,
-    13: 20.5,
-    14: 22.5,
+    8: 7.5,
+    9: 9.0,
+    10: 11.0,
+    12: 14.0,
+    13: 15.5,
+    14: 17.5,
+    15: 16.5,
+    16: 21.0,
+    17: 22.0,
 }
 
 LOSS_WINDOW_S = 10.0

@@ -206,9 +206,9 @@ def test_v5_entries_are_ordered_within_each_modulation_group() -> None:
 
 
 def test_hidden_entries_are_decodable_but_not_offered() -> None:
-    assert [entry.index for entry in v5_entries()] == [8, 9, 10, 12, 13, 14]
+    assert [entry.index for entry in v5_entries()] == [8, 9, 10, 12, 13, 14, 15, 16, 17]
     assert v5_entries(include_hidden=True) == V5_MCS_TABLE
-    assert all(not mcs_entry(index).tx_visible for index in (11, 15, 16, 17))
+    assert not mcs_entry(11).tx_visible
 
 
 def test_v5_entries_have_no_legacy_wire_identity() -> None:

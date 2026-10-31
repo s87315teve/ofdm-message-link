@@ -829,7 +829,7 @@ def test_transmit_window_builds_and_closes(offscreen_qt):
         window.show()
         offscreen_qt.processEvents()
         visible = v5_entries()
-        assert [entry.index for entry in visible] == [8, 9, 10, 12, 13, 14]
+        assert [entry.index for entry in visible] == [8, 9, 10, 12, 13, 14, 15, 16, 17]
         assert window._mcs_combo.count() == len(visible)
         labels = [window._mcs_combo.itemText(i) for i in range(len(visible))]
         assert labels[0].startswith("MCS 8 \u2014 QPSK 1/3, 2.0 Mbit/s")
@@ -837,7 +837,7 @@ def test_transmit_window_builds_and_closes(offscreen_qt):
         assert window._mcs_combo.currentData() == 8
         # One full 996-byte frame (a 1015-byte PSDU): v5 preamble + SIG +
         # payload + 16/64 guards at 5 MS/s.
-        expected_ms = [4.19, 2.85, 2.16, 1.49, 1.15, 1.04]
+        expected_ms = [4.19, 2.85, 2.16, 1.49, 1.15, 1.04, 1.04, 0.82, 0.74]
         assert [_airtime_ms(resolved, entry) for entry in visible] == pytest.approx(
             expected_ms,
             abs=0.01,
