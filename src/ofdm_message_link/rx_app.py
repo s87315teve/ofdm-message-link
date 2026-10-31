@@ -31,7 +31,7 @@ from dataclasses import asdict
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from ofdm_link.phy.mcs_table import describe_mcs_entry, mcs_entry_for_wire
+from ofdm_link.phy.mcs_table import McsTableEntry, McsTableError, describe_mcs_entry, mcs_entry
 
 from . import dashboard_widgets as widgets
 from . import log_limits, options, qt_runtime
@@ -432,9 +432,10 @@ class ReceiveWindow(QtWidgets.QWidget):
         self._bursts_seen += 1
         self._last_burst_at = time.monotonic()
         self._dashboard.observe_burst(self._last_burst_at)
-        entry = mcs_entry_for_wire(observation.modulation, observation.wire_version)
-        self._mcs_counts[entry.index] += 1
-        self._last_mcs = entry
+        entry = _entry_or_none(observation.mcs_index)
+        if entry is not None:
+            self._mcs_counts[entry.index] += 1
+            self._last_mcs = entry
         if observation.evm is not None:
             self._evms.append(observation.evm)
 
@@ -457,12 +458,12 @@ class ReceiveWindow(QtWidgets.QWidget):
             if received.latency_s is not None
             else "      n/a"
         )
-        entry = mcs_entry_for_wire(received.modulation, received.wire_version)
+        index = "?" if received.mcs_index is None else str(received.mcs_index)
         qt_runtime.append_line_following_tail(
             self._log,
 
             f"{stamp}  seq {received.sequence:5d}  "
-            f"MCS {entry.index} wire v{received.wire_version}  "
+            f"MCS {index} wire v{received.wire_version}  "
             f"{len(received.message.payload):6d} B  "
             f"{received.message.fragment_count} frag  "
             f"lat {latency}  {qt_runtime.preview_payload(received.message.payload)}"
@@ -607,8 +608,16 @@ class ReceiveWindow(QtWidgets.QWidget):
             row("  CRC failures", "crc_failures"),
             row("  valid", "valid_decoded_bursts"),
             "",
-            row("bursts decoded", "bursts_decoded"),
-            row("bursts missing", "missing_bursts",
+            "v5 aggregates:",
+            row("  PSDUs received", "psdus_received"),
+            row("  PSDU FCS failed", "psdus_fcs_failed", "good subframes still delivered"),
+            row("  subframes OK", "subframes_ok"),
+            row("  subframes CRC bad", "subframes_bad", "each one a sequence gap"),
+            row("  bad delimiters", "bad_delimiters"),
+            row("  delimiter resyncs", "delimiter_resyncs"),
+            "",
+            row("frames decoded", "bursts_decoded", "one per datagram; a v5 burst carries several"),
+            row("frames missing", "missing_bursts",
                 "undetected preamble or failed CRC; indistinguishable one-way"),
             row("sequence gaps", "sequence_gaps"),
             row("foreign bursts", "foreign_bursts", "valid CRC, not this demo's format"),
@@ -750,6 +759,17 @@ class ReceiveWindow(QtWidgets.QWidget):
         super().closeEvent(event)
 
 
+def _entry_or_none(index: int | None) -> McsTableEntry | None:
+    """Table entry of a decoded burst, or None when its header named none."""
+
+    if index is None:
+        return None
+    try:
+        return mcs_entry(index)
+    except McsTableError:
+        return None
+
+
 def _dbfs(value: float | None) -> str:
     return "       n/a" if value is None else f"{value:10.1f} dBFS"
 
@@ -769,7 +789,7 @@ def _profile_label(resolved: options.ResolvedOptions) -> QtWidgets.QLabel:
     text = (
         f"display hint only: {describe_mcs_entry(resolved.mcs_entry)} | "
         f"frame payload {described['frame_payload_bytes']} B | "
-        "RX reads actual MCS/FEC/wire v1-v4 from each protected burst header; "
+        "RX reads actual MCS/FEC/wire v1-v5 from each protected burst header; "
         f"only sample rate {resolved.profile.sample_rate / 1e6:g} MS/s must match"
     )
     label = QtWidgets.QLabel(text)

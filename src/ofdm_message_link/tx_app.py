@@ -23,43 +23,106 @@ import queue
 import socket
 import threading
 import time
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from ofdm_link.phy import CURRENT_PROTOCOL_VERSION, Frame, FrameKind
+from ofdm_link.phy.ampdu import ampdu_body_length
 from ofdm_link.phy.mcs_table import (
-    MCS_TABLE,
     McsTableEntry,
     describe_mcs_entry,
     mcs_entry,
+    v5_entries,
 )
-from ofdm_link.runtime.airtime import burst_sample_count
-from ofdm_link.runtime.factory import build_burst_config
+from ofdm_link.runtime.airtime import v5_burst_samples_with_guards
 
 from . import dashboard_widgets as widgets
 from . import options, qt_runtime
+from .aggregation import AggregationLimits
 from .dashboard import TxDashboard, TxView, tx_light
-from .link import MessageTransmitter, RateMeter
+from .datagram import Datagram
+from .link import FRAME_OVERHEAD_BYTES, MessageTransmitter, OutgoingBurst, RateMeter
 from .plots import PlotBuffers, SpectrumPlot, TrendPlot
 from .radio_panel import RadioPanel
 from .transport import set_transport_gain
 
 _SEND_QUEUE_DEPTH = 256
+_MODULATION_LABEL = {"QPSK": "QPSK", "QAM16": "16QAM", "QAM64": "64QAM"}
+
+
+def mcs_menu_label(entry: McsTableEntry, sample_rate: float) -> str:
+    """Menu text naming the format the way an operator compares them.
+
+    "QPSK 2/3" plus the PHY rate (48 data carriers x bits per symbol x code
+    rate per 80-sample OFDM symbol) says more at a glance than the scheme
+    name, which is the same LTE Turbo code for every v5 entry.
+    """
+
+    rate_mbps = 48 * entry.bits_per_symbol * float(entry.rate) * sample_rate / 80 / 1e6
+    modulation = _MODULATION_LABEL[entry.modulation.name]
+    hidden = "" if entry.tx_visible else "  [experiment]"
+    return f"MCS {entry.index} — {modulation} {entry.code_rate}, {rate_mbps:.1f} Mbit/s PHY{hidden}"
+
+
+def tx_menu_entries(current: McsTableEntry) -> tuple[McsTableEntry, ...]:
+    """Transmit-visible v5 entries, plus ``current`` if it is a hidden one.
+
+    A hidden entry chosen on the command line for an experiment must still
+    show as selected rather than silently snapping to another format.
+    """
+
+    entries = v5_entries()
+    if current not in entries:
+        entries = tuple(sorted((*entries, current), key=lambda entry: entry.index))
+    return entries
 
 
 @dataclass(frozen=True, slots=True)
 class SentRecord:
-    """What one accepted message turned into on the wire."""
+    """What one burst carried on the wire.
+
+    ``source`` and ``text`` describe the message of the burst's first
+    subframe.  ``message_count`` counts messages whose final fragment went
+    out in this burst, so summing it over records counts messages sent.
+    """
 
     source: str
     text: str
     byte_count: int
-    burst_count: int
+    message_count: int
+    subframe_count: int
     sample_count: int
     first_sequence: int
     mcs_index: int
     mcs_label: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Submitted:
+    """One message as it was handed to the worker."""
+
+    source: str
+    payload: bytes
+    submitted_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class _Pending:
+    """One datagram waiting for a burst, and the message it belongs to."""
+
+    datagram: Datagram
+    message: _Submitted
+    is_last: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _Encoded:
+    """A burst that has its sequence numbers and must go out exactly as is."""
+
+    burst: OutgoingBurst
+    pieces: tuple[_Pending, ...]
 
 
 class _Bridge(QtCore.QObject):
@@ -70,11 +133,21 @@ class _Bridge(QtCore.QObject):
 
 
 class TransmitWorker:
-    """Encode queued messages and push each burst into the sample transport.
+    """Aggregate queued datagrams into v5 bursts and push them to the transport.
 
     The thread outlives any one radio.  Messages typed before a radio is
     started stay queued and go out when one is, rather than being silently
     dropped or forcing the operator to retype them.
+
+    Aggregation is opportunistic.  When the radio accepts the next burst the
+    worker packs whatever datagrams are queued (FIFO, within
+    :class:`AggregationLimits`) into it.  While a burst is on the air the
+    worker is blocked in the send, the queue grows, and the next burst
+    carries more: at low load every datagram still goes out alone and at
+    once, at high load bursts fill up and the per-burst preamble, SIG and
+    guard cost is shared.  ``max_wait_s > 0`` trades latency for fuller
+    bursts by holding a burst that still has room for up to that long after
+    its oldest message was submitted.
     """
 
     def __init__(
@@ -82,19 +155,33 @@ class TransmitWorker:
         transmitter: MessageTransmitter,
         bridge: _Bridge,
         plot_buffers: PlotBuffers | None = None,
+        *,
+        aggregation: AggregationLimits | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._transmitter = transmitter
         self._bridge = bridge
         self._plot_buffers = plot_buffers if plot_buffers is not None else PlotBuffers()
+        self._limits = AggregationLimits() if aggregation is None else aggregation
+        self._clock = clock
         self._sink = None
         self._lock = threading.Lock()
-        self._queue: queue.Queue[tuple[str, bytes]] = queue.Queue(maxsize=_SEND_QUEUE_DEPTH)
+        self._queue: queue.Queue[_Submitted] = queue.Queue(maxsize=_SEND_QUEUE_DEPTH)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Messages taken off the queue but not yet completely sent; written
+        # only by the worker thread, read by the window.
+        self._held_messages = 0
 
     @property
     def pending(self) -> int:
-        return self._queue.qsize()
+        """Messages accepted but not yet completely on the air."""
+
+        return self._queue.qsize() + self._held_messages
+
+    @property
+    def aggregation(self) -> AggregationLimits:
+        return self._limits
 
     @property
     def sink(self):
@@ -137,12 +224,14 @@ class TransmitWorker:
 
     def submit(self, source: str, payload: bytes) -> bool:
         try:
-            self._queue.put_nowait((source, payload))
+            self._queue.put_nowait(_Submitted(source, payload, self._clock()))
             return True
         except queue.Full:
             return False
 
     def _run(self) -> None:
+        pending: deque[_Pending] = deque()
+        unsent: _Encoded | None = None
         while not self._stop.is_set():
             sink = self.sink
             if sink is None:
@@ -150,34 +239,96 @@ class TransmitWorker:
                 self._stop.wait(0.1)
                 continue
             try:
-                source, payload = self._queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            try:
-                bursts = self._transmitter.encode_message(payload)
-                samples = 0
-                for burst in bursts:
-                    if not self._send_when_there_is_room(sink, burst.samples):
-                        break
-                    samples += burst.sample_count
-                    self._plot_buffers.set_samples(burst.samples)
-                if bursts:
-                    self._bridge.sent.emit(
-                        SentRecord(
-                            source=source,
-                            text=qt_runtime.preview_payload(payload),
-                            byte_count=len(payload),
-                            burst_count=len(bursts),
-                            sample_count=samples,
-                            first_sequence=bursts[0].sequence,
-                            mcs_index=bursts[0].mcs_index,
-                            mcs_label=describe_mcs_entry(
-                                mcs_entry(bursts[0].mcs_index)
-                            ),
-                        )
-                    )
+                if unsent is None:
+                    if not pending:
+                        try:
+                            first = self._queue.get(timeout=0.1)
+                        except queue.Empty:
+                            continue
+                        self._admit(pending, first)
+                    self._fill(pending)
+                    unsent = self._encode_next(pending)
+                if not self._send_when_there_is_room(sink, unsent.burst.samples):
+                    # The radio was stopped underneath us.  The burst keeps
+                    # its sequence numbers and goes out first on the next one.
+                    continue
+                self._plot_buffers.set_samples(unsent.burst.samples)
+                self._report(unsent)
             except Exception as error:  # surfaced in the window, never silent
                 self._bridge.failed.emit(f"{type(error).__name__}: {error}")
+            unsent = None
+            self._held_messages = sum(piece.is_last for piece in pending)
+
+    def _admit(self, pending: deque[_Pending], item: _Submitted) -> None:
+        """Fragment one submitted message onto the end of ``pending``."""
+
+        pieces = self._transmitter.fragment_message(item.payload)
+        for index, piece in enumerate(pieces):
+            pending.append(_Pending(piece, item, index == len(pieces) - 1))
+        self._held_messages += 1
+
+    def _subframe_cap(self) -> int:
+        return self._limits.max_subframes if self._limits.enabled else 1
+
+    def _fill(self, pending: deque[_Pending]) -> None:
+        """Move queued messages into ``pending`` until a burst could be full.
+
+        Messages are fragmented only once they are about to be planned, so a
+        long queue does not turn into a long list of datagrams here, and the
+        window's queue count keeps meaning messages.
+        """
+
+        cap = self._subframe_cap()
+        while len(pending) < cap:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            self._admit(pending, item)
+        if not self._limits.enabled or self._limits.max_wait_s <= 0.0 or not pending:
+            return
+        deadline = pending[0].message.submitted_at + self._limits.max_wait_s
+        while len(pending) < cap and not self._stop.is_set():
+            datagrams = [piece.datagram for piece in pending]
+            if self._transmitter.plan_burst(datagrams, self._limits) < len(datagrams):
+                return  # already more than one burst holds; waiting gains nothing
+            remaining = deadline - self._clock()
+            if remaining <= 0.0:
+                return
+            try:
+                item = self._queue.get(timeout=remaining)
+            except queue.Empty:
+                return
+            self._admit(pending, item)
+
+    def _encode_next(self, pending: deque[_Pending]) -> _Encoded:
+        """Plan and encode the next burst from the head of ``pending``."""
+
+        entry = self._transmitter.active_mcs_entry
+        datagrams = [piece.datagram for piece in pending]
+        take = self._transmitter.plan_burst(datagrams, self._limits, entry)
+        pieces = tuple(pending.popleft() for _ in range(take))
+        burst = self._transmitter.encode_datagrams(
+            [piece.datagram for piece in pieces], entry=entry
+        )
+        return _Encoded(burst, pieces)
+
+    def _report(self, sent: _Encoded) -> None:
+        burst = sent.burst
+        first = sent.pieces[0].message
+        self._bridge.sent.emit(
+            SentRecord(
+                source=first.source,
+                text=qt_runtime.preview_payload(first.payload),
+                byte_count=burst.payload_bytes,
+                message_count=sum(piece.is_last for piece in sent.pieces),
+                subframe_count=burst.subframe_count,
+                sample_count=burst.sample_count,
+                first_sequence=burst.sequence,
+                mcs_index=burst.mcs_index,
+                mcs_label=describe_mcs_entry(mcs_entry(burst.mcs_index)),
+            )
+        )
 
     def _send_when_there_is_room(self, sink, samples) -> bool:
         """Block this worker until the transport accepts the burst.
@@ -282,6 +433,7 @@ class TransmitWindow(QtWidgets.QWidget):
                 self._plot_buffers,
                 ingress_port=ingress_port,
                 ui_fps=ui_fps,
+                aggregation=resolved.aggregation,
             )
             self._ingress = None
         else:
@@ -289,6 +441,7 @@ class TransmitWindow(QtWidgets.QWidget):
                 MessageTransmitter(resolved.profile, mcs_entry=resolved.mcs_entry),
                 self._bridge,
                 self._plot_buffers,
+                aggregation=resolved.aggregation,
             )
             self._ingress = IngressListener("127.0.0.1", ingress_port, self._worker.submit)
         self._ingress_address = f"127.0.0.1:{ingress_port}"
@@ -296,8 +449,10 @@ class TransmitWindow(QtWidgets.QWidget):
         self._goodput_now = RateMeter()
         self._messages = 0
         self._bursts = 0
+        self._subframes = 0
         self._messages_base = 0
         self._bursts_base = 0
+        self._subframes_base = 0
         self._bytes = 0
         self._samples = 0
         self._sample_rate = float(resolved.profile.sample_rate)
@@ -423,8 +578,8 @@ class TransmitWindow(QtWidgets.QWidget):
             cards.addWidget(card)
         mcs_card = widgets.Card("MCS for next message")
         self._mcs_combo = QtWidgets.QComboBox()
-        for entry in MCS_TABLE:
-            self._mcs_combo.addItem(describe_mcs_entry(entry), entry.index)
+        for entry in tx_menu_entries(self._resolved.mcs_entry):
+            self._mcs_combo.addItem(mcs_menu_label(entry, self._sample_rate), entry.index)
         selected = self._mcs_combo.findData(self._resolved.mcs_entry.index)
         self._mcs_combo.setCurrentIndex(selected)
         self._mcs_combo.currentIndexChanged.connect(self._on_mcs_changed)
@@ -551,18 +706,30 @@ class TransmitWindow(QtWidgets.QWidget):
 
     def _show_mcs_details(self, entry: McsTableEntry) -> None:
         airtime_ms = _airtime_ms(self._resolved, entry)
+        limits = self._resolved.aggregation
+        if limits.enabled:
+            aggregation = (
+                f"up to {limits.max_subframes} datagrams share a burst of at most "
+                f"{limits.max_burst_airtime_s * 1e3:g} ms"
+            )
+        else:
+            aggregation = "aggregation off: one datagram per burst"
         self._mcs_detail.setText(
             f"Spectral efficiency {entry.spectral_efficiency:.2f} bit/symbol; "
-            f"996-byte PHY payload airtime {airtime_ms:.2f} ms at "
-            f"{self._resolved.profile.sample_rate / 1e6:g} MS/s."
+            f"a full {self._resolved.profile.frame_payload_bytes}-byte frame is a "
+            f"{airtime_ms:.2f} ms burst at "
+            f"{self._resolved.profile.sample_rate / 1e6:g} MS/s, guards included; "
+            f"{aggregation}."
         )
+        hidden = not entry.tx_visible
         self._mcs_warning.setText(
-            "WARNING: Uncoded uses CRC error detection only and has no error "
-            "correction. It needs substantially higher SNR."
-            if entry.fec_scheme == "uncoded"
+            "WARNING: experiment-only entry. It is decodable but not offered by "
+            "default, because its threshold has not been measured on hardware "
+            "or it is expected to sit above the radio's EVM floor."
+            if hidden
             else ""
         )
-        self._mcs_warning.setVisible(entry.fec_scheme == "uncoded")
+        self._mcs_warning.setVisible(hidden)
 
     def _send_typed(self) -> None:
         text = self._input.text()
@@ -593,8 +760,9 @@ class TransmitWindow(QtWidgets.QWidget):
     # -- slots -----------------------------------------------------------
 
     def _on_sent(self, record: SentRecord) -> None:
-        self._messages += 1
-        self._bursts += record.burst_count
+        self._messages += record.message_count
+        self._bursts += 1
+        self._subframes += record.subframe_count
         self._bytes += record.byte_count
         self._samples += record.sample_count
         stamp = time.strftime("%H:%M:%S")
@@ -602,7 +770,7 @@ class TransmitWindow(QtWidgets.QWidget):
             self._log,
 
             f"{stamp}  seq {record.first_sequence:5d}  "
-            f"{record.byte_count:6d} B  {record.burst_count} burst(s)  "
+            f"{record.byte_count:6d} B  {record.subframe_count:2d} subframe(s)  "
             f"{record.mcs_label}  [{record.source}]  {record.text}"
         )
 
@@ -659,15 +827,28 @@ class TransmitWindow(QtWidgets.QWidget):
         elif warning is None:
             self._status.setStyleSheet("")
 
+    def _aggregation_text(self) -> str:
+        limits = self._resolved.aggregation
+        if not limits.enabled:
+            return "aggregation off"
+        return (
+            f"cap {limits.max_subframes} / {limits.max_burst_airtime_s * 1e3:g} ms / "
+            f"{limits.max_psdu_bytes} B, wait {limits.max_wait_s * 1e3:g} ms"
+        )
+
     def _hardware_rows(self, view: TxView, snapshot, elapsed: float) -> str:
         airtime = view.totals["samples"] / self._sample_rate
+        bursts = self._bursts - self._bursts_base
+        subframes = self._subframes - self._subframes_base
         ingress = (
             self._worker.ingress_datagrams if self._ingress is None else self._ingress.datagrams
         )
         rows = [
             f"radio              {'ON' if snapshot is not None else 'off':>10}",
             f"messages sent      {self._messages - self._messages_base:10d}   (since reset)",
-            f"bursts sent        {self._bursts - self._bursts_base:10d}",
+            f"bursts sent        {bursts:10d}",
+            f"subframes/burst    {subframes / bursts if bursts else 0.0:10.2f}"
+            f"   ({self._aggregation_text()})",
             f"application bytes  {view.totals['sent_bytes']:10d}",
             f"waveform airtime   {airtime:10.3f} s"
             f"  ({airtime / elapsed * 100:.1f}% duty since reset)",
@@ -706,6 +887,7 @@ class TransmitWindow(QtWidgets.QWidget):
         )
         self._messages_base = self._messages
         self._bursts_base = self._bursts
+        self._subframes_base = self._subframes
         self._started = now
         self._goodput_now = RateMeter()
         self._trend.set_points(())
@@ -768,6 +950,7 @@ def build_parser() -> argparse.ArgumentParser:
             "(default: process)"
         ),
     )
+    options.add_aggregation_arguments(parser)
     rf = parser.add_argument_group("RF safety gate")
     rf.add_argument(
         "--enable-rf",
@@ -783,19 +966,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _airtime_ms(resolved: options.ResolvedOptions, entry: McsTableEntry) -> float:
-    frame = Frame(
-        CURRENT_PROTOCOL_VERSION,
-        FrameKind.DATA,
-        entry.modulation,
-        0,
-        bytes(996),
+    """Airtime of a burst carrying one full-size frame, guards included."""
+
+    profile = resolved.profile
+    body = ampdu_body_length([FRAME_OVERHEAD_BYTES + profile.frame_payload_bytes])
+    samples = v5_burst_samples_with_guards(
+        entry, body, profile.guard_pre_samples, profile.guard_post_samples
     )
-    samples = burst_sample_count(
-        frame,
-        build_burst_config(resolved.config),
-        wire_version=entry.wire_version,
-    )
-    return samples / resolved.profile.sample_rate * 1000.0
+    return samples / profile.sample_rate * 1000.0
 
 
 def main(argv: list[str] | None = None) -> int:

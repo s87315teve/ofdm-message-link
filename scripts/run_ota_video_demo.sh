@@ -31,8 +31,9 @@ usage: scripts/run_ota_video_demo.sh --enable-rf [options]
   --keep-runs N        keep only the newest N run directories under
                        /tmp/ofdm_ota_video_demo, this one included; 0 = never delete
                        (default: 5; ignored with --out)
-  --mcs-index N        TX MCS (default: 4; use 0 when the RX SNR (2 s) is below 15 dB)
-  --video-kbps N       H.264 bit rate (default: 1300; use 750 with --mcs-index 0)
+  --mcs-index N        TX wire-v5 MCS (default: 8 = QPSK 1/3; 10 = QPSK 2/3 or 12 = 16QAM 1/2
+                       when the RX SNR (2 s) clears their dashboard thresholds)
+  --video-kbps N       H.264 bit rate (default: 750; use 1300 with --mcs-index 10 or higher)
   --auto-start         start both radios with the serials and gains below instead of
                        waiting for the operator to choose them in the windows;
                        needs --tx-serial and --rx-serial
@@ -55,8 +56,8 @@ EOF
 ENABLE_RF=0
 DURATION=""
 OUT=""
-MCS=4
-VIDEO_KBPS=1300
+MCS=8
+VIDEO_KBPS=750
 TRANSPORT=auto
 TX_SERIAL="" RX_SERIAL="" TX_GAIN="" RX_GAIN=""
 OVERLAYS=()

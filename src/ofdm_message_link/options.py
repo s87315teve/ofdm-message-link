@@ -5,6 +5,9 @@ receiver learns modulation and FEC from each protected burst header; it does
 not need a matching startup MCS.  Keeping resolution in one place still makes
 the two commands in the README a matched pair for the parameters that really
 are shared.
+
+The transmitter sends only wire v5, so its ``--mcs-index`` takes the v5
+indices 8-17; the receiver's is a display hint and accepts the whole table.
 """
 
 from __future__ import annotations
@@ -17,16 +20,22 @@ from pathlib import Path
 from ofdm_link.config import LinkConfig
 from ofdm_link.phy import MCS
 from ofdm_link.phy.mcs_table import (
-    MCS_TABLE,
+    ALL_MCS_ENTRIES,
     McsTableEntry,
     mcs_entry,
-    mcs_entry_for_wire,
+    v5_entries,
 )
 from ofdm_link.radio.uhd import RF_ENABLE_ACKNOWLEDGEMENT, B210Settings
-from ofdm_link.runtime.factory import select_frame_decoder
 
+from .aggregation import AggregationLimits
 from .devices import RadioSelection
-from .link import DEFAULT_FRAME_PAYLOAD_BYTES, PhyProfile, build_phy_profile, load_link_config
+from .link import (
+    DEFAULT_FRAME_PAYLOAD_BYTES,
+    PhyProfile,
+    build_phy_profile,
+    default_v5_entry,
+    load_link_config,
+)
 from .transport import DEFAULT_PEAK_AMPLITUDE, DEFAULT_TX_PORT, TransportError
 from .window_layout import parse_geometry
 
@@ -64,6 +73,25 @@ def _log_lines(value: str) -> int:
     return parsed
 
 
+def _max_subframes(value: str) -> int:
+    parsed = int(value)
+    if not 1 <= parsed <= 64:
+        raise argparse.ArgumentTypeError("must be between 1 and 64")
+    return parsed
+
+
+def _milliseconds(low: float, high: float, *, low_inclusive: bool = True):
+    def parse(value: str) -> float:
+        parsed = float(value)
+        above = parsed >= low if low_inclusive else parsed > low
+        if not (above and parsed <= high):
+            bound = "[" if low_inclusive else "("
+            raise argparse.ArgumentTypeError(f"must be in {bound}{low:g}, {high:g}] ms")
+        return parsed
+
+    return parse
+
+
 def _ui_fps(value: str) -> int:
     parsed = int(value)
     if not 1 <= parsed <= 60:
@@ -99,18 +127,28 @@ def add_common_arguments(
         help=(
             "display hint only; RX reads the actual MCS from every burst header"
             if receiver_display_only
-            else "legacy payload constellation selection; ignored when --mcs-index is set"
+            else (
+                "constellation shorthand: qpsk is MCS 8 (QPSK 1/3), qam16 is MCS 12 "
+                "(16QAM 1/2); ignored when --mcs-index is set"
+            )
         ),
     )
+    entries = ALL_MCS_ENTRIES if receiver_display_only else v5_entries(include_hidden=True)
     link.add_argument(
         "--mcs-index",
         type=int,
-        choices=tuple(entry.index for entry in MCS_TABLE),
+        choices=tuple(entry.index for entry in entries),
         default=None,
+        metavar="N",
         help=(
             "display hint only; RX reads the actual MCS from every burst header"
             if receiver_display_only
-            else "startup MCS table index 0..7; takes priority over --mcs"
+            else (
+                "startup wire-v5 MCS index: 8, 9, 10 (QPSK 1/3, 1/2, 2/3), "
+                "12, 13, 14 (16QAM 1/2, 2/3, 3/4); 11 and 15-17 are experiment "
+                "entries the menu hides. Default 8 unless --mcs qam16. Legacy "
+                "indices 0-7 are receive-only"
+            )
         ),
     )
     link.add_argument(
@@ -219,6 +257,92 @@ def add_common_arguments(
     )
 
 
+def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
+    """Transmit-side A-MPDU aggregation controls.
+
+    Aggregation is opportunistic: a burst carries whatever datagrams are
+    queued when the radio has room for it, so at low load it adds no latency
+    and at high load it shares one preamble, SIG and guard between up to
+    ``--aggregation-max-subframes`` datagrams.  ``--aggregation-max-wait-ms``
+    is the only knob that adds latency on purpose.
+    """
+
+    group = parser.add_argument_group(
+        "aggregation",
+        "Several datagrams can share one v5 burst. The caps bound the burst's "
+        "airtime (timing drift, decode latency) and the latency a datagram can "
+        "wait for company. Each option overrides mac.aggregation in the "
+        "configuration (defaults: on, 16 subframes, 0 ms wait, 10 ms airtime).",
+    )
+    group.add_argument(
+        "--aggregation",
+        choices=("on", "off"),
+        default=None,
+        help=(
+            "on packs every datagram queued when the radio is ready into one "
+            "burst, within the caps below; off sends one datagram per burst, "
+            "for A/B measurements"
+        ),
+    )
+    group.add_argument(
+        "--aggregation-max-subframes",
+        type=_max_subframes,
+        default=None,
+        metavar="N",
+        help="most datagrams in one burst, 1-64",
+    )
+    group.add_argument(
+        "--aggregation-max-wait-ms",
+        type=_milliseconds(0.0, 1000.0),
+        default=None,
+        metavar="MS",
+        help=(
+            "hold a burst that still has room up to MS after its oldest message "
+            "arrived, waiting for more to share it. Fuller bursts at a cost of up "
+            "to MS of added latency per datagram; 0 never waits, so a lone "
+            "datagram leaves as soon as the radio is free"
+        ),
+    )
+    group.add_argument(
+        "--max-burst-airtime-ms",
+        type=_milliseconds(0.0, 100.0, low_inclusive=False),
+        default=None,
+        metavar="MS",
+        help=(
+            "longest aggregated burst on the air, guards included; a single "
+            "datagram longer than this is still sent alone. Longer bursts drift "
+            "further against the receiver's timing tracker, lose more level to "
+            "peak scaling and decode more lumpily"
+        ),
+    )
+
+
+def aggregation_limits(args: argparse.Namespace, config: LinkConfig) -> AggregationLimits:
+    """``mac.aggregation`` with any transmit option laid over it.
+
+    The configuration states the caps in milliseconds, like the options; this
+    is the one place they become the seconds :class:`AggregationLimits` uses.
+    The receiver has no such options and simply gets the configured values.
+    """
+
+    section = config.mac.aggregation
+
+    def given(name: str, configured):
+        value = getattr(args, name, None)
+        return configured if value is None else value
+
+    switch = getattr(args, "aggregation", None)
+    return AggregationLimits(
+        enabled=bool(section.enabled) if switch is None else switch == "on",
+        max_wait_s=float(given("aggregation_max_wait_ms", section.max_wait_ms)) / 1e3,
+        max_subframes=int(given("aggregation_max_subframes", section.max_subframes)),
+        max_psdu_bytes=int(section.max_psdu_bytes),
+        max_burst_airtime_s=(
+            float(given("max_burst_airtime_ms", section.max_burst_airtime_ms)) / 1e3
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedOptions:
     """One consistent working point shared by both apps."""
@@ -227,6 +351,7 @@ class ResolvedOptions:
     profile: PhyProfile
     mcs_entry: McsTableEntry
     transport: str
+    aggregation: AggregationLimits = AggregationLimits()
 
     @property
     def uses_radio(self) -> bool:
@@ -265,13 +390,13 @@ def resolve(args: argparse.Namespace) -> ResolvedOptions:
     except (ValueError, TypeError) as error:
         raise SystemExit(f"invalid PHY working point: {error}") from error
     if selected_entry is None:
-        wire_version = select_frame_decoder(config).wire_version
-        selected_entry = mcs_entry_for_wire(profile.mcs, wire_version)
+        selected_entry = default_v5_entry(profile.mcs)
     return ResolvedOptions(
         config=config,
         profile=profile,
         mcs_entry=selected_entry,
         transport=args.transport,
+        aggregation=aggregation_limits(args, config),
     )
 
 
@@ -441,7 +566,9 @@ __all__ = [
     "RF_ACKNOWLEDGEMENT",
     "ResolvedOptions",
     "TransportError",
+    "add_aggregation_arguments",
     "add_common_arguments",
+    "aggregation_limits",
     "build_sink",
     "build_source",
     "clear_ready",
