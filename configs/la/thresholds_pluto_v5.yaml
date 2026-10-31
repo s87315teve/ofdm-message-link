@@ -1,0 +1,30 @@
+# Preamble SNR each MCS needs on a Pluto-to-Pluto link: the lowest SNR at which
+# the receiver lost under 1 % of 900-byte bursts, plus 1 dB, rounded to 0.5 dB.
+# One table for the GUI lights (dashboard.SNR_THRESHOLD_DB) and the link
+# adaptation inner loop (ofdm_message_link.la.thresholds).
+#
+# Legacy MCS 0 and 4: captures in docs/08-measurements.md (8.7); the SNR is the
+# in-band thermal SNR the SNR card shows.  It is not the scale of v1.0.0's
+# 8 / 11 dB, which came from the EVM and read 2-4 dB lower: by TX power the new
+# receiver needs about 10 dB less for MCS 0 and 5 dB less for MCS 4.
+#
+# Wire v5 (8-17): v5 captures in docs/08-measurements.md (8.8), same rule; the
+# SNR is the in-band SNR of the two LTF symbols.  At the same TX gain it reads
+# about 3 dB above the legacy preamble's, because the scrambled v5 waveform has
+# about 3 dB less PAPR and so leaves more mean power after peak normalization;
+# at equal SNR, v5 MCS 8 needs about 3 dB less than MCS 0.  MCS 14 needs more
+# than MCS 15 for the same 3 bits per symbol, so the LA ladder drops 14.
+# Hidden MCS 11 has no value.  An MCS missing here has no measured threshold:
+# its GUI light is judged on loss alone and the LA never selects it.
+snr_threshold_db:
+  0: 9.0
+  4: 15.0
+  8: 7.5
+  9: 9.0
+  10: 11.0
+  12: 14.0
+  13: 15.5
+  14: 17.5
+  15: 16.5
+  16: 21.0
+  17: 22.0
