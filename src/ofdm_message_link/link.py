@@ -54,7 +54,7 @@ from ofdm_link.phy.mcs_table import (
     mcs_index_for_wire,
     v5_entries,
 )
-from ofdm_link.phy.streaming import PayloadFailure, StreamingBurstDecoder
+from ofdm_link.phy.streaming import StreamingBurstDecoder
 from ofdm_link.runtime.airtime import v5_burst_samples_with_guards
 from ofdm_link.runtime.factory import build_burst_config, select_frame_decoder
 
@@ -63,11 +63,6 @@ from .aggregation import AggregationLimits, plan_aggregate
 from .datagram import Datagram, ReassembledMessage, Reassembler
 
 DEFAULT_FRAME_PAYLOAD_BYTES = 996
-# v5 guards: the 160-sample STF absorbs the radio's leading transient, so 16
-# zeros before a burst suffice, and 64 after it flush the transmit filters.
-# Legacy bursts used 256 + 256.
-DEFAULT_GUARD_PRE_SAMPLES = 16
-DEFAULT_GUARD_POST_SAMPLES = 64
 # Serialized frame overhead around a datagram: 7-byte header + CRC-32.
 FRAME_OVERHEAD_BYTES = 11
 # The streaming decoder rescans its whole buffer for each burst, so its cost
@@ -124,8 +119,9 @@ class PhyProfile:
     config: LinkConfig
     mcs: MCS
     frame_payload_bytes: int
-    guard_pre_samples: int = DEFAULT_GUARD_PRE_SAMPLES
-    guard_post_samples: int = DEFAULT_GUARD_POST_SAMPLES
+    guard_pre_samples: int
+    guard_post_samples: int
+    scrambler: bool = True
 
     @property
     def sample_rate(self) -> int:
@@ -162,14 +158,23 @@ def build_phy_profile(
     mcs: MCS | None = None,
     mcs_entry: McsTableEntry | None = None,
     frame_payload_bytes: int = DEFAULT_FRAME_PAYLOAD_BYTES,
-    guard_pre_samples: int = DEFAULT_GUARD_PRE_SAMPLES,
-    guard_post_samples: int = DEFAULT_GUARD_POST_SAMPLES,
+    guard_pre_samples: int | None = None,
+    guard_post_samples: int | None = None,
 ) -> PhyProfile:
     """Resolve the PHY working point, rejecting sizes the wire cannot carry.
 
     ``mcs_entry`` may be a legacy entry, because the receiver takes it only as
-    a display hint; the transmitter enforces v5 itself.
+    a display hint; the transmitter enforces v5 itself.  The guards and the
+    scrambler switch come from ``phy.v5`` unless the guards are given here
+    (16 + 64 by default: the 160-sample STF absorbs the radio's leading
+    transient, and 64 zeros after a burst flush the transmit filters).
     """
+
+    v5 = config.phy.v5
+    guard_pre_samples = v5.guard_pre_samples if guard_pre_samples is None else guard_pre_samples
+    guard_post_samples = (
+        v5.guard_post_samples if guard_post_samples is None else guard_post_samples
+    )
 
     if not isinstance(config, LinkConfig):
         raise TypeError("config must be a LinkConfig")
@@ -198,6 +203,7 @@ def build_phy_profile(
         frame_payload_bytes=frame_payload_bytes,
         guard_pre_samples=guard_pre_samples,
         guard_post_samples=guard_post_samples,
+        scrambler=bool(v5.scrambler),
     )
     tx_entry = (
         mcs_entry
@@ -275,7 +281,7 @@ class MessageTransmitter:
         profile: PhyProfile,
         *,
         mcs_entry: McsTableEntry | None = None,
-        scrambler: bool = True,
+        scrambler: bool | None = None,
     ) -> None:
         if not isinstance(profile, PhyProfile):
             raise TypeError("profile must be a PhyProfile")
@@ -283,7 +289,8 @@ class MessageTransmitter:
         self._profile = profile
         self._burst_config = build_burst_config(profile.config)
         self._mcs_entry = require_v5_entry(entry)
-        self._scrambler = bool(scrambler)
+        # ``phy.v5.scrambler: false`` (seed 0) is an experiment toggle only.
+        self._scrambler = profile.scrambler if scrambler is None else bool(scrambler)
         self._codec_lock = threading.Lock()
         self._sequence = itertools.count()
         self._seed_counter = itertools.count()
@@ -711,12 +718,9 @@ class MessageReceiver:
         delivered: list[ReceivedMessage] = []
         for result in results:
             burst = result.burst
-            failure = result.failure
-            if burst is not None and failure is None:
-                # A v5 PSDU whose FCS failed still comes back as a burst, for
-                # its CRC-valid subframes, but counts as a payload failure.
-                failure = PayloadFailure.from_burst(burst)
-            self._decoder.record_payload_outcome(failure, burst)
+            # A v5 PSDU whose FCS failed has both a burst, for its CRC-valid
+            # subframes, and a failure for the counters.
+            self._decoder.record_payload_outcome(result.failure, burst)
             if burst is not None:
                 delivered.extend(self._accept(burst, result.annotation))
         return tuple(delivered)

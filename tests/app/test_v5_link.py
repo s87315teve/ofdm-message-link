@@ -445,3 +445,67 @@ def test_encode_burst_v5_sample_count_has_no_guards(profile):
     body = bytes(100)
     encoded = encode_burst_v5(body, entry, build_burst_config(profile.config), scrambler_seed=1)
     assert v5_burst_samples_with_guards(entry, len(body), 0, 0) == encoded.sample_count
+
+
+# -- configuration ---------------------------------------------------------
+
+
+def test_guards_and_scrambler_follow_the_phy_v5_section(profile):
+    from dataclasses import replace
+
+    config = profile.config
+    v5 = replace(config.phy.v5, guard_pre_samples=0, guard_post_samples=200, scrambler=False)
+    custom = build_phy_profile(replace(config, phy=replace(config.phy, v5=v5)))
+    assert (custom.guard_pre_samples, custom.guard_post_samples) == (0, 200)
+    (piece,) = MessageTransmitter(custom).fragment_message(b"same bytes every time")
+    # Fresh transmitters, so both bursts carry sequence number 0.
+    first = MessageTransmitter(custom).encode_datagrams((piece,))
+    body = aggregate_body_length((piece,))
+    assert first.sample_count == v5_burst_samples_with_guards(mcs_entry(8), body, 0, 200)
+    assert np.any(first.samples[:16]) and not np.any(first.samples[-200:])
+    # Scrambler off is seed 0, which is what the encoder gets.
+    expected = encode_burst_v5(
+        pack_ampdu([serialize_frame(Frame(1, FrameKind.DATA, MCS.QPSK, 0, piece.encode()))]),
+        mcs_entry(8),
+        build_burst_config(custom.config),
+        scrambler_seed=0,
+    )
+    np.testing.assert_array_equal(first.samples[:-200], expected.samples)
+    scrambled = MessageTransmitter(custom, scrambler=True).encode_datagrams((piece,))
+    assert not np.array_equal(scrambled.samples, first.samples)
+
+
+def test_aggregation_caps_come_from_mac_aggregation_in_milliseconds(profile):
+    import argparse
+    from dataclasses import replace
+
+    from ofdm_message_link import options
+    from ofdm_message_link.tx_app import build_parser
+
+    config = profile.config
+    section = replace(
+        config.mac.aggregation,
+        enabled=False,
+        max_wait_ms=3.0,
+        max_subframes=5,
+        max_psdu_bytes=4000,
+        max_burst_airtime_ms=7.5,
+    )
+    custom = replace(config, mac=replace(config.mac, aggregation=section))
+    limits = options.aggregation_limits(build_parser().parse_args([]), custom)
+    assert limits == AggregationLimits(
+        enabled=False,
+        max_wait_s=0.003,
+        max_subframes=5,
+        max_psdu_bytes=4000,
+        max_burst_airtime_s=0.0075,
+    )
+    # Options override the file one by one.
+    overridden = options.aggregation_limits(
+        build_parser().parse_args(["--aggregation", "on", "--aggregation-max-subframes", "9"]),
+        custom,
+    )
+    assert overridden.enabled is True and overridden.max_subframes == 9
+    assert overridden.max_wait_s == 0.003 and overridden.max_psdu_bytes == 4000
+    # A namespace without the transmit options (the receiver's) gets the file.
+    assert options.aggregation_limits(argparse.Namespace(), custom) == limits

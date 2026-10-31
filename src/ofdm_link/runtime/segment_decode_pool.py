@@ -67,9 +67,8 @@ Annotate = Callable[[AnyDecodedBurst], Any]
 class SegmentDecodeResult:
     """One segment's outcome: a burst and its annotation, or a failure.
 
-    A v5 PSDU whose FCS failed is still a burst here (``failure`` None),
-    because its CRC-valid subframes are deliverable; the caller counts it with
-    ``PayloadFailure.from_burst``.
+    A v5 PSDU whose FCS failed carries both: the burst, because its CRC-valid
+    subframes are still deliverable, and the failure the counters record.
     """
 
     burst: AnyDecodedBurst | None
@@ -128,7 +127,7 @@ def decode_segment(
         return SegmentDecodeResult(burst=None, failure=PayloadFailure.from_error(error))
     return SegmentDecodeResult(
         burst=burst,
-        failure=None,
+        failure=PayloadFailure.from_burst(burst),
         annotation=None if annotate is None else annotate(burst),
     )
 

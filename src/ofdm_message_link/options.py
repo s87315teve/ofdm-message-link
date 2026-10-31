@@ -267,68 +267,78 @@ def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
     is the only knob that adds latency on purpose.
     """
 
-    defaults = AggregationLimits()
     group = parser.add_argument_group(
         "aggregation",
         "Several datagrams can share one v5 burst. The caps bound the burst's "
         "airtime (timing drift, decode latency) and the latency a datagram can "
-        "wait for company.",
+        "wait for company. Each option overrides mac.aggregation in the "
+        "configuration (defaults: on, 16 subframes, 0 ms wait, 10 ms airtime).",
     )
     group.add_argument(
         "--aggregation",
         choices=("on", "off"),
-        default="on",
+        default=None,
         help=(
             "on packs every datagram queued when the radio is ready into one "
             "burst, within the caps below; off sends one datagram per burst, "
-            "for A/B measurements (default: on)"
+            "for A/B measurements"
         ),
     )
     group.add_argument(
         "--aggregation-max-subframes",
         type=_max_subframes,
-        default=defaults.max_subframes,
+        default=None,
         metavar="N",
-        help=f"most datagrams in one burst, 1-64 (default: {defaults.max_subframes})",
+        help="most datagrams in one burst, 1-64",
     )
     group.add_argument(
         "--aggregation-max-wait-ms",
         type=_milliseconds(0.0, 1000.0),
-        default=defaults.max_wait_s * 1e3,
+        default=None,
         metavar="MS",
         help=(
             "hold a burst that still has room up to MS after its oldest message "
             "arrived, waiting for more to share it. Fuller bursts at a cost of up "
             "to MS of added latency per datagram; 0 never waits, so a lone "
-            "datagram leaves as soon as the radio is free (default: 0)"
+            "datagram leaves as soon as the radio is free"
         ),
     )
     group.add_argument(
         "--max-burst-airtime-ms",
         type=_milliseconds(0.0, 100.0, low_inclusive=False),
-        default=defaults.max_burst_airtime_s * 1e3,
+        default=None,
         metavar="MS",
         help=(
             "longest aggregated burst on the air, guards included; a single "
             "datagram longer than this is still sent alone. Longer bursts drift "
             "further against the receiver's timing tracker, lose more level to "
-            "peak scaling and decode more lumpily "
-            f"(default: {defaults.max_burst_airtime_s * 1e3:g})"
+            "peak scaling and decode more lumpily"
         ),
     )
 
 
-def aggregation_limits(args: argparse.Namespace) -> AggregationLimits:
-    """The caps the transmit options ask for; the defaults for the receiver."""
+def aggregation_limits(args: argparse.Namespace, config: LinkConfig) -> AggregationLimits:
+    """``mac.aggregation`` with any transmit option laid over it.
 
-    defaults = AggregationLimits()
+    The configuration states the caps in milliseconds, like the options; this
+    is the one place they become the seconds :class:`AggregationLimits` uses.
+    The receiver has no such options and simply gets the configured values.
+    """
+
+    section = config.mac.aggregation
+
+    def given(name: str, configured):
+        value = getattr(args, name, None)
+        return configured if value is None else value
+
+    switch = getattr(args, "aggregation", None)
     return AggregationLimits(
-        enabled=getattr(args, "aggregation", "on") == "on",
-        max_wait_s=getattr(args, "aggregation_max_wait_ms", defaults.max_wait_s * 1e3) / 1e3,
-        max_subframes=getattr(args, "aggregation_max_subframes", defaults.max_subframes),
-        max_psdu_bytes=defaults.max_psdu_bytes,
+        enabled=bool(section.enabled) if switch is None else switch == "on",
+        max_wait_s=float(given("aggregation_max_wait_ms", section.max_wait_ms)) / 1e3,
+        max_subframes=int(given("aggregation_max_subframes", section.max_subframes)),
+        max_psdu_bytes=int(section.max_psdu_bytes),
         max_burst_airtime_s=(
-            getattr(args, "max_burst_airtime_ms", defaults.max_burst_airtime_s * 1e3) / 1e3
+            float(given("max_burst_airtime_ms", section.max_burst_airtime_ms)) / 1e3
         ),
     )
 
@@ -386,7 +396,7 @@ def resolve(args: argparse.Namespace) -> ResolvedOptions:
         profile=profile,
         mcs_entry=selected_entry,
         transport=args.transport,
-        aggregation=aggregation_limits(args),
+        aggregation=aggregation_limits(args, config),
     )
 
 
