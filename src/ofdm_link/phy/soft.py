@@ -1,4 +1,4 @@
-"""CPU/headless max-log soft demapping for the v1 constellations."""
+"""CPU/headless max-log soft demapping for the QPSK, 16QAM and 64QAM constellations."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from ._arrays import all_finite
-from .codec import MCS, PhyCodecError
+from .codec import _QAM64_LABELS_BY_AMPLITUDE, MCS, PhyCodecError
 from .fec import SOFT_LLR_CLIP
 
 LLR_CONVENTION = "positive-log-p0-over-p1"
@@ -62,7 +62,7 @@ def soft_demap_symbols(
     ``complex_noise_variance`` is :math:`E[|n|^2]` after equalization, either
     one scalar or one value per constellation symbol.  Distances are divided
     by that complex variance.  The implementation is vectorized and chunks
-    the 16QAM distance matrix to bound temporary memory.
+    the 16QAM and 64QAM distance matrices to bound temporary memory.
     """
 
     mode = _require_mcs(mcs)
@@ -90,8 +90,10 @@ def soft_demap_symbols(
         raw = np.empty(values.size * 2, dtype=np.float64)
         np.multiply(values.real, scale, out=raw[0::2])
         np.multiply(values.imag, scale, out=raw[1::2])
-    else:
+    elif mode is MCS.QAM16:
         raw = _qam16_max_log_llrs(values, variances)
+    else:
+        raw = _qam64_max_log_llrs(values, variances)
 
     saturation_count = int(np.count_nonzero(np.abs(raw) > clip))
     llrs = np.clip(raw, -clip, clip).astype(np.float32, copy=False)
@@ -142,6 +144,37 @@ def _qam16_max_log_llrs(
             output[start:stop, bit_index] = (
                 minimum_one - minimum_zero
             ) / variances[start:stop]
+    return output.reshape(-1)
+
+
+def _qam64_max_log_llrs(
+    symbols: NDArray[np.complex128],
+    variances: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Max-log LLRs for Gray 64QAM, computed one axis at a time.
+
+    The labels are separable (I carries bits 0-2, Q bits 3-5) and so is the
+    squared distance, so the 64-point minimum over each bit's half of the
+    constellation equals the 8-level minimum on that bit's own axis.  That is
+    8 instead of 64 distances per symbol and axis, with the same result.
+    """
+
+    axis_levels = np.array((-7.0, -5.0, -3.0, -1.0, 1.0, 3.0, 5.0, 7.0)) / np.sqrt(42.0)
+    labels = _QAM64_LABELS_BY_AMPLITUDE
+    zero_masks = [labels[:, bit] == 0 for bit in range(3)]
+    output = np.empty((symbols.size, 6), dtype=np.float64)
+    for start in range(0, symbols.size, _DISTANCE_CHUNK_SYMBOLS):
+        stop = min(start + _DISTANCE_CHUNK_SYMBOLS, symbols.size)
+        chunk = symbols[start:stop]
+        inverse_variance = 1.0 / variances[start:stop]
+        for axis_offset, axis_values in ((0, chunk.real), (3, chunk.imag)):
+            distances = (axis_values[:, None] - axis_levels[None, :]) ** 2
+            for bit, zero in enumerate(zero_masks):
+                minimum_zero = np.min(distances[:, zero], axis=1)
+                minimum_one = np.min(distances[:, ~zero], axis=1)
+                output[start:stop, axis_offset + bit] = (
+                    minimum_one - minimum_zero
+                ) * inverse_variance
     return output.reshape(-1)
 
 

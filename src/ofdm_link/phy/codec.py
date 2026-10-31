@@ -89,14 +89,32 @@ class FrameKind(IntEnum):
 
 
 class MCS(IntEnum):
-    """Payload constellation encoded in the fixed PHY header."""
+    """Payload constellation encoded in the fixed PHY header.
+
+    ``QAM64`` exists only for wire v5, whose SIG names the constellation by
+    MCS-table index.  The legacy v1-v4 header parsers must keep rejecting its
+    value 2 so their candidate lists and false-accept rate do not grow.
+    """
 
     QPSK = 0
     QAM16 = 1
+    QAM64 = 2
 
     @property
     def bits_per_symbol(self) -> int:
-        return 2 if self is MCS.QPSK else 4
+        return _BITS_PER_SYMBOL[self]
+
+
+_BITS_PER_SYMBOL = {MCS.QPSK: 2, MCS.QAM16: 4, MCS.QAM64: 6}
+
+# Per-axis Gray levels indexed by the axis label read MSB first.  64QAM uses the
+# same structure as the 16QAM levels (-3, -1, 3, 1): the first label bit picks
+# the sign (1 = positive), the rest are a reflected Gray code of the magnitude,
+# so neighbouring levels differ in exactly one bit.
+_QAM16_AXIS_LEVELS = np.array([-3.0, -1.0, 3.0, 1.0], dtype=np.float32)
+_QAM64_AXIS_LEVELS = np.array([-7.0, -5.0, -1.0, -3.0, 7.0, 5.0, 1.0, 3.0], dtype=np.float32)
+_QAM16_SCALE = np.sqrt(10.0)
+_QAM64_SCALE = np.sqrt(42.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -671,7 +689,11 @@ def serialize_frame(frame: Frame) -> bytes:
 
 
 def map_symbols(bits: ArrayLike, mcs: MCS) -> NDArray[np.complex64]:
-    """Map bits to unit-average-power QPSK or Gray-coded 16QAM symbols."""
+    """Map bits to unit-average-power QPSK or Gray-coded 16QAM/64QAM symbols.
+
+    QAM symbols take the first half of their bits for I and the second half for
+    Q, each axis label read MSB first.
+    """
 
     mode = _require_mcs(mcs)
     values = _as_bits(bits, "bits")
@@ -687,16 +709,24 @@ def map_symbols(bits: ArrayLike, mcs: MCS) -> NDArray[np.complex64]:
         real = 1.0 - 2.0 * grouped[:, 0]
         imag = 1.0 - 2.0 * grouped[:, 1]
         symbols = (real + 1j * imag) / np.sqrt(2.0)
-    else:
-        levels = np.array([-3.0, -1.0, 3.0, 1.0], dtype=np.float32)
+    elif mode is MCS.QAM16:
         real_index = 2 * grouped[:, 0] + grouped[:, 1]
         imag_index = 2 * grouped[:, 2] + grouped[:, 3]
-        symbols = (levels[real_index] + 1j * levels[imag_index]) / np.sqrt(10.0)
+        symbols = (
+            _QAM16_AXIS_LEVELS[real_index] + 1j * _QAM16_AXIS_LEVELS[imag_index]
+        ) / _QAM16_SCALE
+    else:
+        weights = np.array([4, 2, 1], dtype=np.intp)
+        real_index = grouped[:, :3] @ weights
+        imag_index = grouped[:, 3:] @ weights
+        symbols = (
+            _QAM64_AXIS_LEVELS[real_index] + 1j * _QAM64_AXIS_LEVELS[imag_index]
+        ) / _QAM64_SCALE
     return symbols.astype(np.complex64, copy=False)
 
 
 def demap_symbols(symbols: ArrayLike, mcs: MCS) -> NDArray[np.uint8]:
-    """Hard-decision demap QPSK or Gray-coded 16QAM symbols to bits."""
+    """Hard-decision demap QPSK or Gray-coded 16QAM/64QAM symbols to bits."""
 
     mode = _require_mcs(mcs)
     values = np.asarray(symbols)
@@ -714,15 +744,25 @@ def demap_symbols(symbols: ArrayLike, mcs: MCS) -> NDArray[np.uint8]:
         decisions = np.column_stack((values.real < 0.0, values.imag < 0.0))
         return decisions.astype(np.uint8, copy=False).reshape(-1)
 
-    scaled = values * np.sqrt(10.0)
-    bins = np.array([-2.0, 0.0, 2.0], dtype=np.float32)
-    pairs = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], dtype=np.uint8)
-    real_bits = pairs[np.digitize(scaled.real, bins)]
-    imag_bits = pairs[np.digitize(scaled.imag, bins)]
-    decisions = np.column_stack(
-        (real_bits[:, 0], real_bits[:, 1], imag_bits[:, 0], imag_bits[:, 1])
-    )
-    return decisions.reshape(-1)
+    if mode is MCS.QAM16:
+        scaled = values * _QAM16_SCALE
+        bins = np.array([-2.0, 0.0, 2.0], dtype=np.float32)
+        labels = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], dtype=np.uint8)
+    else:
+        scaled = values * _QAM64_SCALE
+        bins = np.array([-6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 6.0], dtype=np.float32)
+        labels = _QAM64_LABELS_BY_AMPLITUDE
+    real_bits = labels[np.digitize(scaled.real, bins)]
+    imag_bits = labels[np.digitize(scaled.imag, bins)]
+    return np.column_stack((real_bits, imag_bits)).reshape(-1)
+
+
+# 64QAM axis labels sorted by increasing amplitude (-7 ... 7), derived from the
+# mapper's level table so the hard and soft demappers cannot drift from it.
+_QAM64_LABELS_BY_AMPLITUDE = np.array(
+    [[(index >> shift) & 1 for shift in (2, 1, 0)] for index in np.argsort(_QAM64_AXIS_LEVELS)],
+    dtype=np.uint8,
+)
 
 
 def _as_bits(values: ArrayLike, name: str) -> NDArray[np.uint8]:

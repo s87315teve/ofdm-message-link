@@ -29,7 +29,10 @@ from ofdm_link.phy import (
 from ofdm_link.phy.codec import deserialize_frame, serialize_frame
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+# The legacy frame codec carries QPSK and 16QAM only; 64QAM is wire v5, whose
+# rate matching always fills whole symbols (its tests are below and in
+# test_rate_match.py).
+@pytest.mark.parametrize("mcs", [MCS.QPSK, MCS.QAM16])
 @pytest.mark.parametrize("payload", [b"", b"a", bytes(range(251))])
 def test_frame_and_constellation_round_trip(mcs: MCS, payload: bytes) -> None:
     frame = Frame(
@@ -123,6 +126,44 @@ def test_qam16_is_gray_coded_and_normalized() -> None:
     ordered_axis_pairs = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], dtype=np.uint8)
     hamming_distances = np.count_nonzero(ordered_axis_pairs[:-1] != ordered_axis_pairs[1:], axis=1)
     np.testing.assert_array_equal(hamming_distances, np.ones(3, dtype=np.int64))
+
+
+def test_qam64_is_gray_coded_and_normalized() -> None:
+    bit_words = np.array(list(product((0, 1), repeat=6)), dtype=np.uint8)
+
+    symbols = map_symbols(bit_words.reshape(-1), MCS.QAM64)
+
+    assert MCS.QAM64.bits_per_symbol == 6
+    assert np.mean(np.abs(symbols) ** 2) == pytest.approx(1.0)
+    np.testing.assert_array_equal(demap_symbols(symbols, MCS.QAM64), bit_words.reshape(-1))
+    # I = b0 b1 b2, Q = b3 b4 b5, levels (-7, -5, -1, -3, 7, 5, 1, 3) / sqrt(42).
+    np.testing.assert_allclose(
+        map_symbols(np.array([0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0], dtype=np.uint8), MCS.QAM64),
+        np.array([-7 + 3j, 7 - 1j]) / np.sqrt(42.0),
+        rtol=1e-6,
+    )
+    # Neighbouring levels on each axis differ in exactly one bit.
+    for axis in (np.real, np.imag):
+        values = axis(symbols)
+        order = np.argsort(values, kind="stable")
+        labels = bit_words[:, :3] if axis is np.real else bit_words[:, 3:]
+        levels, first = np.unique(np.round(values[order], 6), return_index=True)
+        assert levels.size == 8
+        ordered_labels = labels[order][first]
+        distances = np.count_nonzero(ordered_labels[:-1] != ordered_labels[1:], axis=1)
+        np.testing.assert_array_equal(distances, np.ones(7, dtype=np.int64))
+
+
+def test_qam64_hard_demap_survives_noise_inside_the_decision_region() -> None:
+    rng = np.random.default_rng(4)
+    bits = rng.integers(0, 2, 6 * 4000, dtype=np.uint8)
+    symbols = map_symbols(bits, MCS.QAM64)
+    # Half the level spacing is 1 / sqrt(42); stay inside it on each axis.
+    jitter = rng.uniform(-0.9, 0.9, (symbols.size, 2)) / np.sqrt(42.0)
+
+    np.testing.assert_array_equal(
+        demap_symbols(symbols + jitter @ np.array([1.0, 1j]), MCS.QAM64), bits
+    )
 
 
 def test_viterbi_corrects_separated_coded_bit_errors() -> None:
