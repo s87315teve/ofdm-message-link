@@ -35,7 +35,9 @@ from ofdm_link.phy.burst_header import (
     TurboBurstHeader,
     _parse_header_bits,
 )
-from ofdm_link.phy.codec import DEFAULT_DUAL_VERSION_FRAME_DECODER, demap_symbols
+from ofdm_link.phy.codec import DEFAULT_DUAL_VERSION_FRAME_DECODER, demap_symbols, map_symbols
+from ofdm_link.phy.psdu_codec import RateMatchedTurboCodec
+from ofdm_link.phy.scrambler import scramble_bits
 from ofdm_link.phy.sync import acquire_all
 from ofdm_link.phy.sync_v5 import V5SyncConfig
 from ofdm_link.radio.simulation import SimulationChannelConfig, apply_simulation_channel
@@ -204,6 +206,33 @@ def test_sample_clock_drift_beyond_the_pilot_alias_is_tracked(
     # Positive ppm: the receiver samples faster, so the burst arrives early.
     tracking = decoded.diagnostics.sample_clock_tracking
     assert tracking.estimated_sfo_ppm == pytest.approx(ppm, abs=3.0)
+
+
+@pytest.mark.parametrize("ppm", [20.0, -40.0])
+def test_sample_clock_correction_keeps_the_payload_evm_flat(ppm: float) -> None:
+    # The review's m14c case.  Linear-interpolation resampling attenuated
+    # the band-edge carriers wherever the correction was near half a sample,
+    # so EVM sagged by up to 10 dB along a corrected burst; whole-sample
+    # window shifts plus the per-symbol pilot slope do not.
+    entry = mcs_entry(14)
+    body = _body(8188, 14)
+    burst = encode_burst_v5(body, entry, scrambler_seed=3)
+    reference = map_symbols(
+        scramble_bits(RateMatchedTurboCodec().encode(body, burst.geometry), 3), entry.modulation
+    )
+    received, _ = apply_simulation_channel(
+        _framed(burst.samples, before=200, after=400),
+        SimulationChannelConfig(sample_rate_offset_ppm=ppm, snr_db=30.0, seed=5),
+    )
+
+    decoded = decode_burst(received.astype(np.complex64))
+
+    assert decoded.fcs_ok
+    assert decoded.diagnostics.sample_clock_tracking.correction_applied
+    error = np.abs(decoded.payload_symbols - reference) ** 2
+    eighths = 10 * np.log10([chunk.mean() for chunk in np.array_split(error, 8)])
+    assert np.max(eighths) - np.min(eighths) < 1.5
+    assert np.max(eighths) < -26.0
 
 
 def test_truncated_burst_asks_for_the_signalled_length() -> None:

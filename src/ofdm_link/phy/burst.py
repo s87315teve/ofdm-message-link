@@ -1042,6 +1042,7 @@ def _apply_sample_clock_tracking(
     mcs: MCS,
     phase_slope_rad_per_carrier: ArrayLike,
     config: BurstConfig,
+    realign_windows: bool = False,
 ) -> tuple[NDArray[np.complex64], SampleClockTrackingDiagnostics]:
     """Resample the payload for sample-clock offset when the estimate warrants it.
 
@@ -1051,6 +1052,15 @@ def _apply_sample_clock_tracking(
     timing vector is built.  The timing correction is affine in the sample
     index over a non-negative range, so its first, last and maximum absolute
     values are exact scalars.
+
+    ``realign_windows`` (the v5 path) applies the same correction without
+    interpolating: each 80-sample symbol is read from the source shifted by
+    the whole number of samples nearest its timing correction, and the
+    fractional rest -- under half a sample -- is left as the linear phase
+    across carriers that the pilot slope fit removes per symbol, which is
+    exact.  Linear interpolation attenuates the band-edge carriers by up to
+    8 dB at a half-sample offset and adds as much distortion.  The legacy
+    path keeps the interpolator.
     """
 
     tracking = config.sample_clock_tracking
@@ -1100,6 +1110,15 @@ def _apply_sample_clock_tracking(
 
     if applied_ppm == 0.0:
         corrected = corrected_payload_source[:payload_sample_count]
+    elif realign_windows:
+        corrected = _realigned_symbols(
+            np.concatenate((corrected_fixed, corrected_payload_source)),
+            payload_start_in_source=corrected_fixed.size,
+            payload_start_from_preamble=payload_start_from_preamble,
+            payload_sample_count=payload_sample_count,
+            applied_ppm=applied_ppm,
+            config=config,
+        )
     else:
         payload_start_in_source = corrected_fixed.size
         sample_indices = np.arange(payload_sample_count, dtype=np.float64)
@@ -1126,6 +1145,37 @@ def _apply_sample_clock_tracking(
         limit_hit=limit_event_count > 0,
     )
     return corrected, diagnostics
+
+
+def _realigned_symbols(
+    source: NDArray[np.complex64],
+    *,
+    payload_start_in_source: int,
+    payload_start_from_preamble: int,
+    payload_sample_count: int,
+    applied_ppm: float,
+    config: BurstConfig,
+) -> NDArray[np.complex64]:
+    """Each payload symbol read whole, shifted by its nearest-sample timing.
+
+    The shift is the timing correction at the symbol's FFT-window centre,
+    rounded; the symbols themselves are copied, never interpolated.
+    """
+
+    block_length = config.numerology.fft_size + config.numerology.cp_length
+    symbol_starts = np.arange(0, payload_sample_count, block_length)
+    centres = (
+        payload_start_from_preamble
+        + symbol_starts
+        + config.numerology.cp_length
+        + config.numerology.fft_size // 2
+    )
+    shifts = np.rint(centres * applied_ppm * 1e-6).astype(np.int64)
+    first = payload_start_in_source + symbol_starts + shifts
+    if first.min() < 0 or first.max() + block_length > source.size:
+        raise BurstDecodeError("timing correction requires unavailable payload samples")
+    rows = first[:, np.newaxis] + np.arange(block_length)[np.newaxis, :]
+    return source[rows].reshape(-1).astype(np.complex64, copy=False)
 
 
 def _linear_interpolate(

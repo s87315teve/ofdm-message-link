@@ -380,6 +380,7 @@ def _decode_v5_acquired(
             mcs=entry.modulation,
             phase_slope_rad_per_carrier=provisional.phase_slope_rad_per_carrier,
             config=settings,
+            realign_windows=True,
         )
         if payload_shortage and (
             not tracking.correction_applied or tracking.applied_correction_ppm >= 0.0
