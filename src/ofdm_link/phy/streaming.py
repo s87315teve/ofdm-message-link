@@ -21,7 +21,12 @@ from .burst import (
 )
 from .codec import DEFAULT_DUAL_VERSION_FRAME_DECODER, demap_symbols
 from .ofdm import OfdmNumerology
-from .sync import AcquisitionResult, _acquisition_candidates
+from .sync import (
+    AcquisitionResult,
+    PreambleMeasurement,
+    _acquisition_candidates,
+    measure_preamble,
+)
 
 # Preamble SNR readings kept between two drains; a caller that stops draining
 # loses the oldest rather than growing the decoder without bound.
@@ -29,24 +34,25 @@ LINK_SNR_HISTORY = 4096
 
 
 def link_snr_db(
-    acquisition: AcquisitionResult,
+    measurement: PreambleMeasurement | None,
     numerology: OfdmNumerology,
 ) -> float | None:
     """SNR of one burst in dB, from its preamble, or ``None`` if not measured.
 
-    The preamble's power is one per sample, while an OFDM symbol puts unit
-    power on each active carrier and so averages ``active / fft_size`` per
-    sample.  Scaling by that ratio states the SNR of the payload samples --
-    the mean burst power over the noise variance, which is also what the udp
-    transport's ``--snr-db`` sets.  It needs no successful decode, so a burst
-    whose header or payload failed still reports what the channel was.
+    The measurement is per active carrier.  An OFDM symbol puts unit power on
+    each active carrier, so it averages ``active / fft_size`` per sample;
+    scaling by that ratio states the SNR of the payload samples -- the mean
+    burst power over the noise variance, which is also what the udp
+    transport's ``--snr-db`` sets when the noise is white.  It needs no
+    successful decode, so a burst whose header or payload failed still
+    reports what the channel was.
     """
 
-    snr = acquisition.preamble_snr
-    if snr is None or not snr > 0.0:
+    if measurement is None:
         return None
     ratio = len(numerology.active_carriers) / numerology.fft_size
-    return float(10.0 * np.log10(snr * ratio))
+    snr = measurement.signal_power / measurement.noise_variance * ratio
+    return float(10.0 * np.log10(snr))
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,7 +219,11 @@ class StreamingBurstDecoder:
         ):
             return
         self._last_snr_start = start
-        snr = link_snr_db(acquisition, self._config.numerology)
+        numerology = self._config.numerology
+        measurement = measure_preamble(
+            self._buffer, acquisition, numerology.active_carriers, self._config.sync
+        )
+        snr = link_snr_db(measurement, numerology)
         if snr is not None:
             self._link_snrs.append(snr)
 

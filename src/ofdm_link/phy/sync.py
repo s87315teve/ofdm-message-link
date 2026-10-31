@@ -20,7 +20,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from ._arrays import all_finite
 
-# Floor on the preamble noise estimate, as a fraction of the received power:
+# Floor on the preamble noise estimate, as a fraction of the signal power:
 # caps the reported SNR at 60 dB when the input carries no noise at all.
 _MINIMUM_NOISE_FRACTION = 1e-6
 
@@ -112,15 +112,6 @@ class AcquisitionResult:
     magnitude of a scalar least-squares channel estimate; ``signal_power`` is
     its square. ``metric`` is the Schmidl--Cox repeated-half metric and
     ``confidence`` is the normalized coherent preamble correlation.
-
-    ``noise_variance`` and ``repeated_signal_power`` split the received power
-    of the two repeated halves into the part they share and the part they do
-    not.  The channel and the CFO treat both halves alike, so whatever differs
-    between them is noise: with ``C`` the half-to-half correlation and ``R``
-    the mean half energy, ``|C|`` estimates the signal energy and ``R - |C|``
-    the noise energy over one half.  Both are per complex sample.  Unlike
-    ``signal_power`` this needs no channel model, so multipath does not bias
-    it.  ``None`` only when a caller builds the result by hand.
     """
 
     preamble_start: int
@@ -130,16 +121,20 @@ class AcquisitionResult:
     signal_power: float
     metric: float
     confidence: float
-    noise_variance: float | None = None
-    repeated_signal_power: float | None = None
 
-    @property
-    def preamble_snr(self) -> float | None:
-        """Linear signal-to-noise ratio over the preamble, or ``None``."""
 
-        if self.noise_variance is None or self.repeated_signal_power is None:
-            return None
-        return self.repeated_signal_power / self.noise_variance
+@dataclass(frozen=True, slots=True)
+class PreambleMeasurement:
+    """In-band signal power and noise variance of one acquired preamble.
+
+    Both are per active carrier on the unitary FFT, which for white noise is
+    also the noise variance per complex sample.  ``degrees_of_freedom`` is
+    the number of complex values the noise estimate rests on.
+    """
+
+    signal_power: float
+    noise_variance: float
+    degrees_of_freedom: int
 
 
 def generate_preamble(config: SyncConfig | None = None) -> NDArray[np.complex64]:
@@ -160,6 +155,66 @@ def generate_preamble(config: SyncConfig | None = None) -> NDArray[np.complex64]
     useful = np.concatenate((half, half)).astype(np.complex64)
     cyclic_prefix = useful[-settings.cyclic_prefix_length :]
     return np.concatenate((cyclic_prefix, useful)).astype(np.complex64, copy=False)
+
+
+def measure_preamble(
+    samples: ArrayLike,
+    acquisition: AcquisitionResult,
+    active_carriers: tuple[int, ...],
+    config: SyncConfig | None = None,
+) -> PreambleMeasurement | None:
+    """Split one acquired preamble's in-band power into signal and noise.
+
+    The channel and the CFO treat the two repeated halves alike, so whatever
+    differs between them is noise.  Each half is transformed on its own: half
+    -length bin ``m`` is full-length carrier ``2m``, and only the bins that
+    land on ``active_carriers`` are used.  Measuring in band matters because
+    receivers are not white: a Pluto's noise in the guard band was ten times
+    its noise under the data carriers, which a time-domain estimate would
+    have folded in, reading the SNR about 4 dB low.  The half-length transform
+    of the quadratic-phase preamble has unit power in every bin, so the signal
+    power is ``|H|^2`` on the carriers the data uses.  ``None`` when the
+    samples do not hold the whole useful preamble or no bin is in band.
+    """
+
+    settings = _require_config(config)
+    values = _as_complex_samples(samples, "samples")
+    half = settings.half_length
+    start = acquisition.useful_start
+    if start < 0 or start + settings.fft_size > values.size:
+        return None
+    first = values[start : start + half].astype(np.complex128)
+    second = values[start + half : start + settings.fft_size].astype(np.complex128)
+    # Remove the half-to-half CFO rotation so the shared part lines up.
+    rotation = np.vdot(first, second)
+    if rotation == 0:
+        return None
+    second = second * np.conj(rotation) / abs(rotation)
+    in_band = _half_bins_in_band(half, tuple(active_carriers))
+    if not in_band.size:
+        return None
+    first_bins = np.fft.fft(first, norm="ortho")[in_band]
+    second_bins = np.fft.fft(second, norm="ortho")[in_band]
+    noise = float(np.mean(np.abs(second_bins - first_bins) ** 2)) / 2.0
+    signal = float(np.mean(np.abs(first_bins + second_bins) ** 2)) / 4.0 - noise / 2.0
+    if not signal > 0.0:
+        return None
+    return PreambleMeasurement(
+        signal_power=signal,
+        noise_variance=max(noise, signal * _MINIMUM_NOISE_FRACTION),
+        degrees_of_freedom=int(in_band.size),
+    )
+
+
+@lru_cache(maxsize=8)
+def _half_bins_in_band(half_length: int, active_carriers: tuple[int, ...]) -> NDArray[np.int64]:
+    """Half-length FFT bins whose full-length carrier ``2m`` is active."""
+
+    signed = np.arange(half_length)
+    signed[signed >= half_length // 2] -= half_length
+    bins = np.flatnonzero(np.isin(2 * signed, np.asarray(active_carriers)))
+    bins.setflags(write=False)
+    return bins
 
 
 def prepend_preamble(
@@ -326,17 +381,6 @@ def _acquisition_candidates(
     selected_coherent = coherent[accepted]
     scalar_gain = selected_coherent / reference_energy
     amplitude_gain = np.abs(scalar_gain)
-    shared_energy = np.sqrt(
-        np.square(candidate_real[accepted]) + np.square(candidate_imag[accepted])
-    )
-    half_energy = candidate_energy[accepted]
-    repeated_power = shared_energy / half_length
-    # A noiseless input makes the two energies equal to rounding; keep the
-    # variance positive so a ratio built from it stays finite.
-    noise_variance = np.maximum(
-        (half_energy - shared_energy) / half_length,
-        half_energy / half_length * _MINIMUM_NOISE_FRACTION,
-    )
     return tuple(
         AcquisitionResult(
             preamble_start=int(start),
@@ -346,19 +390,15 @@ def _acquisition_candidates(
             signal_power=float(amplitude * amplitude),
             metric=float(candidate_metric),
             confidence=float(candidate_confidence),
-            noise_variance=float(noise),
-            repeated_signal_power=float(power),
         )
         for start, useful_start, normalized_cfo, amplitude, candidate_metric,
-        candidate_confidence, noise, power in zip(
+        candidate_confidence in zip(
             starts,
             useful_starts,
             cfo,
             amplitude_gain,
             selected_metric,
             selected_confidence,
-            noise_variance,
-            repeated_power,
             strict=True,
         )
     )

@@ -35,7 +35,7 @@ from ofdm_link.phy.channel import (
 )
 from ofdm_link.phy.ofdm import OfdmNumerology
 from ofdm_link.phy.streaming import StreamingBurstDecoder, link_snr_db
-from ofdm_link.phy.sync import acquire_preamble, generate_preamble
+from ofdm_link.phy.sync import acquire_preamble, generate_preamble, measure_preamble
 
 NUMEROLOGY = OfdmNumerology()
 TAPS = np.array([0.82 + 0.13j, 0, 0.21 - 0.17j, 0, 0.08j])
@@ -66,6 +66,12 @@ def _channel(tx, snr_db: float, seed: int, *, multipath: bool = False, pad: int 
 # -- preamble noise estimate ------------------------------------------------
 
 
+def _measure(rx):
+    acquisition = acquire_preamble(rx)
+    assert acquisition is not None
+    return measure_preamble(rx, acquisition, NUMEROLOGY.active_carriers)
+
+
 @pytest.mark.parametrize("multipath", [False, True])
 def test_preamble_splits_power_into_signal_and_noise(multipath):
     """Averaged over bursts the estimate is unbiased, with or without multipath."""
@@ -74,9 +80,9 @@ def test_preamble_splits_power_into_signal_and_noise(multipath):
     ratios = []
     for seed in range(60):
         rx, variance = _channel(tx, 10.0, seed, multipath=multipath)
-        acquisition = acquire_preamble(rx)
-        assert acquisition is not None
-        ratios.append(acquisition.noise_variance / variance)
+        measurement = _measure(rx)
+        assert measurement.degrees_of_freedom == 26
+        ratios.append(measurement.noise_variance / variance)
     assert np.mean(ratios) == pytest.approx(1.0, abs=0.08)
 
 
@@ -84,19 +90,44 @@ def test_link_snr_reads_the_burst_snr_within_half_a_db():
     tx = encode_burst(_frame(2), wire_version=TURBO_BURST_HEADER_VERSION).samples
     for snr_db in (5.0, 10.0, 15.0):
         readings = [
-            link_snr_db(acquire_preamble(_channel(tx, snr_db, seed)[0]), NUMEROLOGY)
+            link_snr_db(_measure(_channel(tx, snr_db, seed)[0]), NUMEROLOGY)
             for seed in range(80)
         ]
         assert np.mean(readings) == pytest.approx(snr_db, abs=0.5)
 
 
+def test_noise_outside_the_data_carriers_does_not_lower_the_snr():
+    """A Pluto's guard band was ten times noisier than its data carriers.
+
+    Decoding sees only the data carriers, so that is where the SNR is read; a
+    time-domain estimate would fold the guard band in and read it about 4 dB
+    low.
+    """
+
+    tx = encode_burst(_frame(3), wire_version=TURBO_BURST_HEADER_VERSION).samples
+    readings = []
+    for seed in range(60):
+        rx, variance = _channel(tx, 8.0, seed)
+        rng = np.random.default_rng(1000 + seed)
+        spectrum = np.fft.fft(rng.standard_normal(rx.size) + 1j * rng.standard_normal(rx.size))
+        frequency = np.abs(np.fft.fftfreq(rx.size))
+        spectrum[frequency < 28 / 64] = 0.0  # keep only the guard band
+        guard = np.fft.ifft(spectrum)
+        guard *= np.sqrt(10 * variance * 12 / 64 / np.mean(np.abs(guard) ** 2))
+        noisy = (rx + guard).astype(np.complex64)
+        acquisition = acquire_preamble(noisy)
+        if acquisition is not None:  # the guard noise costs acquisition, not this
+            measurement = measure_preamble(noisy, acquisition, NUMEROLOGY.active_carriers)
+            readings.append(link_snr_db(measurement, NUMEROLOGY))
+    assert len(readings) >= 50
+    assert np.mean(readings) == pytest.approx(8.0, abs=0.6)
+
+
 def test_noiseless_preamble_reports_a_finite_capped_snr():
-    acquisition = acquire_preamble(
-        np.concatenate((np.zeros(50), generate_preamble(), np.zeros(200))).astype(np.complex64)
-    )
-    assert acquisition is not None
-    assert acquisition.noise_variance > 0.0
-    assert 10 * np.log10(acquisition.preamble_snr) == pytest.approx(60.0, abs=0.1)
+    samples = np.concatenate((np.zeros(50), generate_preamble(), np.zeros(200)))
+    measurement = _measure(samples.astype(np.complex64))
+    assert measurement.noise_variance > 0.0
+    assert link_snr_db(measurement, NUMEROLOGY) == pytest.approx(60 + 10 * np.log10(52 / 64))
 
 
 # -- channel smoothing ------------------------------------------------------
@@ -169,9 +200,10 @@ def test_turbo_decoder_no_longer_receives_saturated_llrs():
     decoded = decode_burst(rx)
     diagnostics = decoded.diagnostics
     assert diagnostics.llr_saturation_rate < 0.05
-    # The equalized variance is what the demapper used; its mean over the
-    # data carriers tracks the channel noise it was derived from.
-    assert diagnostics.estimated_noise_variance == pytest.approx(variance, rel=0.5)
+    # The demapper's variance is what the payload will see, measured on the
+    # decoded header: the channel noise plus the channel estimate's own error
+    # (about 20/52 of it after smoothing), never less than the noise itself.
+    assert variance <= diagnostics.estimated_noise_variance <= 2.5 * variance
 
 
 @pytest.mark.parametrize(

@@ -309,9 +309,11 @@ def estimate_channel(
 # filter skirt ahead of it; the cyclic prefix bounds the far end.
 SMOOTHING_PRECURSOR_TAPS = 4
 # The smoothed estimate is kept only while what it leaves out looks like noise.
-# The two variance estimates each rest on 32 complex degrees of freedom, so
-# their ratio is F(64, 64)-distributed and exceeds 3 by chance about once in
-# 100 000 bursts; a false fallback costs only that burst's smoothing.
+# The residual rests on 32 complex degrees of freedom and the preamble's
+# in-band estimate on 26, so their ratio is F(64, 52)-distributed and exceeds
+# 3 by chance about 4 times in 100 000 bursts; a false fallback costs only
+# that burst's smoothing.  Both estimates are in band, so a receiver whose
+# noise is not white does not tip the comparison.
 SMOOTHING_RESIDUAL_LIMIT = 3.0
 
 
@@ -347,8 +349,9 @@ def refine_channel_estimate(
     the estimation error falls by about 4 dB.  What the projection discards is
     noise too, which gives a second variance estimate from the training symbol.
 
-    ``preamble_noise_variance`` comes from the repeated preamble halves.  The
-    two are pooled by their degrees of freedom.  When the residual exceeds the
+    ``preamble_noise_variance`` comes from the repeated preamble halves,
+    measured on the same carriers (:func:`~ofdm_link.phy.sync.measure_preamble`).
+    The two are pooled by their degrees of freedom.  When the residual exceeds the
     preamble estimate by ``SMOOTHING_RESIDUAL_LIMIT``, the channel does not fit
     the delay window -- a timing error, or a delay spread longer than the
     prefix -- so the raw estimate is kept and only the preamble variance used.

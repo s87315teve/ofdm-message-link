@@ -61,7 +61,13 @@ from .codec import (
 )
 from .ofdm import OfdmNumerology, modulate_ofdm
 from .soft import SoftDemapResult, soft_demap_symbols
-from .sync import AcquisitionResult, SyncConfig, acquire_preamble, generate_preamble
+from .sync import (
+    AcquisitionResult,
+    SyncConfig,
+    acquire_preamble,
+    generate_preamble,
+    measure_preamble,
+)
 from .turbo import TurboDecodeReport
 
 
@@ -675,11 +681,14 @@ def _decode_acquired_burst(
     training_samples = corrected_fixed[:block_length]
     header_samples = corrected_fixed[block_length:]
     try:
+        preamble = measure_preamble(
+            values, acquisition, settings.numerology.active_carriers, settings.sync
+        )
         refined = refine_channel_estimate(
             estimate_channel(training_samples, settings.numerology),
             settings.numerology,
-            preamble_noise_variance=acquisition.noise_variance,
-            preamble_degrees_of_freedom=settings.sync.half_length,
+            preamble_noise_variance=None if preamble is None else preamble.noise_variance,
+            preamble_degrees_of_freedom=None if preamble is None else preamble.degrees_of_freedom,
         )
         channel = refined.estimate
         equalized_header = equalize_with_pilots(
@@ -712,6 +721,10 @@ def _decode_acquired_burst(
                         settings.max_coded_payload_bits,
                     ),
                 )
+        payload_noise_variance = max(
+            refined.noise_variance,
+            _header_noise_variance(header, equalized_header),
+        )
     except ValueError as error:
         raise BurstDecodeError(f"fixed signaling header decode failed: {error}") from error
 
@@ -801,7 +814,7 @@ def _decode_acquired_burst(
             )
         else:
             noise_variance = (
-                refined.noise_variance
+                payload_noise_variance
                 if input_noise_variance is None
                 else float(input_noise_variance)
             )
@@ -1185,6 +1198,32 @@ def _map_with_backend(
     if not np.all(np.isfinite(converted.real)) or not np.all(np.isfinite(converted.imag)):
         raise BurstValidationError("symbol_mapper must return only finite symbols")
     return converted
+
+
+def _header_noise_variance(
+    header: BurstHeaderDescriptor,
+    equalized_header: EqualizedBatch,
+) -> float:
+    """Noise the payload will see, measured on the header once it is known.
+
+    The thermal noise from the preamble is what the SNR display wants, but the
+    LLRs need everything that will disturb the payload: the error left in the
+    channel estimate, phase noise, IQ imbalance, transmitter distortion.  Once
+    decoded, the header's 144 QPSK symbols are known, and they went through
+    the same estimate and equalizer the payload will, so their error is that
+    noise.  Each carrier's error is scaled back by its channel power, giving a
+    pre-equalization variance that ``post_equalization_noise_variance``
+    spreads over the payload carriers as usual.  On Pluto captures it ran a
+    median 3.3-3.7 dB above the thermal noise where bursts were being lost,
+    and 5 dB at high SNR; LLRs scaled to the thermal noise alone were
+    overconfident against the decoder's +-64 clamp and lost about 1 % more.
+    """
+
+    reference = map_symbols(encode_burst_header(header), MCS.QPSK).reshape(
+        equalized_header.data_symbols.shape
+    )
+    error = np.abs(equalized_header.data_symbols - reference) ** 2
+    return float(np.mean(error / equalized_header.noise_enhancement))
 
 
 def _header_llrs(
