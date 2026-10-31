@@ -145,8 +145,8 @@ def add_common_arguments(
             if receiver_display_only
             else (
                 "startup wire-v5 MCS index: 8, 9, 10 (QPSK 1/3, 1/2, 2/3), "
-                "12, 13, 14 (16QAM 1/2, 2/3, 3/4); 11 and 15-17 are experiment "
-                "entries the menu hides. Default 8 unless --mcs qam16. Legacy "
+                "12, 13, 14 (16QAM 1/2, 2/3, 3/4), 15, 16, 17 (64QAM 1/2, 2/3, 3/4); "
+                "11 is an experiment entry the menu hides. Default 8 unless --mcs qam16. Legacy "
                 "indices 0-7 are receive-only"
             )
         ),
@@ -272,7 +272,7 @@ def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
         "Several datagrams can share one v5 burst. The caps bound the burst's "
         "airtime (timing drift, decode latency) and the latency a datagram can "
         "wait for company. Each option overrides mac.aggregation in the "
-        "configuration (defaults: on, 16 subframes, 0 ms wait, 10 ms airtime).",
+        "configuration (defaults: on, 16 subframes, 0 ms wait, 8 ms airtime).",
     )
     group.add_argument(
         "--aggregation",
