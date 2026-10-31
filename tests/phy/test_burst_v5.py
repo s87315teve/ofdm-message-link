@@ -176,6 +176,36 @@ def test_fft_backoff_is_validated() -> None:
     assert V5RxConfig().fft_backoff_samples == 3
 
 
+@pytest.mark.parametrize(
+    ("size", "mcs_index", "ppm", "snr"),
+    [
+        # The review's cases: past 2.3 samples of drift the across-pilot
+        # slope aliased and the sample-clock estimate with it.
+        (2480, 8, 48.0, 4.0),
+        (2480, 8, -48.0, 4.0),
+        (8000, 8, 20.0, 30.0),
+        (4000, 8, 40.0, 30.0),
+    ],
+)
+def test_sample_clock_drift_beyond_the_pilot_alias_is_tracked(
+    size: int, mcs_index: int, ppm: float, snr: float
+) -> None:
+    body = _body(size, int(ppm) + size)
+    burst = encode_burst_v5(body, mcs_entry(mcs_index), scrambler_seed=3)
+    received, _ = apply_simulation_channel(
+        _framed(burst.samples, before=200, after=400),
+        SimulationChannelConfig(sample_rate_offset_ppm=ppm, snr_db=snr, seed=size),
+    )
+    assert burst.sample_count * abs(ppm) * 1e-6 > 2.3
+
+    decoded = decode_burst(received.astype(np.complex64))
+
+    assert decoded.fcs_ok and decoded.body == body
+    # Positive ppm: the receiver samples faster, so the burst arrives early.
+    tracking = decoded.diagnostics.sample_clock_tracking
+    assert tracking.estimated_sfo_ppm == pytest.approx(ppm, abs=3.0)
+
+
 def test_truncated_burst_asks_for_the_signalled_length() -> None:
     entry = mcs_entry(9)
     burst = encode_burst_v5(_body(900, 1), entry, scrambler_seed=5)

@@ -450,6 +450,7 @@ def equalize_with_pilots(
     minimum_magnitude_fit_pilot: float = 0.25,
     maximum_magnitude_correction_gain: float = 2.0,
     common_phase_only: bool = False,
+    track_slope_in_time: bool = False,
 ) -> EqualizedBatch:
     """Equalize an aligned batch and remove pilot-derived phase ramps.
 
@@ -468,6 +469,14 @@ def equalize_with_pilots(
     operating SNR -- around 3 dB per carrier -- unwrapping and fitting a line
     through four noisy pilot phases cost about 3 dB of SIG robustness in
     simulation.  The weighting keeps a faded pilot from steering the phase.
+
+    ``track_slope_in_time`` unwraps each symbol's pilot phases relative to
+    the slope predicted for it from the symbols before (a line fitted to
+    their slopes) instead of from zero.  Pilots 14 carriers apart make the
+    across-carrier unwrap ambiguous beyond pi/14 rad/carrier -- 2.3 samples
+    of timing drift -- so a long burst's slope wraps and the sample-clock
+    estimate built on it aliases; along time it never comes close, because
+    the slope moves by less than 0.003 rad/carrier per symbol at 50 ppm.
     """
 
     _require_numerology(numerology)
@@ -499,6 +508,10 @@ def equalize_with_pilots(
         raise ChannelEstimationError("first_symbol_index must be a non-negative integer")
     if type(common_phase_only) is not bool:
         raise ChannelEstimationError("common_phase_only must be a bool")
+    if type(track_slope_in_time) is not bool:
+        raise ChannelEstimationError("track_slope_in_time must be a bool")
+    if common_phase_only and track_slope_in_time:
+        raise ChannelEstimationError("common_phase_only fits no slope to track")
 
     received = _as_complex_array(received_samples, "received_samples")
     block_length = numerology.fft_size + numerology.cp_length
@@ -534,6 +547,9 @@ def equalize_with_pilots(
         pilot_power = np.abs(channel_estimate.coefficients[indices.pilot_indices]) ** 2
         common_phase = np.angle(residual @ pilot_power)
         slope = np.zeros_like(common_phase)
+    elif track_slope_in_time:
+        slope, intercept = _slopes_tracked_in_time(residual[:, pilot_order], indices)
+        common_phase = np.angle(np.exp(1j * intercept))
     else:
         phase = np.unwrap(np.angle(residual[:, pilot_order]), axis=1)
         phase_mean = np.mean(phase, axis=1)
@@ -618,6 +634,51 @@ def equalize_with_pilots(
         phase_slope_rad_per_carrier=slope,
         magnitude_diagnostics=magnitude_diagnostics,
     )
+
+
+# Symbols in the first block of the time-tracked slope fit; each later block
+# doubles, so a prediction never reaches further ahead than the fit behind it.
+_SLOPE_TRACK_FIRST_BLOCK = 16
+
+
+def _slopes_tracked_in_time(
+    ordered_pilots: NDArray[np.complex64], indices: _NumerologyIndices
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Per-symbol pilot phase slope and intercept, unwrapped along time.
+
+    Symbols are taken in doubling blocks.  Each block's slopes are predicted
+    by the least-squares line through every slope fitted so far (zero for
+    the first block: the LTF estimate was taken at the burst's own timing),
+    the pilots are rotated back by the prediction, and only the small rest is
+    unwrapped across carriers and fitted, then added back.  A sample-clock
+    offset drifts the slope linearly in time, so the line extrapolates it.
+    """
+
+    pilot_x = indices.pilot_x
+    symbols = ordered_pilots.shape[0]
+    slopes = np.empty(symbols)
+    intercepts = np.empty(symbols)
+    done = 0
+    block = _SLOPE_TRACK_FIRST_BLOCK
+    while done < symbols:
+        end = min(symbols, done + block)
+        index = np.arange(done, end, dtype=np.float64)
+        if done >= 2:
+            rate, offset = np.polyfit(np.arange(done, dtype=np.float64), slopes[:done], 1)
+            predicted = offset + rate * index
+        else:
+            predicted = np.zeros(end - done)
+        rotated = ordered_pilots[done:end] * np.exp(-1j * predicted[:, None] * pilot_x[None, :])
+        phase = np.unwrap(np.angle(rotated), axis=1)
+        phase_mean = np.mean(phase, axis=1)
+        rest = np.sum(
+            (phase - phase_mean[:, None]) * indices.pilot_x_centered, axis=1
+        ) / indices.pilot_x_centered_square_sum
+        slopes[done:end] = predicted + rest
+        intercepts[done:end] = phase_mean - rest * indices.pilot_x_mean
+        done = end
+        block *= 2
+    return slopes, intercepts
 
 
 def normalized_evm(

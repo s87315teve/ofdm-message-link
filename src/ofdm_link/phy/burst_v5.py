@@ -361,6 +361,8 @@ def _decode_v5_acquired(
         )
     magnitude_correction = entry.modulation is not MCS.QPSK
     try:
+        # Slopes are unwrapped along time, so a drift past 2.3 samples -- where
+        # pilots 14 carriers apart alias -- still reads as what it is.
         provisional = equalize_with_pilots(
             corrected_payload,
             channel,
@@ -368,6 +370,7 @@ def _decode_v5_acquired(
             first_symbol_index=V5_HEADER_OFDM_SYMBOL_COUNT,
             pilot_version=settings.pilot_version,
             correct_pilot_magnitude=magnitude_correction,
+            track_slope_in_time=True,
         )
         corrected_payload, tracking = _apply_sample_clock_tracking(
             corrected_sig,
@@ -395,6 +398,7 @@ def _decode_v5_acquired(
                 first_symbol_index=V5_HEADER_OFDM_SYMBOL_COUNT,
                 pilot_version=settings.pilot_version,
                 correct_pilot_magnitude=magnitude_correction,
+                track_slope_in_time=True,
             )
         )
         payload_symbols = equalized_payload.data_symbols.reshape(-1)

@@ -546,6 +546,37 @@ def test_averaged_symbols_must_be_a_positive_integer(count: object) -> None:
         )
 
 
+def test_slope_tracked_in_time_follows_a_drift_the_pilot_spacing_aliases() -> None:
+    # Pilots 14 carriers apart alias a slope beyond pi/14 rad/carrier, 2.3
+    # samples of timing; a burst drifting to 4 samples must still read true.
+    numerology = OfdmNumerology()
+    symbols = 600
+    rng = np.random.default_rng(21)
+    payload = np.exp(2j * np.pi * rng.integers(0, 4, symbols * 48) / 4).astype(np.complex64)
+    waveform = modulate_ofdm(payload, numerology, first_symbol_index=3)
+    drift = np.linspace(0.0, 4.0, symbols)
+    slope = -2.0 * np.pi * drift / 64
+    cpe = rng.uniform(-np.pi, np.pi, symbols)
+    channel = np.ones(52, dtype=np.complex64)
+    received = _apply_frequency_response_and_phase(
+        waveform.samples, numerology, channel, cpe, slope
+    )
+    estimate = ChannelEstimate(channel, numerology.active_carriers)
+
+    tracked = equalize_with_pilots(
+        received, estimate, numerology, first_symbol_index=3, track_slope_in_time=True
+    )
+    across = equalize_with_pilots(received, estimate, numerology, first_symbol_index=3)
+
+    np.testing.assert_allclose(tracked.phase_slope_rad_per_carrier, slope, atol=1e-4)
+    np.testing.assert_allclose(tracked.data_symbols.reshape(-1), payload, atol=1e-3)
+    assert np.max(np.abs(across.phase_slope_rad_per_carrier - slope)) > 0.2
+    with pytest.raises(ChannelEstimationError):
+        equalize_with_pilots(
+            received, estimate, numerology, common_phase_only=True, track_slope_in_time=True
+        )
+
+
 def test_common_phase_only_equalization_removes_one_phase_and_reports_no_slope() -> None:
     from ofdm_link.phy.channel import ChannelEstimate
 
