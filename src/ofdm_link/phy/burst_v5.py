@@ -17,6 +17,16 @@ decoded body with ``fcs_ok=False`` and the per-code-block CRCs, so the
 aggregation layer can still deliver every subframe whose own CRC passes.
 Exceptions are reserved for bursts whose length or content cannot be trusted
 at all (no LTF, SIG failure, truncated input).
+
+Payload LLRs use one noise variance for the whole burst (known limit, not
+fixed): the larger of the SIG- and LTF-measured values, scaled per carrier
+only by the channel gain.  Noise that differs between carriers -- a spur or
+narrowband interferer, a DC-offset leak next to the null, a receiver whose
+noise rises towards the band edge -- is averaged over all 52 carriers, so
+the LLRs on the affected carriers are overconfident and those on the clean
+ones underconfident.  The Turbo code tolerates a few such carriers; a
+per-carrier variance (from the L1 - L2 difference, smoothed across
+carriers) would be the fix.
 """
 
 from __future__ import annotations

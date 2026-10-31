@@ -22,6 +22,15 @@ the one field that, if wrong, would desynchronize every later subframe.  The
 parser never trusts the length of an MPDU whose own CRC the caller finds bad:
 the caller can drop that MPDU and the following ones are unaffected, because
 the next delimiter position is derived from a delimiter that passed its CRC-8.
+
+False delimiters (known limit, not fixed): during resynchronization a random
+aligned word passes the signature byte and the CRC-8 with probability about
+2^-16 (minus what the length bounds reject), so a damaged region of n words
+yields a false match about n / 65536 times.  A false match only produces an
+MPDU candidate whose own CRC-32 then fails -- the caller drops it -- but it
+can make the scan skip a real delimiter behind it and lose that subframe
+too.  Only a damaged body is scanned this way: in one whose FCS passed,
+every delimiter is the packer's own.
 """
 
 from __future__ import annotations
