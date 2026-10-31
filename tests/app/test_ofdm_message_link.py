@@ -483,7 +483,7 @@ def test_aggregation_options_default_to_opportunistic_without_waiting():
     limits = options.resolve(_tx_args([])).aggregation
     assert limits.enabled is True
     assert limits.max_wait_s == 0.0
-    assert (limits.max_subframes, limits.max_burst_airtime_s) == (16, 0.010)
+    assert (limits.max_subframes, limits.max_burst_airtime_s) == (16, 0.008)
 
 
 def test_aggregation_options_reach_the_resolved_limits():

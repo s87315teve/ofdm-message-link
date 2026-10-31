@@ -141,13 +141,17 @@ class AggregationConfigSection:
     next burst goes into it, up to the caps, with no added wait.  The airtime
     cap bounds sample-clock drift, peak-normalization loss and decode latency
     per burst; ``enabled: false`` sends one datagram per burst (experiment).
+    The 8 ms default keeps a burst at 10 MS/s within the 80 000 samples the
+    receiver's timing correction covers at 50 ppm (4 samples), and
+    validation refuses a cap beyond that at the configured sample rate.
+    ``max_psdu_bytes`` may not exceed the receiver's ``phy.rx.max_psdu_bytes``.
     """
 
     enabled: bool = True
     max_wait_ms: float = 0.0
     max_subframes: int = 16
     max_psdu_bytes: int = 8192
-    max_burst_airtime_ms: float = 10.0
+    max_burst_airtime_ms: float = 8.0
 
 
 @dataclass(frozen=True)
@@ -532,6 +536,7 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         raise ConfigError("phy.sample_rate must be 5, 10, or 20 MS/s for the B210 adapter")
     if radio.adapter == "uhd" and not 70_000_000 <= phy.center_frequency <= 6_000_000_000:
         raise ConfigError("phy.center_frequency must be within 70 MHz to 6 GHz for B210")
+    _check_v5_link_limits(phy, mac.aggregation)
 
     return LinkConfig(
         schema_version=schema_version,
@@ -787,6 +792,34 @@ def _rx_section(phy_raw: Mapping[str, Any]) -> RxConfigSection:
     if not (section.legacy_acquisition or section.v5_acquisition):
         raise ConfigError("phy.rx must leave at least one acquisition family enabled")
     return section
+
+
+def _check_v5_link_limits(phy: PhyConfig, aggregation: AggregationConfigSection) -> None:
+    """Refuse transmit caps this configuration's own receiver cannot take.
+
+    One configuration describes both ends of the link, so an aggregate the
+    transmitter may build must be one the receiver accepts: a PSDU above
+    ``phy.rx.max_psdu_bytes`` is rejected as a header failure, and a burst
+    longer than the receiver's timing correction covers at the worst-case
+    50 ppm sample-clock offset drifts out of it.
+    """
+
+    from ofdm_link.phy.burst_v5 import V5_MAX_TRACKED_BURST_SAMPLES, WORST_CASE_SFO_PPM
+
+    if aggregation.max_psdu_bytes > phy.rx.max_psdu_bytes:
+        raise ConfigError(
+            f"mac.aggregation.max_psdu_bytes ({aggregation.max_psdu_bytes}) exceeds "
+            f"phy.rx.max_psdu_bytes ({phy.rx.max_psdu_bytes}): receivers would reject "
+            "the largest aggregates; lower the first or raise the second"
+        )
+    longest_ms = V5_MAX_TRACKED_BURST_SAMPLES / phy.sample_rate * 1e3
+    if aggregation.max_burst_airtime_ms > longest_ms:
+        raise ConfigError(
+            f"mac.aggregation.max_burst_airtime_ms must be at most {longest_ms:g} ms at "
+            f"{phy.sample_rate} S/s: {V5_MAX_TRACKED_BURST_SAMPLES} samples is the longest "
+            f"burst whose drift at {WORST_CASE_SFO_PPM:g} ppm the receiver's timing "
+            "correction covers"
+        )
 
 
 def _aggregation_section(mac_raw: Mapping[str, Any]) -> AggregationConfigSection:

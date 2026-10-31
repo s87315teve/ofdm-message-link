@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ofdm_link.phy.ampdu import ampdu_body_length
+from ofdm_link.phy.burst_v5 import V5_MAX_TRACKED_BURST_SAMPLES
 from ofdm_message_link.aggregation import AggregationLimits, plan_aggregate
 
 SAMPLE_RATE = 5_000_000
@@ -45,6 +46,16 @@ def test_airtime_cap() -> None:
     assert 1 < take < 16
 
 
+def test_aggregates_stop_at_the_burst_length_the_receiver_tracks() -> None:
+    # Whatever the airtime cap says, a burst longer than the receiver's
+    # timing correction covers at 50 ppm is not built from several MPDUs.
+    lengths = [1000] * 64
+    take = _plan(lengths, max_burst_airtime_s=1.0, max_psdu_bytes=1 << 20, max_subframes=64)
+    assert V5_MAX_TRACKED_BURST_SAMPLES == 80_000
+    assert _samples(ampdu_body_length(lengths[:take])) <= V5_MAX_TRACKED_BURST_SAMPLES
+    assert _samples(ampdu_body_length(lengths[: take + 1])) > V5_MAX_TRACKED_BURST_SAMPLES
+
+
 def test_oversize_single_datagram_is_still_sent() -> None:
     assert _plan([9000], max_psdu_bytes=8192) == 1
     assert _plan([9000, 20], max_psdu_bytes=8192) == 1
@@ -69,7 +80,7 @@ def test_prefix_is_fifo_not_best_fit() -> None:
 def test_limits_validation_and_defaults() -> None:
     defaults = AggregationLimits()
     assert (defaults.max_subframes, defaults.max_psdu_bytes) == (16, 8192)
-    assert defaults.max_burst_airtime_s == 0.010
+    assert defaults.max_burst_airtime_s == 0.008
     with pytest.raises(ValueError):
         AggregationLimits(max_subframes=0)
     with pytest.raises(ValueError):

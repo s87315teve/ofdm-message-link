@@ -34,6 +34,7 @@ from .burst import (
     BurstDiagnostics,
     BurstValidationError,
     DecodedBurst,
+    SampleClockTrackingConfig,
     _apply_sample_clock_tracking,
     _finite_tuple,
     _frozen_samples,
@@ -78,6 +79,17 @@ from .sync_v5 import (
 
 PSDU_FCS_BYTES = 4
 _BLOCK_LENGTH = 80
+#: Worst-case sample-clock offset between two radios: two +-25 ppm crystals.
+WORST_CASE_SFO_PPM = 50.0
+#: Longest burst, in samples, whose drift at ``WORST_CASE_SFO_PPM`` stays
+#: within the receiver's timing correction (``max_abs_timing_shift_samples``,
+#: 4 samples): 80 000 samples, 16 ms at 5 MS/s, 8 ms at 10, 4 ms at 20.  The
+#: tracker follows a longer drift in phase (the slope is unwrapped along
+#: time) and the FFT backoff absorbs a few samples more, but the correction
+#: itself stops here, so transmitters keep aggregates within it.
+V5_MAX_TRACKED_BURST_SAMPLES = round(
+    SampleClockTrackingConfig().max_abs_timing_shift_samples / (WORST_CASE_SFO_PPM * 1e-6)
+)
 # Header LLRs are clipped like every other LLR before the Viterbi sees them.
 _SIG_LLR_CLIP = 64.0
 

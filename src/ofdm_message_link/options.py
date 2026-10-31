@@ -312,7 +312,8 @@ def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
             "longest aggregated burst on the air, guards included; a single "
             "datagram longer than this is still sent alone. Longer bursts drift "
             "further against the receiver's timing tracker, lose more level to "
-            "peak scaling and decode more lumpily"
+            "peak scaling and decode more lumpily. Aggregates also stop at 80000 "
+            "samples whatever MS says, the drift the receiver corrects at 50 ppm"
         ),
     )
 

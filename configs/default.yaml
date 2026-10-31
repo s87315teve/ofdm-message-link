@@ -94,7 +94,9 @@ mac:
     max_wait_ms: 0.0
     max_subframes: 16
     max_psdu_bytes: 8192
-    max_burst_airtime_ms: 10.0
+    # At most 80 000 samples (8 ms at 10 MS/s, 16 ms at 5): the longest burst
+    # whose drift at 50 ppm the receiver's timing correction covers.
+    max_burst_airtime_ms: 8.0
 
 radio:
   adapter: simulation

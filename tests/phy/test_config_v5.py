@@ -131,6 +131,33 @@ def test_bad_aggregation_values_are_rejected(key: str, value: object) -> None:
         validate_config(raw)
 
 
+def test_aggregates_larger_than_the_receiver_accepts_are_refused() -> None:
+    raw = _raw()
+    raw["mac"]["aggregation"]["max_psdu_bytes"] = 20_000
+    with pytest.raises(ConfigError, match="phy.rx.max_psdu_bytes"):
+        validate_config(raw)
+    raw["phy"]["rx"]["max_psdu_bytes"] = 20_000
+    assert validate_config(raw).mac.aggregation.max_psdu_bytes == 20_000
+
+
+@pytest.mark.parametrize(
+    ("sample_rate", "airtime_ms", "accepted"),
+    [(10_000_000, 8.0, True), (10_000_000, 9.0, False), (5_000_000, 16.0, True),
+     (5_000_000, 100.0, False), (20_000_000, 4.0, True), (20_000_000, 8.0, False)],
+)
+def test_airtime_cap_stays_within_the_drift_the_receiver_tracks(
+    sample_rate: int, airtime_ms: float, accepted: bool
+) -> None:
+    raw = _raw()
+    raw["phy"]["sample_rate"] = sample_rate
+    raw["mac"]["aggregation"]["max_burst_airtime_ms"] = airtime_ms
+    if accepted:
+        assert validate_config(raw).mac.aggregation.max_burst_airtime_ms == airtime_ms
+    else:
+        with pytest.raises(ConfigError, match="timing"):
+            validate_config(raw)
+
+
 @pytest.mark.parametrize("rate", ["1/3", "1/2", "2/3", "3/4"])
 def test_rate_matched_turbo_scheme_accepts_the_v5_rates(rate: str) -> None:
     raw = copy.deepcopy(_raw())
