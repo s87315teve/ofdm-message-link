@@ -444,7 +444,7 @@ def v5_candidates(
     shared: SharedCorrelation,
     config: V5SyncConfig,
 ) -> tuple[V5Acquisition, ...]:
-    """Every v5 preamble in the buffer, at most one per 320 samples, by start.
+    """Every v5 preamble in the buffer, at most one per 560 samples, by start.
 
     ``shared`` must be the lag-32 correlation of these same samples.  A peak
     whose +-160-offset neighbourhood reaches past the last judgeable offset is
@@ -623,12 +623,16 @@ def v5_candidates(
 def separated_v5_candidates(
     candidates: tuple[V5Acquisition, ...],
 ) -> tuple[V5Acquisition, ...]:
-    """Keep the strongest v5 candidate per 320-sample preamble, by start."""
+    """Keep the strongest v5 candidate per 560-sample fixed part, by start.
+
+    No two v5 bursts start closer than a preamble and SIG, and a candidate
+    inside another's fixed part would bound that burst before its SIG.
+    """
 
     selected: list[V5Acquisition] = []
     for candidate in sorted(candidates, key=lambda item: item.confidence, reverse=True):
         if all(
-            abs(candidate.stf_start - other.stf_start) >= V5_PREAMBLE_LENGTH
+            abs(candidate.stf_start - other.stf_start) >= V5_FIXED_LENGTH
             for other in selected
         ):
             selected.append(candidate)

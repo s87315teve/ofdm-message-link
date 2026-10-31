@@ -246,6 +246,16 @@ def test_truncated_burst_asks_for_the_signalled_length() -> None:
     assert raised.value.required_sample_count == 16 + burst.sample_count
 
 
+def test_a_burst_cut_inside_its_sig_asks_for_the_fixed_part() -> None:
+    burst = encode_burst_v5(_body(900, 3), mcs_entry(9), scrambler_seed=5)
+    stream = _framed(burst.samples)
+
+    with pytest.raises(BurstDecodeError) as raised:
+        decode_burst(stream[: 16 + 540])
+
+    assert raised.value.required_sample_count == 16 + 560
+
+
 def test_a_bad_fcs_is_returned_as_a_result_not_raised() -> None:
     entry = mcs_entry(8)
     body = _body(3000, 2)

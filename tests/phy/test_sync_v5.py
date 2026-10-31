@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from functools import lru_cache
 
 import numpy as np
@@ -30,6 +31,7 @@ from ofdm_link.phy.sync_v5 import (
     generate_ltf,
     generate_stf,
     measure_ltf_pair,
+    separated_v5_candidates,
     v5_candidates,
 )
 
@@ -246,6 +248,23 @@ def test_mixed_stream_is_acquired_in_order_with_the_right_families() -> None:
         AcquisitionResult,
         V5Acquisition,
     ]
+
+
+def test_no_candidate_survives_inside_a_v5_fixed_part() -> None:
+    # Either family's candidate between a v5 STF start and the end of its
+    # SIG (+560) would bound that burst before its SIG.
+    v5 = V5Acquisition(
+        stf_start=1000,
+        ltf_start=1192,
+        normalized_cfo=0.0,
+        coarse_cfo=0.0,
+        metric=0.9,
+        stf_confidence=0.9,
+        confidence=0.9,
+    )
+    inside_v5 = replace(v5, stf_start=1400, ltf_start=1592, confidence=0.5)
+    beyond_v5 = replace(v5, stf_start=1560, ltf_start=1752, confidence=0.5)
+    assert separated_v5_candidates((v5, inside_v5, beyond_v5)) == (v5, beyond_v5)
 
 
 def test_shared_correlation_leaves_the_legacy_scan_bit_identical() -> None:

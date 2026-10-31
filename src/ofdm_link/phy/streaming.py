@@ -342,6 +342,9 @@ class StreamingBurstDecoder:
                 # Probe it once, then wait without repeatedly scanning the
                 # growing payload buffer or accepting TX length metadata.
                 segment_end = self._buffer.size
+            if isinstance(self._pending_acquisition, V5Acquisition):
+                # A later candidate never cuts a v5 burst short of its SIG.
+                segment_end = max(segment_end, fixed_sample_count)
             try:
                 burst = _decode_burst_with_acquisition(
                     self._buffer[:segment_end],
@@ -494,7 +497,9 @@ class StreamingBurstDecoder:
             )
             if self._required_sample_count is None:
                 probe_end = fixed_sample_count
-                if self._next_candidate_start is not None:
+                if self._next_candidate_start is not None and not isinstance(
+                    self._pending_acquisition, V5Acquisition
+                ):
                     probe_end = min(probe_end, self._next_candidate_start + timing_margin)
                 try:
                     _decode_burst_with_acquisition(

@@ -269,7 +269,12 @@ def _decode_v5_acquired(
     sig_start = stf_start + V5_SIG_OFFSET
     fixed_end = stf_start + V5_FIXED_LENGTH
     if fixed_end > values.size:
-        raise BurstDecodeError("truncated burst before the fixed signaling header")
+        # Wait for the SIG rather than give the burst up: the preamble was
+        # found, and a stream that cut the segment short can extend it.
+        raise BurstDecodeError(
+            "truncated burst before the fixed signaling header",
+            required_sample_count=fixed_end,
+        )
     # Every FFT window -- LTF, SIG, payload -- starts this many samples into
     # its cyclic prefix, so the linear phase it costs is the same everywhere
     # and the LTF channel estimate carries it to the data.

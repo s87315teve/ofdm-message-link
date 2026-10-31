@@ -20,11 +20,13 @@ from ofdm_link.phy import (
     make_dual_version_frame_decoder,
     mcs_entry,
 )
+from ofdm_link.phy import sync as sync_module
 from ofdm_link.phy.streaming import (
     PayloadFailure,
     StreamingBurstDecoder,
     decode_burst_segment,
 )
+from ofdm_link.phy.sync import AcquisitionResult
 from ofdm_link.phy.sync_v5 import V5_RETAIN_SAMPLES
 
 V5_GUARD_PRE, V5_GUARD_POST = 16, 64
@@ -243,6 +245,41 @@ def test_a_stream_under_a_dc_offset_or_tone_still_decodes_v5(interferer: str) ->
     decoded = _feed(_decoder(), stream.astype(np.complex64), 4000)
 
     assert [burst.body for burst in decoded if burst.fcs_ok] == bodies
+
+
+@pytest.mark.parametrize("offset", [330, 400, 550])
+def test_a_candidate_inside_a_v5_fixed_part_does_not_drop_the_burst(
+    monkeypatch: pytest.MonkeyPatch, offset: int
+) -> None:
+    # A legacy false alarm between the end of a v5 preamble (+320) and the
+    # end of its SIG (+560) bounded the segment before the SIG: the decode
+    # raised "truncated" with no sample count and the burst was discarded.
+    body = _body(600, 80)
+    samples = encode_burst_v5(body, mcs_entry(9), scrambler_seed=7).samples
+    stream = np.concatenate((np.zeros(500), samples, np.zeros(800))).astype(np.complex64)
+    real = sync_module._acquisition_candidates
+
+    def with_false_alarm(buffer: np.ndarray, config: object, **kwargs: object):
+        found = real(buffer, config, **kwargs)
+        position = 500 - (stream.size - buffer.size) + offset
+        if not 0 <= position < buffer.size - 400:
+            return found
+        false_alarm = AcquisitionResult(
+            preamble_start=position,
+            useful_start=position + 16,
+            normalized_cfo=0.0,
+            amplitude_gain=1.0,
+            signal_power=1.0,
+            metric=0.3,
+            confidence=0.35,
+        )
+        return (*found, false_alarm)
+
+    monkeypatch.setattr(sync_module, "_acquisition_candidates", with_false_alarm)
+
+    decoded = _decoder().feed(stream)
+
+    assert [burst.body for burst in decoded if isinstance(burst, DecodedPsduBurst)] == [body]
 
 
 def test_back_to_back_v5_bursts_with_the_short_guards() -> None:

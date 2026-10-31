@@ -518,11 +518,14 @@ def acquire_all(
 
     One lag-32 correlation feeds both detectors.  Within a family the
     strongest candidate per preamble survives (legacy: 80 samples apart, as
-    before; v5: 320).  Across families two candidates closer than the longer
-    preamble (320 samples) are the same physical preamble seen by both
-    detectors, or one detector's false alarm on the other's burst, so only
-    the one with the higher confidence relative to its own acceptance
-    threshold is kept.  ``None`` disables a family.  With ``v5`` disabled the
+    before; v5: one per 560-sample fixed part).  Across families a candidate
+    that starts less than a v5 preamble (320 samples) before a v5 candidate,
+    or inside its 560-sample fixed part (preamble and SIG), is the same
+    physical preamble seen by both detectors, or one detector's false alarm
+    on the other's burst, so only the one with the higher confidence
+    relative to its own acceptance threshold is kept.  A candidate left
+    inside a v5 fixed part would bound the burst's samples before its SIG
+    and drop it.  ``None`` disables a family.  With ``v5`` disabled the
     result is exactly the legacy separated scan; with both disabled it is
     empty.
 
@@ -530,7 +533,13 @@ def acquire_all(
     of the buffer for both families; the decoder still reads the raw samples.
     """
 
-    from .sync_v5 import V5_PREAMBLE_LENGTH, prefilter_for_acquisition, v5_candidates
+    from .sync_v5 import (
+        V5_FIXED_LENGTH,
+        V5_PREAMBLE_LENGTH,
+        V5Acquisition,
+        prefilter_for_acquisition,
+        v5_candidates,
+    )
 
     if legacy is None and v5 is None:
         return ()
@@ -565,12 +574,15 @@ def acquire_all(
             return item.confidence / legacy_threshold
         return item.confidence / v5_threshold
 
+    def clash(first: AnyAcquisition, second: AnyAcquisition) -> bool:
+        v5_item, other = (first, second) if isinstance(first, V5Acquisition) else (second, first)
+        offset = other.preamble_start - v5_item.preamble_start
+        return -V5_PREAMBLE_LENGTH < offset < V5_FIXED_LENGTH
+
     selected: list[AnyAcquisition] = []
     for candidate in sorted((*legacy_found, *v5_found), key=score, reverse=True):
         if all(
-            type(other) is type(candidate)
-            or abs(candidate.preamble_start - other.preamble_start) >= V5_PREAMBLE_LENGTH
-            for other in selected
+            type(other) is type(candidate) or not clash(candidate, other) for other in selected
         ):
             selected.append(candidate)
     return tuple(sorted(selected, key=lambda item: item.preamble_start))
