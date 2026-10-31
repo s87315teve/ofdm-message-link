@@ -153,8 +153,44 @@ def test_tones_and_dc_are_rejected_by_the_coherent_stf_stage() -> None:
         signal = np.exp(2j * np.pi * carrier * n / 64) + 0.3
         signal = _awgn(signal, 30.0, rng, 1.0)
         shared = shared_correlation(signal)
-        # The M128 gate passes a tone everywhere; the STF stage must stop it.
+        # With the steady part removed, the M128 gate still passes the
+        # tone-times-noise products here and there; the STF stage stops them.
         assert v5_candidates(signal, shared, V5) == ()
+
+
+@pytest.mark.parametrize("interferer", ["dc", "tone"])
+def test_a_preamble_under_a_strong_dc_offset_or_tone_is_acquired(interferer: str) -> None:
+    # The review's case: burst power 0.2 at 10 dB SNR under a 0.6 DC offset
+    # or a 0.6 tone at 0.48 cycles/sample.  Both put a constant into every
+    # lag-32 product, which held M128 above threshold over the whole buffer:
+    # one endless run, always deferred, never judged.
+    rng = np.random.default_rng(15)
+    stream = np.concatenate((np.zeros(3000), 0.5 * _v5_burst(), np.zeros(3000)))
+    stream = stream * np.exp(2j * np.pi * 0.3 * np.arange(stream.size) / 64)
+    noisy = _awgn(stream, 10.0, rng, 0.25 * 52 / 64).astype(np.complex128)
+    if interferer == "dc":
+        noisy += 0.6
+    else:
+        noisy += 0.6 * np.exp(2j * np.pi * 0.48 * np.arange(noisy.size))
+    noisy = noisy.astype(np.complex64)
+
+    found = acquire_all(noisy, None, V5)
+
+    assert [item.stf_start for item in found] == [3000]
+    assert abs(found[0].normalized_cfo - 0.3) < 0.02
+
+
+def test_a_long_eligible_stretch_is_judged_once_its_peak_is_complete() -> None:
+    # A peak is held back only while its own +-160-offset neighbourhood is
+    # incomplete, however far the eligible stretch around it reaches.
+    rng = np.random.default_rng(16)
+    stream = np.concatenate((np.zeros(1000), 0.5 * _v5_burst(), np.zeros(200)))
+    noisy = (_awgn(stream, 10.0, rng, 0.2) + 0.45).astype(np.complex64)
+    found = acquire_all(noisy, None, V5)
+    assert [item.stf_start for item in found] == [1000]
+    # Cut right after the LTF search: the peak's neighbourhood is not in yet.
+    cut = noisy[: 1000 + 352 + 100]
+    assert acquire_all(cut, None, V5) == ()
 
 
 @pytest.mark.parametrize("wire_version", [1, 2, 3, 4])

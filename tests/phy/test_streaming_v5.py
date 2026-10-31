@@ -219,6 +219,32 @@ def test_idle_and_noise_buffers_stay_bounded() -> None:
     assert noisy.snapshot().detected_v5_candidates == 0
 
 
+@pytest.mark.parametrize("interferer", ["dc", "tone"])
+def test_a_stream_under_a_dc_offset_or_tone_still_decodes_v5(interferer: str) -> None:
+    # Before the steady-part removal the v5 detector found nothing at all
+    # here: the DC or tone kept every offset eligible and the run deferred.
+    rng = np.random.default_rng(17)
+    bodies = [_body(200, 70 + index) for index in range(4)]
+    parts = [np.zeros(1000)]
+    for index, body in enumerate(bodies):
+        samples = encode_burst_v5(body, mcs_entry(8), scrambler_seed=20 + index).samples
+        parts += [np.zeros(V5_GUARD_PRE), samples, np.zeros(V5_GUARD_POST + 700 * (index + 1))]
+    stream = 0.5 * np.concatenate(parts)
+    stream = stream * np.exp(2j * np.pi * 0.3 * np.arange(stream.size) / 64)
+    variance = 0.2 / 10.0
+    stream = stream + np.sqrt(variance / 2) * (
+        rng.standard_normal(stream.size) + 1j * rng.standard_normal(stream.size)
+    )
+    if interferer == "dc":
+        stream = stream + 0.45
+    else:
+        stream = stream + 0.6 * np.exp(2j * np.pi * 0.48 * np.arange(stream.size))
+
+    decoded = _feed(_decoder(), stream.astype(np.complex64), 4000)
+
+    assert [burst.body for burst in decoded if burst.fcs_ok] == bodies
+
+
 def test_back_to_back_v5_bursts_with_the_short_guards() -> None:
     bodies = [_body(size, 60 + size) for size in (100, 1500, 19 - 4, 800)]
     parts = []

@@ -1,0 +1,44 @@
+seed 1 snr 30.0 ppm 0.0 dual: legacy cands 7 v5 cands 0 hdr ok 7 fail 0 crc 0
+    300-4860 v1 379123ff2993 cfo 0.3728 sfo 0.93 applied 0.00 evm-ish 0.9969
+    5591-16231 v2 2ecc2e0670cd cfo 0.3688 sfo -0.26 applied 0.00 evm-ish 1.0407
+    17049-18729 v3 47328a571f83 cfo 0.3713 sfo 1.73 applied 0.00 evm-ish 1.0041
+    19874-24994 v4 39dbaf13615a cfo 0.3732 sfo -0.76 applied 0.00 evm-ish 0.9798
+    25578-37258 v2 44b6b59b7eb6 cfo 0.3673 sfo 0.15 applied 0.00 evm-ish 0.9968
+    37745-46705 v4 f78258e3ae88 cfo 0.3700 sfo 0.42 applied 0.00 evm-ish 0.9925
+    47389-51869 v1 a469208f4770 cfo 0.3688 sfo -0.04 applied 0.00 evm-ish 1.0124
+seed 1 snr 30.0 ppm 0.0 legacy-only: legacy cands 7 v5 cands 0 hdr ok 7 fail 0 crc 0
+    300-4860 v1 379123ff2993 cfo 0.3728 sfo 0.93 applied 0.00 evm-ish 0.9969
+    5591-16231 v2 2ecc2e0670cd cfo 0.3688 sfo -0.26 applied 0.00 evm-ish 1.0407
+    17049-18729 v3 47328a571f83 cfo 0.3713 sfo 1.73 applied 0.00 evm-ish 1.0041
+    19874-24994 v4 39dbaf13615a cfo 0.3732 sfo -0.76 applied 0.00 evm-ish 0.9798
+    25578-37258 v2 44b6b59b7eb6 cfo 0.3673 sfo 0.15 applied 0.00 evm-ish 0.9968
+    37745-46705 v4 f78258e3ae88 cfo 0.3700 sfo 0.42 applied 0.00 evm-ish 0.9925
+    47389-51869 v1 a469208f4770 cfo 0.3688 sfo -0.04 applied 0.00 evm-ish 1.0124
+seed 2 snr 18.0 ppm 35.0 dual: legacy cands 7 v5 cands 0 hdr ok 7 fail 0 crc 1
+    300-4860 v1 e750e0d70231 cfo 0.3753 sfo -33.77 applied 0.00 evm-ish 1.0135
+    5650-16290 v2 91eea2411e6a cfo 0.3614 sfo -36.59 applied -36.59 evm-ish 1.1033
+    16682-18362 v3 180a474d78e9 cfo 0.3607 sfo -40.29 applied 0.00 evm-ish 1.0000
+    24879-36559 v2 5f07c225864b cfo 0.3810 sfo -35.97 applied -35.97 evm-ish 1.1068
+    37393-46353 v4 b6bf6573c95a cfo 0.3623 sfo -34.20 applied -34.20 evm-ish 0.8369
+    47165-51645 v1 214e01de2c6b cfo 0.3807 sfo -43.14 applied -40.00 evm-ish 1.0279
+seed 2 snr 18.0 ppm 35.0 legacy-only: legacy cands 7 v5 cands 0 hdr ok 7 fail 0 crc 1
+    300-4860 v1 e750e0d70231 cfo 0.3753 sfo -33.77 applied 0.00 evm-ish 1.0135
+    5650-16290 v2 91eea2411e6a cfo 0.3614 sfo -36.59 applied -36.59 evm-ish 1.1033
+    16682-18362 v3 180a474d78e9 cfo 0.3607 sfo -40.29 applied 0.00 evm-ish 1.0000
+    24879-36559 v2 5f07c225864b cfo 0.3810 sfo -35.97 applied -35.97 evm-ish 1.1068
+    37393-46353 v4 b6bf6573c95a cfo 0.3623 sfo -34.20 applied -34.20 evm-ish 0.8369
+    47165-51645 v1 214e01de2c6b cfo 0.3807 sfo -43.14 applied -40.00 evm-ish 1.0279
+seed 3 snr 12.0 ppm -45.0 dual: legacy cands 7 v5 cands 0 hdr ok 7 fail 0 crc 3
+    300-4860 v1 ce77778ab679 cfo 0.3722 sfo 33.30 applied 0.00 evm-ish 1.2397
+    5783-16424 v2 486a306d6ca2 cfo 0.3556 sfo 43.83 applied 40.00 evm-ish 1.0130
+    16836-18516 v3 d133ed4126b6 cfo 0.3867 sfo 110.43 applied 0.00 evm-ish 1.1736
+    25350-37031 v2 71b8f4485836 cfo 0.3745 sfo 44.10 applied 40.00 evm-ish 1.3165
+seed 3 snr 12.0 ppm -45.0 legacy-only: legacy cands 7 v5 cands 0 hdr ok 7 fail 0 crc 3
+    300-4860 v1 ce77778ab679 cfo 0.3722 sfo 33.30 applied 0.00 evm-ish 1.2397
+    5783-16424 v2 486a306d6ca2 cfo 0.3556 sfo 43.83 applied 40.00 evm-ish 1.0130
+    16836-18516 v3 d133ed4126b6 cfo 0.3867 sfo 110.43 applied 0.00 evm-ish 1.1736
+    25350-37031 v2 71b8f4485836 cfo 0.3745 sfo 44.10 applied 40.00 evm-ish 1.3165
+seed 4 snr 8.0 ppm 20.0 dual: legacy cands 7 v5 cands 0 hdr ok 6 fail 1 crc 4
+    17417-19097 v3 bf6b7b68cf2a cfo 0.3331 sfo -215.32 applied 0.00 evm-ish 1.5653
+seed 4 snr 8.0 ppm 20.0 legacy-only: legacy cands 7 v5 cands 0 hdr ok 6 fail 1 crc 4
+    17417-19097 v3 bf6b7b68cf2a cfo 0.3331 sfo -215.32 applied 0.00 evm-ish 1.5653

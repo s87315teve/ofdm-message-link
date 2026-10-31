@@ -17,18 +17,22 @@ Layout, in samples from the first STF sample (``stf_start``)::
 
 Acquisition, for each candidate (all stages vectorized over candidates):
 
-1. ``M128(d) = |sum p| ^ 2 / (sum e) ^ 2`` over 128 lag-32 products, from the
-   correlation sums the legacy detector already computed
+1. ``M128(d) = |sum p - 128 m| ^ 2 / (sum e - 128 |m|) ^ 2`` over 128 lag-32
+   products, from the correlation sums the legacy detector already computed
    (:class:`~ofdm_link.phy.sync.SharedCorrelation`), against
-   ``detection_threshold`` and an energy gate.
-2. One candidate per run of eligible offsets (runs split at gaps over 32):
-   the offset of the largest ``|sum p|``, which is a triangle peaking at
+   ``detection_threshold`` and an energy gate.  ``m`` is the mean product
+   over the surrounding 1024: the steady part a DC offset or CW tone adds to
+   every product, which would otherwise hold the metric above threshold
+   over the whole buffer.
+2. Non-maximum suppression: the offset of the largest ``|sum p - 128 m|``
+   within +-160 eligible offsets, which is a triangle peaking at
    ``stf_start`` whatever the guard before it holds.  The normalized metric
    is flat over an exact-zero guard and would not locate the peak.
 3. Coarse CFO from the lag-16 correlation over STF samples 16..159 (range
-   +-2 subcarriers, enough for two +-25 ppm radios at 2.45 GHz), then a
-   coherent check against the STF over its 16 cyclic phases: tones, DC and
-   spurs score about 1/12 and are rejected by ``stf_threshold``.
+   +-2 subcarriers, enough for two +-25 ppm radios at 2.45 GHz), with the
+   local DC and steady lag-16 product removed, then a coherent check against
+   the STF over its 16 cyclic phases: tones, DC and spurs score about 1/12
+   and are rejected by ``stf_threshold``.
 4. Fine timing on the LTF pair over +-``fine_timing_search`` samples, with a
    balance test: a legacy burst's single training symbol matches L1 but not
    L2, so ``min(c1, c2) >= balance_ratio * c_pair`` rejects it.
@@ -291,9 +295,129 @@ def _required_tail(config: V5SyncConfig) -> int:
 
 
 #: How many trailing samples a streaming receiver must keep when no v5
-#: preamble was found: a run of eligible offsets is only judged once its
-#: whole triangle and its LTF search fit in the buffer.
+#: preamble was found: a peak is only judged once its whole suppression
+#: neighbourhood and its LTF search fit in the buffer.
 V5_RETAIN_SAMPLES = 640
+
+# Half-width of the peak search: the M128 triangle spans +-128 offsets around
+# ``stf_start``, and two v5 preambles are never closer than a fixed header.
+_PEAK_RADIUS = V5_PREAMBLE_LENGTH // 2
+# Products on each side of the 128-product metric window whose mean is taken
+# as the steady (DC or CW tone) part of the correlation.  Long against the
+# STF, so the mean is well averaged, short against the seconds a radio's DC
+# offset drifts over.
+_STEADY_SIDE = 448
+# Fewest products a side needs before its mean is trusted.
+_STEADY_MINIMUM = _METRIC_WIDTH
+# Offsets between two measurements of the steady part.
+_STEADY_STEP = 16
+# Samples around a candidate over which its local DC and steady lag-16 and
+# lag-64 products are measured for the coherent stages.
+_LOCAL_SPAN = 1024
+# Standard deviations of white-noise scatter a local steady product must
+# exceed before it is subtracted.
+_STEADY_SIGNIFICANCE = 4.0
+
+
+def _steady_mean(
+    shared: SharedCorrelation, limit: int
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Steady lag-32 product around each metric window offset.
+
+    A DC offset ``c`` puts ``|c|^2`` into every product and a CW tone a
+    constant phasor; neither averages out over 128 products, so without this
+    the normalized metric stays above threshold over the whole buffer and no
+    preamble triangle stands out.  The mean is taken separately over the
+    ``_STEADY_SIDE`` products before the window and those after it, and the
+    side with the smaller mean is used (smallest-of, as in a CFAR detector):
+    a steady interferer is on both sides, a preamble near the window only on
+    one, and must not be subtracted from the noise in front of it.
+    """
+
+    products = shared.real_cum.size
+    side = _STEADY_SIDE
+    step = _STEADY_STEP
+    # The steady part changes slowly by definition, so it is measured every
+    # ``step`` offsets and held in between: a sixteenth of the work of the
+    # full-rate metric it corrects.
+    grid = np.arange(0, limit, step)
+    before_count = np.minimum(grid, side)
+    after_count = np.minimum(products - _METRIC_WIDTH - grid, side)
+    trusted_before = before_count >= _STEADY_MINIMUM
+    trusted_after = after_count >= _STEADY_MINIMUM
+    before_scale = np.where(trusted_before, 1.0 / np.maximum(before_count, 1), 0.0)
+    after_scale = np.where(trusted_after, 1.0 / np.maximum(after_count, 1), 0.0)
+    # Each side's sum is a difference of the cumulative sum at two shifted
+    # positions; padding the cumulative sum with its end values on both sides
+    # turns every clipped position into a plain strided slice.
+    start = side + _METRIC_WIDTH
+    means = []
+    for cumulative in (shared.real_cum, shared.imag_cum):
+        z = np.concatenate(
+            (np.zeros(side + 1), cumulative, np.full(side + _METRIC_WIDTH, cumulative[-1]))
+        )
+        before = z[side : side + limit : step] - z[:limit:step]
+        after = z[start + side : start + side + limit : step] - z[start : start + limit : step]
+        means.append((before * before_scale, after * after_scale))
+    (before_real, after_real), (before_imag, after_imag) = means
+    before_power = np.where(trusted_before, before_real**2 + before_imag**2, np.inf)
+    after_power = np.where(trusted_after, after_real**2 + after_imag**2, np.inf)
+    # An untrusted side never wins the smallest-of choice; with neither side
+    # trusted both means are zero and nothing is subtracted.
+    use_before = before_power <= after_power
+    real = np.where(use_before, before_real, after_real)
+    imag = np.where(use_before, before_imag, after_imag)
+    return np.repeat(real, step)[:limit], np.repeat(imag, step)[:limit]
+
+
+class _LocalInterference:
+    """Local DC and steady lag products around each candidate.
+
+    The DC is the mean of the ``_LOCAL_SPAN`` samples around a candidate: the
+    preamble and payload carry no DC carrier, so they leave it alone.  A
+    steady lag-``L`` product (a CW tone's ``|a|^2 exp(j 2 pi f L)``) is the
+    mean, DC removed, of every product over the same span that does not
+    touch the candidate's 320-sample preamble, and for lag 64 none that
+    start in a SIG or payload cyclic prefix, which the burst itself
+    correlates.
+    """
+
+    def __init__(self, values: NDArray[np.complex64], starts: NDArray[np.int64]) -> None:
+        span = min(_LOCAL_SPAN, values.size)
+        first = np.clip(starts - (span - V5_PREAMBLE_LENGTH) // 2, 0, values.size - span)
+        self._local = values[first[:, None] + np.arange(span)[None, :]].astype(np.complex128)
+        self.dc = self._local.mean(axis=1)
+        self._local -= self.dc[:, None]
+        self._preamble = (starts - first)[:, None]
+        self._power = np.mean(self._local.real**2 + self._local.imag**2, axis=1)
+
+    def keep(self, mask: NDArray[np.bool_]) -> None:
+        """Drop the candidates a stage rejected."""
+
+        self._local = self._local[mask]
+        self.dc = self.dc[mask]
+        self._preamble = self._preamble[mask]
+        self._power = self._power[mask]
+
+    def steady(self, lag: int) -> NDArray[np.complex128]:
+        """The significant steady lag-``lag`` product per candidate, else zero."""
+
+        products = np.conj(self._local[:, :-lag]) * self._local[:, lag:]
+        position = np.arange(products.shape[1])[None, :]
+        after = position - (self._preamble + V5_PREAMBLE_LENGTH)
+        outside = (position < self._preamble - lag) | (after >= 0)
+        if lag == 64:
+            # A cyclic prefix repeats its symbol's last 16 samples 64 later:
+            # those products are the burst's own, not an interferer's.
+            outside &= (after < 0) | (after % 80 >= 16)
+        count = np.maximum(np.count_nonzero(outside, axis=1), 1)
+        products[~outside] = 0.0
+        mean = products.sum(axis=1) / count
+        # The mean of ``count`` white products scatters by ``power /
+        # sqrt(count)``; below a few of those it is noise, and subtracting it
+        # would only add that noise to the CFO estimates.
+        significant = np.abs(mean) > _STEADY_SIGNIFICANCE * self._power / np.sqrt(count)
+        return np.where(significant, mean, 0.0)
 
 
 def v5_candidates(
@@ -303,9 +427,9 @@ def v5_candidates(
 ) -> tuple[V5Acquisition, ...]:
     """Every v5 preamble in the buffer, at most one per 320 samples, by start.
 
-    ``shared`` must be the lag-32 correlation of these same samples.  An
-    eligible run that reaches within 32 offsets of the last judgeable offset is
-    left for a later, longer buffer: its peak may not have arrived yet.
+    ``shared`` must be the lag-32 correlation of these same samples.  A peak
+    whose +-160-offset neighbourhood reaches past the last judgeable offset is
+    left for a later, longer buffer: a larger one may not have arrived yet.
     """
 
     if not isinstance(config, V5SyncConfig):
@@ -318,38 +442,62 @@ def v5_candidates(
     limit = values.size - _required_tail(config)
     if limit <= 0 or shared.real_cum.size < _METRIC_WIDTH:
         return ()
-    real, imag, energy = shared.window(_METRIC_WIDTH)
-    real, imag, energy = real[:limit], imag[:limit], energy[:limit]
+    real, imag, raw_energy = shared.window(_METRIC_WIDTH)
+    steady_real, steady_imag = _steady_mean(shared, limit)
+    real = real[:limit] - _METRIC_WIDTH * steady_real
+    imag = imag[:limit] - _METRIC_WIDTH * steady_imag
+    raw_energy = raw_energy[:limit]
     numerator = real * real
     numerator += imag * imag
+    # The steady part removed from the products is removed from their power
+    # too, so a preamble under a DC offset or a tone scores what it would
+    # without it.  Where nothing steady is present the correction is the
+    # small mean of white products, a few percent of the energy.
+    energy = raw_energy - _METRIC_WIDTH * np.hypot(steady_real, steady_imag)
     threshold = energy * energy
     threshold *= config.detection_threshold
     eligible = numerator >= threshold
-    eligible &= energy >= config.minimum_power * _METRIC_WIDTH
-    offsets = np.flatnonzero(eligible)
-    if not offsets.size:
+    eligible &= energy > 0.0
+    eligible &= raw_energy >= config.minimum_power * _METRIC_WIDTH
+    if not np.any(eligible):
         return ()
 
-    # Non-maximum suppression: one candidate per run of eligible offsets.
-    breaks = np.flatnonzero(np.diff(offsets) > 32) + 1
-    run_starts = np.concatenate(([0], breaks))
-    run_ends = np.concatenate((breaks, [offsets.size]))
+    # Non-maximum suppression: the largest ``|sum p|`` within +-_PEAK_RADIUS
+    # offsets is one candidate, the triangle's apex at ``stf_start``.  A
+    # long eligible stretch -- a strong interferer the steady-part removal
+    # did not cancel -- yields one candidate per neighbourhood instead of
+    # one for the whole stretch, and a peak is left for a later buffer only
+    # while its own neighbourhood is incomplete, so no run is deferred
+    # forever however long it is.
+    score = np.where(eligible, numerator, -1.0)
     peaks: list[int] = []
-    for first, last in zip(run_starts.tolist(), run_ends.tolist(), strict=True):
-        if offsets[last - 1] >= limit - 32:
-            continue
-        run = offsets[first:last]
-        peaks.append(int(run[np.argmax(numerator[run])]))
+    while True:
+        peak = int(np.argmax(score))
+        if score[peak] < 0.0:
+            break
+        score[max(0, peak - _PEAK_RADIUS) : peak + _PEAK_RADIUS + 1] = -1.0
+        if peak + _PEAK_RADIUS < limit:
+            peaks.append(peak)
     if not peaks:
         return ()
-    starts = np.asarray(peaks, dtype=np.int64)
-    metric = numerator[starts] / np.square(energy[starts])
+    starts = np.sort(np.asarray(peaks, dtype=np.int64))
+    metric = numerator[starts] / np.square(np.maximum(energy[starts], 1e-300))
 
-    # Coarse CFO from the lag-16 STF correlation, skipping the first period.
+    # Coarse CFO from the lag-16 STF correlation, skipping the first period,
+    # with the local DC removed from the samples and the local steady lag-16
+    # product (a tone's) removed from the correlation: either would otherwise
+    # pull the estimate towards its own phase.
+    interference = _LocalInterference(values, starts)
+    dc = interference.dc
     span = np.arange(_STF_SKIP, _STF_SKIP + _STF_CHECK_LENGTH)
-    first = values[starts[:, None] + span[None, :]].astype(np.complex128)
-    lagged = values[starts[:, None] + span[None, :] + _COARSE_CFO_LAG].astype(np.complex128)
-    coarse = 4.0 * np.angle(np.sum(np.conj(first) * lagged, axis=1)) / (2.0 * np.pi)
+    first = values[starts[:, None] + span[None, :]].astype(np.complex128) - dc[:, None]
+    lagged = (
+        values[starts[:, None] + span[None, :] + _COARSE_CFO_LAG].astype(np.complex128)
+        - dc[:, None]
+    )
+    lag16 = np.sum(np.conj(first) * lagged, axis=1)
+    lag16 -= _STF_CHECK_LENGTH * interference.steady(_COARSE_CFO_LAG)
+    coarse = 4.0 * np.angle(lag16) / (2.0 * np.pi)
 
     # Coherent STF check over the 16 cyclic phases of the period.
     rotation = np.exp(-2j * np.pi * coarse[:, None] * span[None, :] / 64.0)
@@ -374,6 +522,8 @@ def v5_candidates(
         coarse[keep],
         stf_confidence[keep],
     )
+    interference.keep(keep)
+    dc = interference.dc
 
     # Fine timing on the LTF pair, coarse CFO removed.
     search = config.fine_timing_search
@@ -381,6 +531,7 @@ def v5_candidates(
         V5_LTF_FIRST_SYMBOL_OFFSET - search, V5_LTF_FIRST_SYMBOL_OFFSET + search + 128
     )
     block = values[starts[:, None] + block_offsets[None, :]].astype(np.complex128)
+    block -= dc[:, None]
     block *= np.exp(-2j * np.pi * coarse[:, None] * block_offsets[None, :] / 64.0)
     windows = sliding_window_view(block, 128, axis=1)  # (candidates, 2*search+1, 128)
     reference = np.conj(_ltf_symbol())
@@ -417,9 +568,13 @@ def v5_candidates(
     if not np.any(accepted):
         return ()
 
-    # Fine CFO from the L1 -> L2 rotation of the selected window.
+    # Fine CFO from the L1 -> L2 rotation of the selected window, less the
+    # local steady lag-64 product (rotated like the window by the coarse
+    # correction), which a tone would otherwise add at its own phase.
     chosen = windows[rows, best]
-    fine = np.angle(np.sum(chosen[:, 64:] * np.conj(chosen[:, :64]), axis=1)) / (2.0 * np.pi)
+    rotation64 = np.sum(chosen[:, 64:] * np.conj(chosen[:, :64]), axis=1)
+    rotation64 -= 64 * interference.steady(64) * np.exp(-2j * np.pi * coarse)
+    fine = np.angle(rotation64) / (2.0 * np.pi)
     found = [
         V5Acquisition(
             stf_start=int(stf),
