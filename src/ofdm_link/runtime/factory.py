@@ -34,7 +34,8 @@ from ofdm_link.phy.burst_header import (
     CONVOLUTIONAL_R13_BURST_HEADER_VERSION,
     UNCODED_BURST_HEADER_VERSION,
 )
-from ofdm_link.phy.mcs_table import McsTableEntry
+from ofdm_link.phy.mcs_table import V5_WIRE_VERSION, McsTableEntry
+from ofdm_link.phy.sync_v5 import V5RxConfig, V5SyncConfig
 from ofdm_link.phy.turbo import native_convolutional_soft_decoder
 
 
@@ -194,7 +195,7 @@ def select_frame_decoder_for_entry(
 
     _require_link_config(config)
     decision_mode = config.phy.fec.decision_mode
-    if entry.fec_scheme == "turbo":
+    if entry.fec_scheme in {"turbo", "turbo_rm"}:
         decision_mode = "turbo"
     elif decision_mode == "turbo":
         decision_mode = "soft"
@@ -247,6 +248,19 @@ def _select_frame_decoder(
             soft_demap_symbols if soft_observations else None,
             receiver,
             CONVOLUTIONAL_R13_BURST_HEADER_VERSION,
+        )
+    if config.phy.fec.scheme == "turbo_rm":
+        # Wire v5: the payload codec lives inside the v5 burst encoder and
+        # decoder, so this selection only names the family.  The receiver
+        # half still decodes every legacy version alongside v5.
+        return DecoderBackendSelection(
+            turbo_codec,
+            "native_turbo_rate_matched",
+            map_symbols,
+            demap_symbols,
+            soft_demap_symbols,
+            receiver,
+            V5_WIRE_VERSION,
         )
     if config.phy.fec.scheme == "turbo":
         return DecoderBackendSelection(
@@ -308,4 +322,21 @@ def build_burst_config(config: LinkConfig) -> BurstConfig:
         detection_threshold=config.phy.sync.detection_threshold,
         correlation_threshold=config.phy.sync.correlation_threshold,
     )
-    return BurstConfig(numerology=numerology, sync=sync)
+    rx = config.phy.rx
+    v5 = V5RxConfig(
+        acquisition=V5SyncConfig(
+            detection_threshold=rx.v5_detection_threshold,
+            stf_threshold=rx.v5_stf_threshold,
+            correlation_threshold=rx.v5_correlation_threshold,
+            balance_ratio=rx.v5_balance_ratio,
+            prefilter=rx.acquisition_prefilter,
+        ),
+        legacy_acquisition=rx.legacy_acquisition,
+        v5_acquisition=rx.v5_acquisition,
+        ltf_average=rx.ltf_average,
+        channel_smoothing=rx.channel_smoothing,
+        llr_noise_source=rx.llr_noise_source,  # type: ignore[arg-type]
+        max_psdu_bytes=rx.max_psdu_bytes,
+        turbo_max_iterations=rx.turbo_max_iterations,
+    )
+    return BurstConfig(numerology=numerology, sync=sync, v5=v5)
