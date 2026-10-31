@@ -8,7 +8,7 @@
 # load at start and decode-worker CPU during the load.  Transmits RF.
 set -euo pipefail
 
-ROOT=$(realpath "$1"); TX_GAIN=$2; MCS=$3; RATE=$4; SECONDS_=$5; OUT=$6; SIZE=${7:-900}
+ROOT=$(realpath "$1"); TX_ROOT=$(realpath "${TX_ROOT:-$1}"); TX_GAIN=$2; MCS=$3; RATE=$4; SECONDS_=$5; OUT=$6; SIZE=${7:-900}
 HERE=$(cd "$(dirname "$0")" && pwd)
 PYTHON=${PYTHON:-python}
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
@@ -37,9 +37,12 @@ PYTHONPATH="$ROOT/src" "$PYTHON" -m ofdm_message_link.rx_app --transport pluto \
     --egress-port 52022 --stats-log "$OUT/rx_stats.jsonl" > "$OUT/rx.log" 2>&1 &
 RX_PID=$!
 wait_ready "$OUT/rx.ready"
-PYTHONPATH="$ROOT/src" "$PYTHON" -m ofdm_message_link.tx_app --transport pluto \
+# TX_ROOT (default ROOT) supplies tx_app; TX_EXTRA_ARGS is word-split extra tx_app arguments.
+cd "$TX_ROOT"
+# shellcheck disable=SC2086
+PYTHONPATH="$TX_ROOT/src" "$PYTHON" -m ofdm_message_link.tx_app --transport pluto \
     --serial "$TX_SERIAL" --gain "$TX_GAIN" --mcs-index "$MCS" --auto-start \
-    --ready-file "$OUT/tx.ready" \
+    --ready-file "$OUT/tx.ready" ${TX_EXTRA_ARGS:-} \
     --enable-rf --acknowledgement 'I acknowledge that this process will transmit RF' \
     > "$OUT/tx.log" 2>&1 &
 TX_PID=$!
@@ -51,12 +54,12 @@ SAMPLER_PID=$!
 "$PYTHON" "$HERE/../ota_udp_throughput/udp_load.py" --rate "$RATE" \
     --duration "$SECONDS_" --size "$SIZE" --output "$OUT/load.json" > "$OUT/load.log" 2>&1
 kill "$SAMPLER_PID" 2>/dev/null || true; wait "$SAMPLER_PID" 2>/dev/null || true
-"$PYTHON" - "$OUT" "$RX_PID" "$LOAD_START" "$ROOT" "$TX_GAIN" "$MCS" "$RATE" "$SIZE" "$HERE" <<'PY'
+"$PYTHON" - "$OUT" "$RX_PID" "$LOAD_START" "$ROOT" "$TX_GAIN" "$MCS" "$RATE" "$SIZE" "$HERE" "$TX_ROOT" "${TX_EXTRA_ARGS:-}" <<'PY'
 import json, sys
 sys.path.insert(0, sys.argv[9])
 import cpu_sampler
 out, pid, load, root, gain, mcs, rate, size = sys.argv[1:9]
-meta = {"root": root, "tx_gain_db": float(gain), "mcs_index": int(mcs), "rate": float(rate),
+meta = {"tx_root": sys.argv[10], "tx_extra_args": sys.argv[11], "root": root, "tx_gain_db": float(gain), "mcs_index": int(mcs), "rate": float(rate),
         "size": int(size), "load_1min_at_start": float(load)}
 meta.update(cpu_sampler.summarize(out + "/cpu.jsonl", int(pid)))
 json.dump(meta, open(out + "/meta.json", "w"), indent=1)

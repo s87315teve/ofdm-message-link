@@ -40,6 +40,17 @@ def wait_for_load(log: list) -> float:
     return load1()
 
 
+def _find(obj, key):
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for v in obj.values():
+            r = _find(v, key)
+            if r is not None:
+                return r
+    return None
+
+
 def summarize(run: Path) -> dict:
     load = json.loads((run / "load.json").read_text())
     meta = json.loads((run / "meta.json").read_text())
@@ -61,6 +72,9 @@ def summarize(run: Path) -> dict:
         "worker_cpu_sum_pct": meta.get("worker_cpu_sum_pct"),
         "rx_main_cpu_pct": meta.get("rx_main_cpu_pct"),
         "sender_max_behind_ms": load.get("sender_max_behind_ms"),
+        "latency_ms_p50": load.get("latency_ms_p50"), "latency_ms_p99": load.get("latency_ms_p99"),
+        "psdus_received": _find(records[-1], "psdus_received"),
+        "subframes_ok": _find(records[-1], "subframes_ok"),
     }
 
 
@@ -79,6 +93,10 @@ class Search:
             self.n += 1
             run = self.out / f"run{self.n:02d}_r{rate:.1f}"
             env = {"PYTHON": sys.executable, **__import__("os").environ}
+            if self.a.tx_arg:
+                env["TX_EXTRA_ARGS"] = " ".join(self.a.tx_arg)
+            if self.a.tx_root:
+                env["TX_ROOT"] = self.a.tx_root
             proc = subprocess.run(
                 [str(HERE / "live_run.sh"), self.a.root, str(self.a.tx_gain), str(self.a.mcs),
                  str(rate), str(self.a.seconds), str(run), str(self.a.size)],
@@ -110,7 +128,7 @@ class Search:
 
     def save(self, result: dict | None = None) -> None:
         doc = {"root": self.a.root, "tx_gain_db": self.a.tx_gain, "mcs_index": self.a.mcs,
-               "size": self.a.size, "seconds": self.a.seconds, "runs": self.runs}
+               "size": self.a.size, "tx_args": self.a.tx_arg, "seconds": self.a.seconds, "runs": self.runs}
         if result is not None:
             doc["result"] = result
         (self.out / "search.json").write_text(json.dumps(doc, indent=1))
@@ -125,7 +143,7 @@ class Search:
         lo, hi = 0.0, None
         if probe["passed"]:
             lo = 20.0
-            rate = max(30.0, 0.6 * CAPACITY.get(a.mcs, 190))
+            rate = max(30.0, 0.6 * (a.est_rate or CAPACITY.get(a.mcs, 190)))
         else:
             hi, rate = 20.0, 10.0
         while hi is None:
@@ -133,7 +151,7 @@ class Search:
             if s["passed"]:
                 lo = rate
                 rate *= 1.5
-                if lo > 800:
+                if lo > a.cap:
                     break
             else:
                 hi = rate
@@ -156,6 +174,10 @@ def main() -> None:
     p.add_argument("--size", type=int, default=900)
     p.add_argument("--seconds", type=int, default=30)
     p.add_argument("--out", required=True)
+    p.add_argument("--tx-arg", action="append", default=[], help="extra tx_app argument (repeatable, word-split)")
+    p.add_argument("--tx-root", default=None)
+    p.add_argument("--est-rate", type=float, default=None, help="expected max rate, places first bracket at 0.6x")
+    p.add_argument("--cap", type=float, default=6000, help="stop bracketing above this passing rate")
     args = p.parse_args()
     args.root = str(Path(args.root).resolve())
     print(json.dumps(Search(args).run()))

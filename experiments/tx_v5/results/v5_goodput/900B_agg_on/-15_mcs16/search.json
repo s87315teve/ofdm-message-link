@@ -1,0 +1,38 @@
+{
+ "root": "/home/steve/Desktop/steve/my_github/ofdm-message-link",
+ "tx_gain_db": -15.0,
+ "mcs_index": 16,
+ "size": 900,
+ "tx_args": [],
+ "seconds": 30,
+ "runs": [
+  {
+   "rate": 20.0,
+   "size": 900,
+   "sent": 600,
+   "delivered": 455,
+   "loss": 0.24166666666666667,
+   "corrupt": 0,
+   "overflow_while_loaded": 0,
+   "snr_2s_mean": 16.607158558299485,
+   "load_1min_at_start": 2.15,
+   "worker_cpu_mean_pct": 12.523653135862943,
+   "n_workers": 8,
+   "worker_cpu_sum_pct": 100.18922508690355,
+   "rx_main_cpu_pct": 12.407730396973694,
+   "sender_max_behind_ms": 0.0012099917512387037,
+   "latency_ms_p50": 41.417372,
+   "latency_ms_p99": 55.89553098,
+   "psdus_received": 600,
+   "subframes_ok": 455,
+   "dir": "run01_r20.0",
+   "passed": false,
+   "notes": []
+  }
+ ],
+ "result": {
+  "goodput_bps": 0.0,
+  "max_rate": 0.0,
+  "reason": "probe at 20/s lost > 1%"
+ }
+}
