@@ -1,0 +1,33 @@
+{
+ "root": "/tmp/claude-1000/-home-steve-Desktop-steve-my-github-ofdm-message-link/7347b886-2f82-4a84-a215-d295fcf06e93/scratchpad/base",
+ "tx_gain_db": -5.0,
+ "mcs_index": 3,
+ "size": 900,
+ "seconds": 30,
+ "runs": [
+  {
+   "rate": 20.0,
+   "size": 900,
+   "sent": 600,
+   "delivered": 465,
+   "loss": 0.225,
+   "corrupt": 0,
+   "overflow_while_loaded": 0,
+   "snr_2s_mean": 22.58861601512252,
+   "load_1min_at_start": 1.78,
+   "worker_cpu_mean_pct": 7.883036744707706,
+   "n_workers": 8,
+   "worker_cpu_sum_pct": 63.06429395766165,
+   "rx_main_cpu_pct": 12.12036886914491,
+   "sender_max_behind_ms": 0.0006479967851191759,
+   "dir": "run01_r20.0",
+   "passed": false,
+   "notes": []
+  }
+ ],
+ "result": {
+  "goodput_bps": 0.0,
+  "max_rate": 0.0,
+  "reason": "probe at 20/s lost > 1%"
+ }
+}

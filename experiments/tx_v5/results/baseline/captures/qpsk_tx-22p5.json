@@ -1,0 +1,17 @@
+{
+ "mcs": "qpsk",
+ "tx_gain_db": -22.5,
+ "tx_gain_readback_db": -22.5,
+ "rx_gain_db": 15.0,
+ "bursts_sent": 400,
+ "burst_rate_per_s": 100.0,
+ "payload_bytes": 900,
+ "sample_rate_sps": 5000000,
+ "center_frequency_hz": 2450000000.0,
+ "tx_serial": "104473541196000419000c00f2ff1e6e77",
+ "rx_serial": "10447354119600041b000b00f2ff1ef9c6",
+ "rx_overflow_events": 0,
+ "samples": 23461888,
+ "send_duration_s": 4.61978776199976,
+ "recorded_at": "2026-11-01T02:50:26+0800"
+}

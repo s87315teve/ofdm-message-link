@@ -1,0 +1,13 @@
+{
+ "root": "/tmp/claude-1000/-home-steve-Desktop-steve-my-github-ofdm-message-link/7347b886-2f82-4a84-a215-d295fcf06e93/scratchpad/base",
+ "tx_gain_db": -15.0,
+ "mcs_index": 0,
+ "rate": 480.9,
+ "size": 300,
+ "load_1min_at_start": 2.94,
+ "window_s": 31.230945728020743,
+ "rx_main_cpu_pct": 23.15011547509164,
+ "n_workers": 8,
+ "worker_cpu_mean_pct": 16.02977394151833,
+ "worker_cpu_sum_pct": 128.23819153214663
+}

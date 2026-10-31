@@ -15,6 +15,8 @@ dist/
 *.log
 runs/
 results/
+# Results that experiment READMEs and docs/08 cite are kept in the repo.
+!experiments/tx_v5/results/
 artifacts/
 
 # Qt runtime files

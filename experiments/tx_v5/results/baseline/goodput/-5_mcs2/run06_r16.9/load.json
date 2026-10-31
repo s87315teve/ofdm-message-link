@@ -1,0 +1,28 @@
+{
+ "rate_offered": 16.9,
+ "size": 900,
+ "duration": 30.0,
+ "sent": 507,
+ "send_span_s": 29.940931055985857,
+ "sender_max_behind_ms": 0.0006780028343200684,
+ "offered_mbps": 0.12192005629932486,
+ "delivered": 505,
+ "lost": 2,
+ "loss_ratio": 0.0039447731755424065,
+ "corrupt": 0,
+ "duplicate": 0,
+ "reordered": 0,
+ "foreign": 0,
+ "goodput_mbps": 0.12143910933167466,
+ "steady_sent": 473,
+ "steady_delivered": 472,
+ "steady_goodput_mbps": 0.1216280156588394,
+ "latency_ms_p50": 43.371257,
+ "latency_ms_p99": 60.03797951999994,
+ "latency_ms_max": 87.339223,
+ "arrival_span_s": 29.897856342984596,
+ "first_lost": [
+  23,
+  446
+ ]
+}
