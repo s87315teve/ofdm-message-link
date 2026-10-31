@@ -2616,18 +2616,70 @@ def test_one_decode_worker_keeps_the_inline_decoder(profile):
         MessageReceiver(profile, decode_workers=0)
 
 
-def test_parallel_decode_bounds_in_flight_work_and_counts_the_waits(profile):
+def _annotate_after_gate(gate_path, burst):
+    """Worker-side annotation that holds every decode until the gate file exists."""
+
+    from ofdm_message_link.link import burst_quality
+
+    deadline = time.monotonic() + 60.0
+    while not os.path.exists(gate_path) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return burst_quality(burst)
+
+
+def test_parallel_decode_bounds_in_flight_work_and_counts_the_waits(profile, tmp_path):
+    import functools
+    import threading
+
+    from ofdm_link.runtime.segment_decode_pool import SegmentDecodePool
+
     stream, messages = _mixed_mcs_stream(profile, bursts=12, seed=43)
+    gate = tmp_path / "open"
     receiver = MessageReceiver(profile, decode_workers=2)
+    # Swap in a pool whose workers cannot finish a segment until the gate
+    # opens, so "the owner submits faster than the workers decode" is a fact
+    # of the test and not a race against machine speed.
+    receiver._pool.close()
+    receiver._pool = SegmentDecodePool(
+        profile.config,
+        workers=2,
+        annotate=functools.partial(_annotate_after_gate, str(gate)),
+    )
+    delivered = []
+    errors = []
+
+    def feed_everything():
+        try:
+            # One chunk holding every burst: the owner submits until the
+            # bound is full and then blocks in submit() waiting for a result.
+            delivered.extend(receiver.feed(stream))
+            delivered.extend(receiver.flush())
+        except BaseException as error:  # reported on the main thread
+            errors.append(error)
+
+    feeder = threading.Thread(target=feed_everything, daemon=True)
     try:
-        delivered = []
-        # One chunk holding every burst makes the owner submit faster than two
-        # workers can decode, so the bound must push back.
-        delivered.extend(receiver.feed(stream))
-        delivered.extend(receiver.flush())
+        feeder.start()
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            held = receiver.decode_pool_snapshot()
+            if held.in_flight == held.max_in_flight and held.backpressure_waits > 0:
+                break
+            time.sleep(0.01)
+        # Nothing has completed, so the bound is the only thing holding the owner.
+        assert held.max_in_flight == 8
+        assert held.in_flight == 8
+        assert held.completed == 0
+        assert held.backpressure_waits > 0
+        gate.touch()
+        feeder.join(timeout=120.0)
+        assert not feeder.is_alive()
         snapshot = receiver.decode_pool_snapshot()
     finally:
+        gate.touch()
+        feeder.join(timeout=120.0)
         receiver.close()
+    assert not errors, errors
     assert [item.message.payload for item in delivered] == messages
     assert snapshot.max_in_flight == 8
     assert snapshot.backpressure_waits > 0
