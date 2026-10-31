@@ -144,6 +144,9 @@ class AggregationConfigSection:
     The 8 ms default keeps a burst at 10 MS/s within the 80 000 samples the
     receiver's timing correction covers at 50 ppm (4 samples), and
     validation refuses a cap beyond that at the configured sample rate.
+    ``min_burst_interval_ms`` caps the burst rate (4 ms: at most 250/s) by
+    holding a burst back until that long after the previous one, filling it
+    meanwhile; it adds latency only when bursts are back to back.  0 disables.
     ``max_psdu_bytes`` may not exceed the receiver's ``phy.rx.max_psdu_bytes``.
     """
 
@@ -152,6 +155,7 @@ class AggregationConfigSection:
     max_subframes: int = 16
     max_psdu_bytes: int = 8192
     max_burst_airtime_ms: float = 8.0
+    min_burst_interval_ms: float = 4.0
 
 
 @dataclass(frozen=True)
@@ -839,6 +843,7 @@ def _aggregation_section(mac_raw: Mapping[str, Any]) -> AggregationConfigSection
             "max_subframes",
             "max_psdu_bytes",
             "max_burst_airtime_ms",
+            "min_burst_interval_ms",
         },
     )
     values: dict[str, Any] = {}
@@ -855,6 +860,10 @@ def _aggregation_section(mac_raw: Mapping[str, Any]) -> AggregationConfigSection
     if "max_burst_airtime_ms" in raw:
         values["max_burst_airtime_ms"] = _bounded_number(
             raw, "max_burst_airtime_ms", "mac.aggregation", 0.1, 100.0
+        )
+    if "min_burst_interval_ms" in raw:
+        values["min_burst_interval_ms"] = _bounded_number(
+            raw, "min_burst_interval_ms", "mac.aggregation", 0.0, 50.0
         )
     return AggregationConfigSection(**{**asdict(defaults), **values})
 

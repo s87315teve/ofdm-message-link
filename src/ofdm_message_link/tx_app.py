@@ -147,7 +147,10 @@ class TransmitWorker:
     once, at high load bursts fill up and the per-burst preamble, SIG and
     guard cost is shared.  ``max_wait_s > 0`` trades latency for fuller
     bursts by holding a burst that still has room for up to that long after
-    its oldest message was submitted.
+    its oldest message was submitted.  ``min_burst_interval_s > 0`` caps the
+    burst rate: a burst is held until that long after the previous one was
+    handed to the radio, collecting more datagrams meanwhile (a lone datagram
+    after an idle period still goes at once, a full burst is never held).
     """
 
     def __init__(
@@ -172,6 +175,7 @@ class TransmitWorker:
         # Messages taken off the queue but not yet completely sent; written
         # only by the worker thread, read by the window.
         self._held_messages = 0
+        self._last_burst_at: float | None = None
 
     @property
     def pending(self) -> int:
@@ -252,6 +256,7 @@ class TransmitWorker:
                     # The radio was stopped underneath us.  The burst keeps
                     # its sequence numbers and goes out first on the next one.
                     continue
+                self._last_burst_at = self._clock()
                 self._plot_buffers.set_samples(unsent.burst.samples)
                 self._report(unsent)
             except Exception as error:  # surfaced in the window, never silent
@@ -285,9 +290,19 @@ class TransmitWorker:
             except queue.Empty:
                 break
             self._admit(pending, item)
-        if not self._limits.enabled or self._limits.max_wait_s <= 0.0 or not pending:
+        if not self._limits.enabled or not pending:
             return
-        deadline = pending[0].message.submitted_at + self._limits.max_wait_s
+        # The effective deadline is the later of the max-wait one and the
+        # minimum burst interval since the previous burst; the loop below
+        # ends early as soon as the burst cannot take more.
+        deadlines = []
+        if self._limits.max_wait_s > 0.0:
+            deadlines.append(pending[0].message.submitted_at + self._limits.max_wait_s)
+        if self._limits.min_burst_interval_s > 0.0 and self._last_burst_at is not None:
+            deadlines.append(self._last_burst_at + self._limits.min_burst_interval_s)
+        if not deadlines:
+            return
+        deadline = max(deadlines)
         while len(pending) < cap and not self._stop.is_set():
             datagrams = [piece.datagram for piece in pending]
             if self._transmitter.plan_burst(datagrams, self._limits) < len(datagrams):
@@ -833,7 +848,8 @@ class TransmitWindow(QtWidgets.QWidget):
             return "aggregation off"
         return (
             f"cap {limits.max_subframes} / {limits.max_burst_airtime_s * 1e3:g} ms / "
-            f"{limits.max_psdu_bytes} B, wait {limits.max_wait_s * 1e3:g} ms"
+            f"{limits.max_psdu_bytes} B, wait {limits.max_wait_s * 1e3:g} ms, "
+            f"min interval {limits.min_burst_interval_s * 1e3:g} ms"
         )
 
     def _hardware_rows(self, view: TxView, snapshot, elapsed: float) -> str:

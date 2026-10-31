@@ -490,6 +490,7 @@ def test_aggregation_caps_come_from_mac_aggregation_in_milliseconds(profile):
         max_subframes=5,
         max_psdu_bytes=4000,
         max_burst_airtime_ms=7.5,
+        min_burst_interval_ms=6.0,
     )
     custom = replace(config, mac=replace(config.mac, aggregation=section))
     limits = options.aggregation_limits(build_parser().parse_args([]), custom)
@@ -499,6 +500,7 @@ def test_aggregation_caps_come_from_mac_aggregation_in_milliseconds(profile):
         max_subframes=5,
         max_psdu_bytes=4000,
         max_burst_airtime_s=0.0075,
+        min_burst_interval_s=0.006,
     )
     # Options override the file one by one.
     overridden = options.aggregation_limits(
@@ -509,3 +511,150 @@ def test_aggregation_caps_come_from_mac_aggregation_in_milliseconds(profile):
     assert overridden.max_wait_s == 0.003 and overridden.max_psdu_bytes == 4000
     # A namespace without the transmit options (the receiver's) gets the file.
     assert options.aggregation_limits(argparse.Namespace(), custom) == limits
+
+
+# -- minimum burst interval ----------------------------------------------------
+
+
+def test_min_burst_interval_plumbs_through_config_and_cli(profile):
+    import argparse
+    from dataclasses import replace
+
+    import pytest as _pytest
+
+    from ofdm_link.config import ConfigError
+    from ofdm_message_link import options
+    from ofdm_message_link.tx_app import build_parser
+
+    config = profile.config
+    assert config.mac.aggregation.min_burst_interval_ms == 4.0
+    default = options.aggregation_limits(build_parser().parse_args([]), config)
+    assert default.min_burst_interval_s == 0.004
+    cli = options.aggregation_limits(
+        build_parser().parse_args(["--min-burst-interval-ms", "0"]), config
+    )
+    assert cli.min_burst_interval_s == 0.0
+    assert options.aggregation_limits(argparse.Namespace(), config) == default
+    with _pytest.raises(SystemExit):
+        build_parser().parse_args(["--min-burst-interval-ms", "51"])
+    with _pytest.raises(ValueError):
+        AggregationLimits(min_burst_interval_s=-0.001)
+    assert AggregationLimits().min_burst_interval_s == 0.0
+    # Config validation: range 0-50 ms.
+    from ofdm_link import config as config_module
+
+    for bad in (-1, 50.5, "x"):
+        with _pytest.raises(ConfigError):
+            config_module._aggregation_section({"aggregation": {"min_burst_interval_ms": bad}})
+    section = config_module._aggregation_section({"aggregation": {"min_burst_interval_ms": 50}})
+    assert section.min_burst_interval_ms == 50.0
+    assert replace(section, min_burst_interval_ms=0.0).min_burst_interval_ms == 0.0
+
+
+def _offer(worker, rate_hz, count, size=20):
+    period = 1.0 / rate_hz
+    start = time.monotonic()
+    for index in range(count):
+        assert worker.submit("test", bytes([index % 256]) * size)
+        wait = start + (index + 1) * period - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+
+
+def test_min_burst_interval_caps_the_burst_rate_and_fills_the_bursts(profile):
+    interval = 0.01
+    limits = AggregationLimits(min_burst_interval_s=interval)
+    transmitter = MessageTransmitter(profile)
+    bridge = _Bridge()
+    worker = TransmitWorker(transmitter, bridge, aggregation=limits)
+    sink = _RecordingSink()
+    worker.attach(sink)
+    worker.start()
+    try:
+        _offer(worker, 1000.0, 300)
+        assert _wait_for(
+            lambda: sum(record.message_count for record in bridge.sent.values) == 300
+        ), bridge.failed.values
+    finally:
+        worker.stop()
+    assert not bridge.failed.values
+    gaps = np.diff(sink.arrivals)
+    # Never faster than the cap (small slack for timer granularity) ...
+    assert gaps.min() >= interval * 0.9
+    assert len(sink.bursts) <= 0.3 / interval + 3
+    # ... and the bursts carry several datagrams each.
+    assert 300 / len(sink.bursts) > 1.5
+
+
+def test_a_lone_datagram_after_idle_is_not_delayed(profile):
+    limits = AggregationLimits(min_burst_interval_s=0.2)
+    transmitter = MessageTransmitter(profile)
+    bridge = _Bridge()
+    worker = TransmitWorker(transmitter, bridge, aggregation=limits)
+    sink = _RecordingSink()
+    worker.attach(sink)
+    worker.start()
+    try:
+        worker.submit("test", b"first")
+        assert _wait_for(lambda: len(sink.bursts) == 1)
+        time.sleep(0.25)  # longer than the interval: idle
+        submitted = time.monotonic()
+        worker.submit("test", b"second")
+        assert _wait_for(lambda: len(sink.bursts) == 2)
+    finally:
+        worker.stop()
+    assert sink.arrivals[1] - submitted < 0.1
+
+
+def test_back_to_back_datagram_waits_for_the_interval(profile):
+    limits = AggregationLimits(min_burst_interval_s=0.15)
+    transmitter = MessageTransmitter(profile)
+    bridge = _Bridge()
+    worker = TransmitWorker(transmitter, bridge, aggregation=limits)
+    sink = _RecordingSink()
+    worker.attach(sink)
+    worker.start()
+    try:
+        worker.submit("test", b"first")
+        assert _wait_for(lambda: len(sink.bursts) == 1)
+        worker.submit("test", b"second")
+        assert _wait_for(lambda: len(sink.bursts) == 2)
+    finally:
+        worker.stop()
+    assert sink.arrivals[1] - sink.arrivals[0] >= 0.14
+
+
+def test_a_full_burst_is_not_held_for_the_interval(profile):
+    limits = AggregationLimits(min_burst_interval_s=0.3, max_subframes=4)
+    transmitter = MessageTransmitter(profile)
+    bridge = _Bridge()
+    worker = TransmitWorker(transmitter, bridge, aggregation=limits)
+    sink = _RecordingSink()
+    worker.attach(sink)
+    worker.start()
+    try:
+        worker.submit("test", b"first")
+        assert _wait_for(lambda: len(sink.bursts) == 1)
+        for index in range(4):  # exactly max_subframes: the burst is full
+            worker.submit("test", bytes([index]) * 20)
+        assert _wait_for(lambda: len(sink.bursts) == 2)
+        queued = time.monotonic()
+    finally:
+        worker.stop()
+    assert queued - sink.arrivals[0] < 0.2
+    assert [record.subframe_count for record in bridge.sent.values] == [1, 4]
+
+
+def test_interval_zero_keeps_the_opportunistic_behaviour(profile):
+    messages = [bytes([index]) * 50 for index in range(10)]
+    bridge, sink = _run_worker(profile, messages, AggregationLimits(min_burst_interval_s=0.0))
+    # Queued before the radio started: one burst, as before the interval existed.
+    assert [record.subframe_count for record in bridge.sent.values] == [10]
+    _, sink = _run_worker(
+        profile,
+        messages[:3],
+        AggregationLimits(min_burst_interval_s=0.0),
+        attach_first=True,
+        pause_s=0.3,
+    )
+    assert len(sink.bursts) == 3
