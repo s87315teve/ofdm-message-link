@@ -13,12 +13,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from numpy.typing import ArrayLike, NDArray
 
 from ._arrays import all_finite
+
+if TYPE_CHECKING:
+    from .sync_v5 import AnyAcquisition, V5SyncConfig
 
 # Floor on the preamble noise estimate, as a fraction of the signal power:
 # caps the reported SNR at 60 dB when the input carries no noise at all.
@@ -248,6 +252,85 @@ def _moving_sum(values: NDArray[np.generic], width: int) -> NDArray[np.float64]:
     return sums
 
 
+@dataclass(frozen=True, slots=True)
+class SharedCorrelation:
+    """Cumulative sums of one buffer's lag-``lag`` autocorrelation.
+
+    ``p(n) = conj(r(n)) r(n + lag)`` and ``e(n) = (|r(n)|^2 + |r(n + lag)|^2) / 2``
+    for every ``n`` with both samples in the buffer.  Both preamble families
+    -- the legacy repeated-half chirp and the 802.11a STF -- are periodic in
+    32 samples, so their detectors differ only in how wide a window they sum
+    over.  Keeping the cumulative sums lets each family take its window with
+    three subtractions instead of a second pass over the buffer.  The sums are
+    float64: a single-precision cumulative sum over a whole buffer would lose
+    far more than the window it is differenced over.
+    """
+
+    real_cum: NDArray[np.float64]
+    imag_cum: NDArray[np.float64]
+    energy_cum: NDArray[np.float64]
+    lag: int
+    sample_count: int
+
+    def window(
+        self, width: int
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Running sums of Re p, Im p and e over every ``width``-product window.
+
+        Entry ``d`` sums products ``d .. d + width - 1``.  The arithmetic is
+        exactly :func:`_moving_sum`'s, so the legacy detector sees bit-identical
+        sums whether or not the correlation is shared.
+        """
+
+        if type(width) is not int or not 1 <= width <= self.real_cum.size:
+            raise SyncError("window width must fit the correlated buffer")
+        return (
+            _window_sums(self.real_cum, width),
+            _window_sums(self.imag_cum, width),
+            _window_sums(self.energy_cum, width),
+        )
+
+
+def _window_sums(cumulative: NDArray[np.float64], width: int) -> NDArray[np.float64]:
+    sums = np.empty(cumulative.size - width + 1, dtype=np.float64)
+    sums[0] = cumulative[width - 1]
+    np.subtract(cumulative[width:], cumulative[:-width], out=sums[1:])
+    return sums
+
+
+def shared_correlation(samples: ArrayLike, lag: int = 32) -> SharedCorrelation:
+    """Compute one buffer's lag-``lag`` correlation sums for both detectors."""
+
+    values = _as_complex_samples(samples, "samples")
+    if type(lag) is not int or lag < 1:
+        raise SyncError("lag must be a positive integer")
+    if values.size <= lag:
+        raise SyncError("samples must be longer than the correlation lag")
+    return _shared_correlation(values, lag)
+
+
+def _shared_correlation(values: NDArray[np.complex64], lag: int) -> SharedCorrelation:
+    products = np.conjugate(values[:-lag]) * values[lag:]
+    # One squared-magnitude pass over the buffer, shared by both halves.
+    # ``real**2 + imag**2`` also avoids the square root that ``abs`` takes
+    # only to have it squared again.
+    squared_magnitude = values.real * values.real
+    squared_magnitude += values.imag * values.imag
+    paired_power = squared_magnitude[:-lag] + squared_magnitude[lag:]
+    paired_power *= 0.5
+    # Keep the correlation as separate real and imaginary running sums: the
+    # metric needs only their squares, and two float64 cumulative sums are
+    # cheaper than one complex128 cumulative sum over the same samples.
+    interleaved = products.view(np.float32).reshape(-1, 2)
+    return SharedCorrelation(
+        real_cum=np.cumsum(interleaved[:, 0], dtype=np.float64),
+        imag_cum=np.cumsum(interleaved[:, 1], dtype=np.float64),
+        energy_cum=np.cumsum(paired_power, dtype=np.float64),
+        lag=lag,
+        sample_count=int(values.size),
+    )
+
+
 def acquire_preamble(
     samples: ArrayLike, config: SyncConfig | None = None
 ) -> AcquisitionResult | None:
@@ -261,7 +344,15 @@ def acquire_preamble(
     """
 
     settings = _require_config(config)
-    candidates = _acquisition_candidates(samples, settings)
+    return _unambiguous_candidate(_acquisition_candidates(samples, settings), settings)
+
+
+def _unambiguous_candidate(
+    candidates: tuple[AcquisitionResult, ...],
+    settings: SyncConfig,
+) -> AcquisitionResult | None:
+    """The strongest candidate, unless an independent one comes close to it."""
+
     if not candidates:
         return None
 
@@ -286,11 +377,17 @@ def acquire_preamble(
 def _acquisition_candidates(
     samples: ArrayLike,
     config: SyncConfig | None = None,
+    *,
+    shared: SharedCorrelation | None = None,
 ) -> tuple[AcquisitionResult, ...]:
     """Return every threshold-qualified preamble candidate.
 
     This internal vectorized scan lets the continuous decoder separate multiple
-    bursts before applying the public finite-buffer ambiguity rule.
+    bursts before applying the public finite-buffer ambiguity rule.  ``shared``
+    is the buffer's lag-32 correlation when the caller already computed it for
+    the v5 detector: the running sums are the expensive part of the scan and
+    both preambles need exactly the same ones, so they are computed once.  The
+    result does not depend on whether it was supplied.
     """
 
     settings = _require_config(config)
@@ -303,21 +400,13 @@ def _acquisition_candidates(
         return ()
 
     half_length = settings.half_length
-    products = np.conjugate(values[:-half_length]) * values[half_length:]
-    # One squared-magnitude pass over the buffer, shared by both halves.
-    # ``real**2 + imag**2`` also avoids the square root that ``abs`` takes
-    # only to have it squared again.
-    squared_magnitude = values.real * values.real
-    squared_magnitude += values.imag * values.imag
-    paired_power = squared_magnitude[:-half_length] + squared_magnitude[half_length:]
-    paired_power *= 0.5
-    # Keep the correlation as separate real and imaginary running sums: the
-    # metric needs only their squares, and two float64 cumulative sums are
-    # cheaper than one complex128 cumulative sum over the same samples.
-    interleaved = products.view(np.float32).reshape(-1, 2)
-    correlation_real = _moving_sum(interleaved[:, 0], half_length)
-    correlation_imag = _moving_sum(interleaved[:, 1], half_length)
-    repeated_energy = _moving_sum(paired_power, half_length)
+    if (
+        shared is None
+        or shared.lag != half_length
+        or shared.sample_count != values.size
+    ):
+        shared = _shared_correlation(values, half_length)
+    correlation_real, correlation_imag, repeated_energy = shared.window(half_length)
 
     first_useful = settings.cyclic_prefix_length
     last_useful = values.size - settings.fft_size
@@ -402,6 +491,89 @@ def _acquisition_candidates(
             strict=True,
         )
     )
+
+
+def separated_candidates(
+    candidates: tuple[AcquisitionResult, ...],
+    preamble_length: int,
+) -> tuple[AcquisitionResult, ...]:
+    """Keep the strongest legacy candidate for each physical preamble."""
+
+    selected: list[AcquisitionResult] = []
+    for candidate in sorted(candidates, key=lambda item: item.confidence, reverse=True):
+        if all(
+            abs(candidate.preamble_start - other.preamble_start) >= preamble_length
+            for other in selected
+        ):
+            selected.append(candidate)
+    return tuple(sorted(selected, key=lambda item: item.preamble_start))
+
+
+def acquire_all(
+    samples: ArrayLike,
+    legacy: SyncConfig | None,
+    v5: V5SyncConfig | None,
+) -> tuple[AnyAcquisition, ...]:
+    """Every separated preamble of either family in one buffer, by start.
+
+    One lag-32 correlation feeds both detectors.  Within a family the
+    strongest candidate per preamble survives (legacy: 80 samples apart, as
+    before; v5: 320).  Across families two candidates closer than the longer
+    preamble (320 samples) are the same physical preamble seen by both
+    detectors, or one detector's false alarm on the other's burst, so only
+    the one with the higher confidence relative to its own acceptance
+    threshold is kept.  ``None`` disables a family.  With ``v5`` disabled the
+    result is exactly the legacy separated scan; with both disabled it is
+    empty.
+
+    ``v5.prefilter`` (experiment only) low-pass filters the acquisition copy
+    of the buffer for both families; the decoder still reads the raw samples.
+    """
+
+    from .sync_v5 import V5_PREAMBLE_LENGTH, prefilter_for_acquisition, v5_candidates
+
+    if legacy is None and v5 is None:
+        return ()
+    values = _as_complex_samples(samples, "samples")
+    if v5 is not None and v5.prefilter:
+        values = prefilter_for_acquisition(values)
+    lag = 32 if legacy is None else legacy.half_length
+    shared = (
+        _shared_correlation(values, lag)
+        if values.size > lag and np.any(values)
+        else None
+    )
+    legacy_found: tuple[AcquisitionResult, ...] = ()
+    if legacy is not None:
+        legacy_found = separated_candidates(
+            _acquisition_candidates(values, legacy, shared=shared),
+            legacy.preamble_length,
+        )
+    if v5 is None:
+        return legacy_found
+    v5_found = () if shared is None or lag != 32 else v5_candidates(values, shared, v5)
+    if not v5_found:
+        return legacy_found
+    if not legacy_found:
+        return v5_found
+
+    legacy_threshold = 1.0 if legacy is None else legacy.correlation_threshold
+    v5_threshold = v5.correlation_threshold
+
+    def score(item: AnyAcquisition) -> float:
+        if isinstance(item, AcquisitionResult):
+            return item.confidence / legacy_threshold
+        return item.confidence / v5_threshold
+
+    selected: list[AnyAcquisition] = []
+    for candidate in sorted((*legacy_found, *v5_found), key=score, reverse=True):
+        if all(
+            type(other) is type(candidate)
+            or abs(candidate.preamble_start - other.preamble_start) >= V5_PREAMBLE_LENGTH
+            for other in selected
+        ):
+            selected.append(candidate)
+    return tuple(sorted(selected, key=lambda item: item.preamble_start))
 
 
 @lru_cache(maxsize=8)

@@ -7,6 +7,7 @@ import pytest
 
 from ofdm_link.phy import burst as burst_module
 from ofdm_link.phy import streaming as streaming_module
+from ofdm_link.phy import sync as sync_module
 from ofdm_link.phy.facade import (
     CURRENT_PROTOCOL_VERSION,
     MCS,
@@ -82,6 +83,8 @@ def test_streaming_decode_reuses_the_preamble_it_already_acquired(
         raise AssertionError("the burst decoder re-acquired a known preamble")
 
     monkeypatch.setattr(burst_module, "acquire_preamble", rescanned)
+    # The dual-family finite-buffer scan is the other way to re-acquire.
+    monkeypatch.setattr(burst_module, "_acquire_one", rescanned)
     decoder = StreamingBurstDecoder()
     decoded = _feed_in_chunks(decoder, burst.samples, (211, 1009))
 
@@ -162,15 +165,19 @@ def test_a_preamble_candidate_inside_a_signalled_burst_does_not_discard_it(
     frame = _frame(31, b"kept despite a spurious candidate")
     burst = encode_burst(frame)
     spurious_start = burst.sample_count - 31
-    real = streaming_module._acquisition_candidates
+    real = sync_module._acquisition_candidates
 
-    def with_spurious_candidate(buffer: np.ndarray, config: object) -> tuple[object, ...]:
-        found = real(buffer, config)
+    def with_spurious_candidate(
+        buffer: np.ndarray, config: object, **kwargs: object
+    ) -> tuple[object, ...]:
+        found = real(buffer, config, **kwargs)
         if not found or buffer.size <= spurious_start:
             return found
         return (*found, replace(found[0], preamble_start=spurious_start))
 
-    monkeypatch.setattr(streaming_module, "_acquisition_candidates", with_spurious_candidate)
+    # The stream scans through ``sync.acquire_all``, which shares one
+    # correlation between both preamble families.
+    monkeypatch.setattr(sync_module, "_acquisition_candidates", with_spurious_candidate)
     decoder = StreamingBurstDecoder()
 
     assert [item.frame for item in decoder.feed(burst.samples)] == [frame]

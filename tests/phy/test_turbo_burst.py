@@ -29,6 +29,9 @@ from ofdm_link.phy.ofdm import modulate_ofdm
 from ofdm_link.phy.sync import generate_preamble
 from ofdm_link.radio import SimulationChannelConfig, apply_simulation_channel
 
+# v1-v4 carry only these; 64QAM exists for wire v5 alone.
+LEGACY_MCS = (MCS.QPSK, MCS.QAM16)
+
 
 def _frame(mcs: MCS, payload_size: int = 96) -> Frame:
     return Frame(
@@ -40,7 +43,7 @@ def _frame(mcs: MCS, payload_size: int = 96) -> Frame:
     )
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_v2_turbo_complete_burst_round_trip_and_bounded_telemetry(mcs: MCS) -> None:
     frame = _frame(mcs)
 
@@ -105,7 +108,7 @@ def test_one_receiver_accepts_v1_and_v2_without_negotiation() -> None:
     assert v2.diagnostics.wire_version == TURBO_BURST_HEADER_VERSION
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_interleaved_v2_v1_v2_bursts_keep_decode_reports_atomic(mcs: MCS) -> None:
     decoder = make_dual_version_frame_decoder()
     frame = _frame(mcs, payload_size=32)

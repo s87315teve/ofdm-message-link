@@ -27,8 +27,11 @@ from ofdm_link.phy.burst_header import (
 )
 from ofdm_link.phy.codec import MCS
 
+# v1-v4 carry only these; 64QAM exists for wire v5 alone.
+LEGACY_MCS = (MCS.QPSK, MCS.QAM16)
 
-@pytest.mark.parametrize("mcs", list(MCS))
+
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_header_round_trip_uses_fixed_qpsk_signaling(mcs: MCS) -> None:
     header = BurstHeader(CURRENT_BURST_HEADER_VERSION, mcs, 1_234)
 
@@ -143,7 +146,7 @@ def test_header_is_immutable() -> None:
         header.mcs = MCS.QAM16  # type: ignore[misc]
 
 
-@pytest.mark.parametrize("mcs", list(MCS))
+@pytest.mark.parametrize("mcs", LEGACY_MCS)
 def test_v2_header_keeps_wire_size_but_carries_information_length(mcs: MCS) -> None:
     header = TurboBurstHeader(TURBO_BURST_HEADER_VERSION, mcs, 8_056)
 

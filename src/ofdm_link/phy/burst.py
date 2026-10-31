@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -19,6 +20,7 @@ from ._arrays import all_finite
 from .burst_header import (
     BURST_HEADER_SIGNALING_OFDM_SYMBOL_COUNT,
     CURRENT_BURST_HEADER_VERSION,
+    LEGACY_HEADER_MODULATIONS,
     SUPPORTED_WIRE_VERSIONS,
     TURBO_BURST_HEADER_VERSION,
     BurstHeader,
@@ -59,16 +61,26 @@ from .codec import (
     information_frame_bit_count,
     map_symbols,
 )
+from .mcs_table import V5_WIRE_VERSION
 from .ofdm import OfdmNumerology, modulate_ofdm
 from .soft import SoftDemapResult, soft_demap_symbols
 from .sync import (
     AcquisitionResult,
+    SharedCorrelation,
     SyncConfig,
+    _acquisition_candidates,
+    _as_complex_samples,
+    _shared_correlation,
+    _unambiguous_candidate,
     acquire_preamble,
     generate_preamble,
     measure_preamble,
 )
+from .sync_v5 import AnyAcquisition, V5Acquisition, V5RxConfig, v5_candidates
 from .turbo import TurboDecodeReport
+
+if TYPE_CHECKING:
+    from .burst_v5 import AnyDecodedBurst
 
 
 class BurstError(ValueError):
@@ -168,8 +180,15 @@ class BurstConfig:
     # list holds every legal header of that size, so it is kept to what the
     # link sends: the app's default frame payload is 996 bytes.  0 disables it.
     header_list_max_payload_bytes: int = 1024
+    # Wire-v5 receive settings, and the switches that turn either acquisition
+    # family off.  The legacy fields above keep their meaning for v1-v4.
+    v5: V5RxConfig = field(default_factory=V5RxConfig)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.v5, V5RxConfig):
+            raise BurstValidationError("v5 must be a V5RxConfig")
+        if not (self.v5.legacy_acquisition or self.v5.v5_acquisition):
+            raise BurstValidationError("at least one acquisition family must be enabled")
         if (
             type(self.header_list_max_payload_bytes) is not int
             or not 0 <= self.header_list_max_payload_bytes <= 4096
@@ -297,7 +316,7 @@ class SampleClockTrackingDiagnostics:
 class BurstDiagnostics:
     """Synchronization, channel, and per-symbol phase observations."""
 
-    acquisition: AcquisitionResult
+    acquisition: AnyAcquisition
     channel_estimate: ChannelEstimate
     header_common_phase_rad: tuple[float, ...]
     header_phase_slope_rad_per_carrier: tuple[float, ...]
@@ -322,8 +341,8 @@ class BurstDiagnostics:
     decode_outcome: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.acquisition, AcquisitionResult):
-            raise BurstDecodeError("acquisition must be an AcquisitionResult")
+        if not isinstance(self.acquisition, (AcquisitionResult, V5Acquisition)):
+            raise BurstDecodeError("acquisition must be an AcquisitionResult or V5Acquisition")
         if not isinstance(self.channel_estimate, ChannelEstimate):
             raise BurstDecodeError("channel_estimate must be a ChannelEstimate")
         if not isinstance(self.sample_clock_tracking, SampleClockTrackingDiagnostics):
@@ -336,7 +355,14 @@ class BurstDiagnostics:
             )
         if self.decode_outcome not in {"decoded", "payload_decode_failed"}:
             raise BurstDecodeError("decode_outcome must describe the payload result")
-        if self.wire_version not in SUPPORTED_WIRE_VERSIONS:
+        if (self.wire_version == V5_WIRE_VERSION) != isinstance(
+            self.acquisition, V5Acquisition
+        ):
+            raise BurstDecodeError("only a v5 acquisition can carry wire version 5")
+        if (
+            self.wire_version not in SUPPORTED_WIRE_VERSIONS
+            and self.wire_version != V5_WIRE_VERSION
+        ):
             raise BurstDecodeError(
                 "wire_version must identify a defined burst wire version"
             )
@@ -456,6 +482,10 @@ def encode_burst(
         raise BurstValidationError("frame must be a Frame")
     if wire_version not in SUPPORTED_WIRE_VERSIONS:
         raise BurstValidationError(f"unsupported wire_version {wire_version}")
+    if frame.mcs not in LEGACY_HEADER_MODULATIONS:
+        raise BurstValidationError(
+            f"{frame.mcs.name} is carried only by wire v5; use encode_burst_v5"
+        )
     if frame_encoder is not None and not callable(frame_encoder):
         raise BurstValidationError("frame_encoder must be callable or None")
 
@@ -558,8 +588,16 @@ def decode_burst(
     symbol_demapper: SymbolDemapper = demap_symbols,
     soft_symbol_demapper: SoftSymbolDemapper | None = None,
     input_noise_variance: float | None = None,
-) -> DecodedBurst:
-    """Acquire and decode exactly one unambiguous burst in a finite buffer."""
+) -> AnyDecodedBurst:
+    """Acquire and decode exactly one unambiguous burst in a finite buffer.
+
+    Both preamble families are searched (each can be switched off in
+    ``config.v5``).  A legacy burst returns a :class:`DecodedBurst` exactly as
+    before; a v5 burst returns a
+    :class:`~ofdm_link.phy.burst_v5.DecodedPsduBurst`.  When both families
+    find a preamble, the one with the higher confidence relative to its own
+    threshold is decoded.
+    """
 
     settings = _require_config(config)
     values = _validated_decode_input(
@@ -571,11 +609,89 @@ def decode_burst(
         input_noise_variance,
     )
     try:
-        acquisition = acquire_preamble(values, settings.sync)
+        acquisition = _acquire_one(values, settings)
     except (TypeError, ValueError) as error:
         raise BurstDecodeError(f"preamble acquisition failed: {error}") from error
     if acquisition is None:
         raise BurstDecodeError("no unambiguous preamble acquired")
+    return _decode_any_acquired(
+        values,
+        acquisition,
+        settings,
+        frame_decoder=frame_decoder,
+        symbol_demapper=symbol_demapper,
+        soft_symbol_demapper=soft_symbol_demapper,
+        input_noise_variance=input_noise_variance,
+    )
+
+
+def _acquire_one(
+    values: NDArray[np.complex64],
+    settings: BurstConfig,
+) -> AnyAcquisition | None:
+    """The finite-buffer acquisition rule, applied per family then across them.
+
+    The legacy family keeps :func:`~ofdm_link.phy.sync.acquire_preamble`'s
+    ambiguity rule unchanged; the v5 family applies the same rule to its own
+    separated candidates.  The one lag-32 correlation is shared by both.
+    """
+
+    rx = settings.v5
+    if not rx.v5_acquisition:
+        # Legacy only: exactly the scan this function replaced.
+        return acquire_preamble(values, settings.sync)
+    checked = _as_complex_samples(values, "samples")
+    shared: SharedCorrelation | None = None
+    if checked.size > settings.sync.half_length and np.any(checked):
+        shared = _shared_correlation(checked, settings.sync.half_length)
+    legacy: AcquisitionResult | None = None
+    if rx.legacy_acquisition:
+        legacy = _unambiguous_candidate(
+            _acquisition_candidates(checked, settings.sync, shared=shared),
+            settings.sync,
+        )
+    v5: V5Acquisition | None = None
+    if rx.v5_acquisition and shared is not None and shared.lag == 32:
+        found = v5_candidates(checked, shared, rx.acquisition)
+        if found:
+            best = max(found, key=lambda item: item.confidence)
+            competing = any(
+                item is not best
+                and item.confidence * settings.sync.ambiguity_ratio >= best.confidence
+                for item in found
+            )
+            v5 = None if competing else best
+    if legacy is None or v5 is None:
+        return legacy if v5 is None else v5
+    if (
+        v5.confidence / rx.acquisition.correlation_threshold
+        > legacy.confidence / settings.sync.correlation_threshold
+    ):
+        return v5
+    return legacy
+
+
+def _decode_any_acquired(
+    values: NDArray[np.complex64],
+    acquisition: AnyAcquisition,
+    settings: BurstConfig,
+    *,
+    frame_decoder: FrameDecoder,
+    symbol_demapper: SymbolDemapper,
+    soft_symbol_demapper: SoftSymbolDemapper | None,
+    input_noise_variance: float | None,
+) -> AnyDecodedBurst:
+    """Dispatch on the acquisition's family; the legacy path is unchanged."""
+
+    if isinstance(acquisition, V5Acquisition):
+        from .burst_v5 import _decode_v5_acquired
+
+        return _decode_v5_acquired(
+            values,
+            acquisition,
+            settings,
+            input_noise_variance=input_noise_variance,
+        )
     return _decode_acquired_burst(
         values,
         acquisition,
@@ -590,13 +706,13 @@ def decode_burst(
 def _decode_burst_with_acquisition(
     samples: ArrayLike,
     config: BurstConfig | None,
-    acquisition: AcquisitionResult,
+    acquisition: AnyAcquisition,
     *,
     frame_decoder: FrameDecoder,
     symbol_demapper: SymbolDemapper,
     soft_symbol_demapper: SoftSymbolDemapper | None,
     input_noise_variance: float | None,
-) -> DecodedBurst:
+) -> AnyDecodedBurst:
     """Decode one burst whose preamble the caller has already acquired.
 
     The continuous decoder has to scan for preambles before it can bound a
@@ -604,11 +720,12 @@ def _decode_burst_with_acquisition(
     saves a second full-buffer acquisition scan for every burst, which is the
     single largest non-FEC cost in the receive path.  The caller owns the
     separation rule it applied; this entry point applies none of its own.
+    A :class:`~ofdm_link.phy.sync_v5.V5Acquisition` selects the v5 path.
     """
 
     settings = _require_config(config)
-    if not isinstance(acquisition, AcquisitionResult):
-        raise BurstValidationError("acquisition must be an AcquisitionResult")
+    if not isinstance(acquisition, (AcquisitionResult, V5Acquisition)):
+        raise BurstValidationError("acquisition must be an AcquisitionResult or V5Acquisition")
     values = _validated_decode_input(
         samples,
         settings,
@@ -617,7 +734,7 @@ def _decode_burst_with_acquisition(
         soft_symbol_demapper,
         input_noise_variance,
     )
-    return _decode_acquired_burst(
+    return _decode_any_acquired(
         values,
         acquisition,
         settings,
@@ -1135,7 +1252,9 @@ def _header_candidates(
         8,
     )
     headers: list[BurstHeaderDescriptor] = []
-    for mcs in MCS:
+    # Only the modulations a v1-v4 header can carry: a later constellation in
+    # the enum must not widen the legacy list or its false-accept rate.
+    for mcs in LEGACY_HEADER_MODULATIONS:
         for version in SUPPORTED_WIRE_VERSIONS:
             for count in information_counts:
                 if version == TURBO_BURST_HEADER_VERSION:

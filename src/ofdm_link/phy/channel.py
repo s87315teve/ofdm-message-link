@@ -338,6 +338,7 @@ def refine_channel_estimate(
     *,
     preamble_noise_variance: float | None = None,
     preamble_degrees_of_freedom: int | None = None,
+    averaged_symbols: int = 1,
 ) -> RefinedChannel:
     """Fit a delay-limited channel to one training symbol and estimate noise.
 
@@ -355,6 +356,12 @@ def refine_channel_estimate(
     preamble estimate by ``SMOOTHING_RESIDUAL_LIMIT``, the channel does not fit
     the delay window -- a timing error, or a delay spread longer than the
     prefix -- so the raw estimate is kept and only the preamble variance used.
+
+    ``averaged_symbols`` is how many training symbols ``least_squares``
+    averages (2 for the v5 LTF pair).  Its noise per carrier is then the
+    per-sample variance divided by that count, so the residual is scaled back
+    up before it is compared or pooled; the returned ``noise_variance`` is
+    always per sample.  With the default 1 nothing changes.
     """
 
     _require_numerology(numerology)
@@ -376,11 +383,16 @@ def refine_channel_estimate(
                 "preamble_degrees_of_freedom must be a positive integer"
             )
 
+    if type(averaged_symbols) is not int or averaged_symbols < 1:
+        raise ChannelEstimationError("averaged_symbols must be a positive integer")
+
     projection, residual_dof = _smoothing_projection(numerology)
     measured = least_squares.coefficients.astype(np.complex128)
     smoothed = projection @ measured
     residual = measured - smoothed
     residual_variance = float(np.vdot(residual, residual).real) / residual_dof
+    if averaged_symbols != 1:
+        residual_variance *= averaged_symbols
 
     if preamble_noise_variance is None:
         if not residual_variance > 0.0:
@@ -437,6 +449,7 @@ def equalize_with_pilots(
     correct_pilot_magnitude: bool = False,
     minimum_magnitude_fit_pilot: float = 0.25,
     maximum_magnitude_correction_gain: float = 2.0,
+    common_phase_only: bool = False,
 ) -> EqualizedBatch:
     """Equalize an aligned batch and remove pilot-derived phase ramps.
 
@@ -447,6 +460,14 @@ def equalize_with_pilots(
     When ``correct_pilot_magnitude`` is true, a quadratic log-magnitude model
     fitted to the four pilots also compensates bounded, time-varying passband
     droop.  Header callers keep that optional correction disabled.
+
+    ``common_phase_only`` fits only the common phase, as the channel-power
+    weighted mean of the pilot rotations, and reports a zero slope.  It is
+    for symbols right after a fresh channel estimate (the v5 SIG): there the
+    timing is exact, so the slope term only adds noise, and at the SIG's
+    operating SNR -- around 3 dB per carrier -- unwrapping and fitting a line
+    through four noisy pilot phases cost about 3 dB of SIG robustness in
+    simulation.  The weighting keeps a faded pilot from steering the phase.
     """
 
     _require_numerology(numerology)
@@ -476,6 +497,8 @@ def equalize_with_pilots(
         raise ChannelEstimationError("correct_pilot_magnitude must be a bool")
     if type(first_symbol_index) is not int or first_symbol_index < 0:
         raise ChannelEstimationError("first_symbol_index must be a non-negative integer")
+    if type(common_phase_only) is not bool:
+        raise ChannelEstimationError("common_phase_only must be a bool")
 
     received = _as_complex_array(received_samples, "received_samples")
     block_length = numerology.fft_size + numerology.cp_length
@@ -507,14 +530,19 @@ def equalize_with_pilots(
     # Unwrap in increasing carrier order even if a custom numerology listed its
     # pilots in another order.  All operations remain batch-vectorized.
     pilot_order = indices.pilot_order
-    phase = np.unwrap(np.angle(residual[:, pilot_order]), axis=1)
-    phase_mean = np.mean(phase, axis=1)
-    slope = np.sum(
-        (phase - phase_mean[:, np.newaxis]) * indices.pilot_x_centered,
-        axis=1,
-    ) / indices.pilot_x_centered_square_sum
-    intercept = phase_mean - slope * indices.pilot_x_mean
-    common_phase = np.angle(np.exp(1j * intercept))
+    if common_phase_only:
+        pilot_power = np.abs(channel_estimate.coefficients[indices.pilot_indices]) ** 2
+        common_phase = np.angle(residual @ pilot_power)
+        slope = np.zeros_like(common_phase)
+    else:
+        phase = np.unwrap(np.angle(residual[:, pilot_order]), axis=1)
+        phase_mean = np.mean(phase, axis=1)
+        slope = np.sum(
+            (phase - phase_mean[:, np.newaxis]) * indices.pilot_x_centered,
+            axis=1,
+        ) / indices.pilot_x_centered_square_sum
+        intercept = phase_mean - slope * indices.pilot_x_mean
+        common_phase = np.angle(np.exp(1j * intercept))
 
     phase_model = (
         common_phase[:, np.newaxis]
