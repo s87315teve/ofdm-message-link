@@ -473,14 +473,16 @@ class ProcessReceiveWorker:
 # --------------------------------------------------------------------------
 
 
-def _tx_main(profile, mcs_entry, ingress_port, ui_fps, events, control, replies) -> None:
+def _tx_main(
+    profile, mcs_entry, ingress_port, ui_fps, aggregation, events, control, replies
+) -> None:
     _bound_numeric_threads()
     from .link import MessageTransmitter
     from .tx_app import IngressListener, TransmitWorker
 
     sink = _EventSink(events, samples_per_second=ui_fps)
     transmitter = MessageTransmitter(profile, mcs_entry=mcs_entry)
-    worker = TransmitWorker(transmitter, sink, sink)
+    worker = TransmitWorker(transmitter, sink, sink, aggregation=aggregation)
     ingress = IngressListener("127.0.0.1", ingress_port, worker.submit)
 
     def handle(command: tuple) -> None:
@@ -536,6 +538,7 @@ class ProcessTransmitWorker:
         *,
         ingress_port: int,
         ui_fps: int = 15,
+        aggregation=None,
     ) -> None:
         self._bridge = bridge
         self._plot_buffers = plot_buffers
@@ -546,7 +549,7 @@ class ProcessTransmitWorker:
         self._sink: _TransportView | None = None
         self._engine = _EngineProcess(
             _tx_main,
-            (profile, mcs_entry, ingress_port, ui_fps),
+            (profile, mcs_entry, ingress_port, ui_fps, aggregation),
             self._dispatch,
         )
 

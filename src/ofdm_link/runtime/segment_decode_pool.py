@@ -28,7 +28,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from ofdm_link.config import LinkConfig
-from ofdm_link.phy.burst import BurstDecodeError, DecodedBurst
+from ofdm_link.phy.burst import BurstDecodeError
+from ofdm_link.phy.burst_v5 import AnyDecodedBurst
 from ofdm_link.phy.streaming import BurstSegment, PayloadFailure, decode_burst_segment
 
 # Never fork this process. By the time a pool is built the parent has loaded
@@ -59,14 +60,19 @@ def _safe_context() -> multiprocessing.context.BaseContext:
 _MAX_WORKERS = 64
 _READY_TIMEOUT_S = 120.0
 
-Annotate = Callable[[DecodedBurst], Any]
+Annotate = Callable[[AnyDecodedBurst], Any]
 
 
 @dataclass(frozen=True, slots=True)
 class SegmentDecodeResult:
-    """One segment's outcome: a burst and its annotation, or a failure."""
+    """One segment's outcome: a burst and its annotation, or a failure.
 
-    burst: DecodedBurst | None
+    A v5 PSDU whose FCS failed is still a burst here (``failure`` None),
+    because its CRC-valid subframes are deliverable; the caller counts it with
+    ``PayloadFailure.from_burst``.
+    """
+
+    burst: AnyDecodedBurst | None
     failure: PayloadFailure | None
     annotation: Any = None
 

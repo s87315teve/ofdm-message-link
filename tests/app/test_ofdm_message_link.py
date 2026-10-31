@@ -191,23 +191,77 @@ def test_typed_message_survives_the_whole_waveform_path(profile):
 
 
 def test_transmitter_can_switch_all_mcs_entries_without_reconfiguring_receiver(profile):
-    from ofdm_link.phy.mcs_table import MCS_TABLE
+    from ofdm_link.phy.mcs_table import v5_entries
 
     transmitter = MessageTransmitter(profile)
     receiver = MessageReceiver(profile)
     payload = b"x" * profile.max_message_payload_bytes
 
-    for entry in MCS_TABLE:
+    for entry in v5_entries(include_hidden=True):
         transmitter.select_mcs_entry(entry)
         bursts = transmitter.encode_message(payload)
         delivered = receiver.feed(concatenate_bursts(bursts))
         observations = receiver.drain_observations()
 
         assert [item.message.payload for item in delivered] == [payload]
+        assert {item.mcs_index for item in delivered} == {entry.index}
         assert {item.mcs_index for item in bursts} == {entry.index}
-        assert {item.wire_version for item in bursts} == {entry.wire_version}
+        assert {item.wire_version for item in bursts} == {5}
         assert {item.modulation for item in observations} == {entry.modulation}
-        assert {item.wire_version for item in observations} == {entry.wire_version}
+        assert {item.mcs_index for item in observations} == {entry.index}
+        assert {item.wire_version for item in observations} == {5}
+
+
+def test_transmitter_sends_only_wire_v5(profile):
+    from ofdm_link.phy.mcs_table import MCS_TABLE
+
+    transmitter = MessageTransmitter(profile)
+    assert transmitter.active_mcs_entry.index == 8, "QPSK profile -> QPSK 1/3"
+    for entry in MCS_TABLE:
+        with pytest.raises(ValueError, match="only wire v5"):
+            transmitter.select_mcs_entry(entry)
+        with pytest.raises(ValueError, match="only wire v5"):
+            MessageTransmitter(profile, mcs_entry=entry)
+    assert transmitter.active_mcs_entry.index == 8
+
+
+def _legacy_burst(profile, entry, piece, sequence):
+    """A wire v1-v4 burst carrying one datagram, as an older transmitter sends it."""
+
+    from ofdm_link.phy import CURRENT_PROTOCOL_VERSION, Frame, FrameKind, encode_burst
+    from ofdm_link.runtime.factory import build_burst_config, select_frame_decoder_for_entry
+
+    selection = select_frame_decoder_for_entry(profile.config, entry)
+    encoded = encode_burst(
+        Frame(CURRENT_PROTOCOL_VERSION, FrameKind.DATA, entry.modulation, sequence, piece.encode()),
+        build_burst_config(profile.config),
+        symbol_mapper=selection.symbol_mapper,
+        wire_version=selection.wire_version,
+        frame_encoder=selection.frame_encoder,
+    )
+    guard = np.zeros(256, dtype=np.complex64)
+    return np.concatenate((guard, encoded.samples, guard)).astype(np.complex64)
+
+
+def test_receiver_still_delivers_every_legacy_format(profile):
+    from ofdm_link.phy.mcs_table import MCS_TABLE
+
+    transmitter = MessageTransmitter(profile)
+    receiver = MessageReceiver(profile)
+    for sequence, entry in enumerate(MCS_TABLE):
+        message = f"legacy MCS {entry.index}".encode()
+        (piece,) = transmitter.fragment_message(message)
+        delivered = receiver.feed(_legacy_burst(profile, entry, piece, sequence))
+        observations = receiver.drain_observations()
+
+        assert [item.message.payload for item in delivered] == [message]
+        assert delivered[0].mcs_index == entry.index
+        assert delivered[0].wire_version == entry.wire_version
+        assert [item.mcs_index for item in observations] == [entry.index]
+    stats = receiver.stats
+    assert stats.bursts_decoded == len(MCS_TABLE)
+    assert stats.missing_bursts == 0
+    assert stats.psdus_received == 0 and stats.subframes_ok == 0
 
 
 def test_message_larger_than_one_frame_is_fragmented_and_rebuilt(profile):
@@ -393,15 +447,79 @@ def test_ui_fps_accepts_the_documented_range():
 
 
 def test_mcs_index_takes_priority_over_the_legacy_modulation_option():
-    resolved = options.resolve(_tx_args(["--mcs", "qpsk", "--mcs-index", "7"]))
-    assert resolved.mcs_entry.index == 7
+    resolved = options.resolve(_tx_args(["--mcs", "qpsk", "--mcs-index", "13"]))
+    assert resolved.mcs_entry.index == 13
     assert resolved.profile.mcs.name == "QAM16"
 
 
-def test_legacy_mcs_option_keeps_the_configured_code_rate():
+def test_modulation_shorthand_picks_the_most_robust_v5_entry():
+    assert options.resolve(_tx_args([])).mcs_entry.index == 8
+    assert options.resolve(_tx_args(["--mcs", "qpsk"])).mcs_entry.index == 8
     resolved = options.resolve(_tx_args(["--mcs", "qam16"]))
-    assert resolved.mcs_entry.index == 4
-    assert resolved.mcs_entry.fec_scheme == "turbo"
+    assert resolved.mcs_entry.index == 12
+    assert resolved.mcs_entry.fec_scheme == "turbo_rm"
+
+
+@pytest.mark.parametrize("index", ["0", "4", "7", "18"])
+def test_transmitter_refuses_legacy_and_unknown_mcs_indices(index):
+    with pytest.raises(SystemExit):
+        _tx_args(["--mcs-index", index])
+
+
+def test_transmitter_accepts_hidden_v5_entries_for_experiments():
+    for index in (11, 15, 16, 17):
+        assert options.resolve(_tx_args(["--mcs-index", str(index)])).mcs_entry.index == index
+
+
+def test_receiver_display_hint_accepts_legacy_and_v5_indices():
+    from ofdm_message_link.rx_app import build_parser
+
+    for index in ("0", "7", "8", "17"):
+        args = build_parser().parse_args(["--mcs-index", index])
+        assert options.resolve(args).mcs_entry.index == int(index)
+
+
+def test_aggregation_options_default_to_opportunistic_without_waiting():
+    limits = options.resolve(_tx_args([])).aggregation
+    assert limits.enabled is True
+    assert limits.max_wait_s == 0.0
+    assert (limits.max_subframes, limits.max_burst_airtime_s) == (16, 0.010)
+
+
+def test_aggregation_options_reach_the_resolved_limits():
+    limits = options.resolve(
+        _tx_args(
+            [
+                "--aggregation", "off",
+                "--aggregation-max-subframes", "4",
+                "--aggregation-max-wait-ms", "2.5",
+                "--max-burst-airtime-ms", "5",
+            ]
+        )
+    ).aggregation
+    assert limits.enabled is False
+    assert limits.max_subframes == 4
+    assert limits.max_wait_s == pytest.approx(0.0025)
+    assert limits.max_burst_airtime_s == pytest.approx(0.005)
+    # The receiver has no aggregation options and resolves the defaults.
+    from ofdm_message_link.rx_app import build_parser
+
+    assert options.resolve(build_parser().parse_args([])).aggregation.enabled is True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--aggregation-max-subframes", "0"],
+        ["--aggregation-max-subframes", "65"],
+        ["--aggregation-max-wait-ms", "-1"],
+        ["--max-burst-airtime-ms", "0"],
+        ["--aggregation", "maybe"],
+    ],
+)
+def test_aggregation_options_reject_values_outside_their_range(argv):
+    with pytest.raises(SystemExit):
+        _tx_args(argv)
 
 
 def test_receiver_help_marks_startup_mcs_as_display_only():
@@ -697,7 +815,7 @@ def offscreen_qt(monkeypatch):
 
 @pytest.mark.gui
 def test_transmit_window_builds_and_closes(offscreen_qt):
-    from ofdm_link.phy.mcs_table import MCS_TABLE, describe_mcs_entry
+    from ofdm_link.phy.mcs_table import v5_entries
     from ofdm_message_link.tx_app import TransmitWindow, _airtime_ms, build_parser
 
     args = build_parser().parse_args(["--udp-port", "53301", "--ingress-port", "53302"])
@@ -710,12 +828,17 @@ def test_transmit_window_builds_and_closes(offscreen_qt):
     try:
         window.show()
         offscreen_qt.processEvents()
-        assert window._mcs_combo.count() == len(MCS_TABLE) == 8
-        assert [window._mcs_combo.itemText(i) for i in range(8)] == [
-            describe_mcs_entry(entry) for entry in MCS_TABLE
-        ]
-        expected_ms = [4.16, 4.11, 2.77, 1.42, 2.13, 2.10, 1.42, 0.75]
-        assert [_airtime_ms(resolved, entry) for entry in MCS_TABLE] == pytest.approx(
+        visible = v5_entries()
+        assert [entry.index for entry in visible] == [8, 9, 10, 12, 13, 14]
+        assert window._mcs_combo.count() == len(visible)
+        labels = [window._mcs_combo.itemText(i) for i in range(len(visible))]
+        assert labels[0].startswith("MCS 8 \u2014 QPSK 1/3, 2.0 Mbit/s")
+        assert "QPSK 2/3" in labels[2] and "16QAM 3/4, 9.0 Mbit/s" in labels[5]
+        assert window._mcs_combo.currentData() == 8
+        # One full 996-byte frame (a 1015-byte PSDU): v5 preamble + SIG +
+        # payload + 16/64 guards at 5 MS/s.
+        expected_ms = [4.19, 2.85, 2.16, 1.49, 1.15, 1.04]
+        assert [_airtime_ms(resolved, entry) for entry in visible] == pytest.approx(
             expected_ms,
             abs=0.01,
         )
@@ -728,10 +851,9 @@ def test_transmit_window_builds_and_closes(offscreen_qt):
         assert window._light_card.light.state in {"OFF", "OK"}  # never the RX-only WAITING
         # The MCS selector sits in the top card row, outside every tab.
         assert not window._tabs.isAncestorOf(window._mcs_combo)
-        window._mcs_combo.setCurrentIndex(window._mcs_combo.findData(7))
-        assert window._worker.active_mcs_entry.index == 7
-        assert window._mcs_warning.isVisible()
-        assert "no error correction" in window._mcs_warning.text()
+        window._mcs_combo.setCurrentIndex(window._mcs_combo.findData(13))
+        assert window._worker.active_mcs_entry.index == 13
+        assert not window._mcs_warning.isVisible()
         window._send_typed()  # empty input must be a no-op, not a crash
         window._input.setText("hello")
         window._send_typed()
@@ -768,7 +890,7 @@ def test_receive_window_builds_and_closes(offscreen_qt, tmp_path):
         assert "last 10 s" in window._decode_text.toPlainText()
         assert "burst loss ratio" in window._decode_text.toPlainText()
         transmitter = MessageTransmitter(resolved.profile)
-        transmitter.select_mcs_entry(mcs_entry(7))
+        transmitter.select_mcs_entry(mcs_entry(13))
         receiver = MessageReceiver(resolved.profile)
         delivered = receiver.feed(
             concatenate_bursts(transmitter.encode_message(b"actual MCS metadata"))
@@ -777,7 +899,7 @@ def test_receive_window_builds_and_closes(offscreen_qt, tmp_path):
         window._on_message(delivered[0])
         window._record_burst(observations[0])
         window._refresh_stats()
-        assert "MCS 7 wire v4" in window._log.toPlainText()
+        assert "MCS 13 wire v5" in window._log.toPlainText()
         log = tmp_path / "stats.jsonl"
         window._stats_log = log.open("a", encoding="utf-8")
         window._refresh_stats()
@@ -785,7 +907,11 @@ def test_receive_window_builds_and_closes(offscreen_qt, tmp_path):
         record = json.loads(log.read_text().splitlines()[-1])
         assert record["receiver"]["bursts_decoded"] == 0
         assert "detected_burst_candidates" in record["decoder"]
-        assert "MCS 7  bursts" in window._decode_text.toPlainText()
+        assert "MCS 13 bursts" in window._decode_text.toPlainText()
+        assert "subframes OK" in window._decode_text.toPlainText()
+        assert {"subframes_ok", "subframes_bad", "bad_delimiters", "delimiter_resyncs"} <= set(
+            record["receiver"]
+        )
         assert record["link_state"] in {"WAITING", "GOOD"}
         assert {"loss_10s", "snr_2s", "link_reason"} <= set(record)
         offscreen_qt.processEvents()
@@ -899,7 +1025,7 @@ def test_log_tabs_keep_only_the_newest_log_lines(offscreen_qt):
         for n in range(300):
             receiver._on_message(delivered)
             transmitter._on_sent(
-                SentRecord("udp", f"message {n}", 752, 1, 4096, n, 4, "MCS 4")
+                SentRecord("udp", f"message {n}", 752, 1, 1, 4096, n, 8, "MCS 8")
             )
         offscreen_qt.processEvents()
         for window in (receiver, transmitter):
@@ -1894,9 +2020,16 @@ def test_a_full_transport_paces_the_sender_instead_of_dropping_bursts(offscreen_
         def stop(self):
             pass
 
+    from ofdm_message_link.aggregation import AggregationLimits
+
     args = _tx_args([])
     resolved = options.resolve(args)
-    worker = TransmitWorker(MessageTransmitter(resolved.profile), _Bridge())
+    # One datagram per burst, so every message needs its own turn at the sink.
+    worker = TransmitWorker(
+        MessageTransmitter(resolved.profile),
+        _Bridge(),
+        aggregation=AggregationLimits(enabled=False),
+    )
     sink = _SlowSink()
     worker.start()
     worker.attach(sink)
@@ -2375,19 +2508,21 @@ def test_process_engines_carry_ingress_to_egress_and_leave_no_process_behind():
             len(rx_bridge.message.values) < 2
             or receiver.egress_datagrams < 2
             or transmitter.ingress_datagrams < 1
-            or len(tx_bridge.sent.values) < 2
+            or sum(record.message_count for record in tx_bridge.sent.values) < 2
         ):
             time.sleep(0.05)
         assert receiver.stats.messages_delivered == 2
         assert receiver.egress_datagrams == 2
         assert transmitter.ingress_datagrams == 1
-        assert len(tx_bridge.sent.values) == 2
+        # Each record is one burst; the two messages may share one.
+        assert sum(record.message_count for record in tx_bridge.sent.values) == 2
         assert all(item.payload_symbols.size == 0 for item in rx_bridge.message.values)
         assert "chunks_dropped_overflow" in receiver.source.snapshot()
         # Every acquired burst's preamble SNR crosses the process boundary;
-        # with no noise added it sits at the estimator's 60 dB ceiling.
+        # with no noise added it sits at the estimator's 60 dB ceiling.  The
+        # two messages may have shared one aggregated burst.
         snrs = [value for batch in rx_bridge.link_snr.values for value in batch]
-        assert len(snrs) >= 2 and all(50.0 < value < 61.0 for value in snrs)
+        assert len(snrs) >= 1 and all(50.0 < value < 61.0 for value in snrs)
         assert not rx_bridge.failed.values and not tx_bridge.failed.values
     finally:
         transmitter.stop()
@@ -2397,16 +2532,28 @@ def test_process_engines_carry_ingress_to_egress_and_leave_no_process_behind():
 
 
 def _mixed_mcs_stream(profile, *, bursts, seed):
+    """v5 bursts at two MCS with a legacy wire-v2 burst every third one.
+
+    The legacy bursts take their sequence numbers from the same counter, as
+    if one transmitter had been switched between formats, so the stream has
+    no sequence gaps.
+    """
+
     from ofdm_link.phy.mcs_table import mcs_entry
 
     transmitter = MessageTransmitter(profile)
     rng = np.random.default_rng(seed)
     blocks, messages = [], []
     for index in range(bursts):
-        transmitter.select_mcs_entry(mcs_entry(4 if index % 3 else 0))
         message = rng.bytes(int(rng.integers(20, 900)))
         messages.append(message)
         blocks.append(np.zeros(int(rng.integers(0, 3000)), dtype=np.complex64))
+        if index % 3 == 0:
+            (piece,) = transmitter.fragment_message(message)
+            sequence = next(transmitter._sequence) % 65536
+            blocks.append(_legacy_burst(profile, mcs_entry(0), piece, sequence))
+            continue
+        transmitter.select_mcs_entry(mcs_entry(12 if index % 3 == 1 else 8))
         blocks.append(concatenate_bursts(transmitter.encode_message(message)))
     blocks.append(np.zeros(9000, dtype=np.complex64))
     return _awgn(np.concatenate(blocks).astype(np.complex64), 18.0, seed=seed), messages

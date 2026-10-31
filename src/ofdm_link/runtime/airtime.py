@@ -1,4 +1,4 @@
-"""Exact finite-burst airtime accounting and TDD slot admission."""
+"""Exact finite-burst airtime accounting (legacy and wire v5) and TDD slot admission."""
 
 from __future__ import annotations
 
@@ -13,7 +13,9 @@ from ofdm_link.phy import (
     Frame,
 )
 from ofdm_link.phy.burst_header import SUPPORTED_WIRE_VERSIONS
+from ofdm_link.phy.burst_v5 import v5_burst_sample_count
 from ofdm_link.phy.codec import coded_frame_bit_count_by_wire_version
+from ofdm_link.phy.mcs_table import McsTableEntry
 
 _NANOSECONDS_PER_SECOND = 1_000_000_000
 
@@ -66,6 +68,33 @@ def burst_sample_count(
     if total > settings.max_burst_samples:
         raise AirtimeError("encoded burst exceeds max_burst_samples")
     return total
+
+
+def v5_burst_samples_with_guards(
+    entry: McsTableEntry,
+    body_bytes: int,
+    guard_pre: int,
+    guard_post: int,
+) -> int:
+    """Samples one v5 burst occupies on the air, guards included.
+
+    A v5 burst is ``560 + 80 N_sym`` samples (STF 160, LTF 160, SIG 3x80,
+    then the rate-matched payload) where ``N_sym`` follows from the PSDU
+    length, so it is computed exactly rather than estimated.  The guards are
+    added here because they cost airtime like any other sample: with 16 + 64
+    guards a one-datagram MCS 8 burst is 19 600 samples where the legacy
+    preamble and 256 + 256 guards made a comparable one 20 032.  Callers that
+    budget airtime (aggregation caps, the transmit window's estimate) must
+    count them, or a 10 ms cap would admit bursts longer than 10 ms.
+
+    ``body_bytes`` is the A-MPDU body without the 4-byte PSDU FCS.
+    """
+
+    if type(guard_pre) is not int or guard_pre < 0:
+        raise AirtimeError("guard_pre must be a non-negative integer")
+    if type(guard_post) is not int or guard_post < 0:
+        raise AirtimeError("guard_post must be a non-negative integer")
+    return guard_pre + v5_burst_sample_count(entry, body_bytes) + guard_post
 
 
 class AirtimeDecisionReason(Enum):
