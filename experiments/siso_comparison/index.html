@@ -1,0 +1,831 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body>
+<title>SISO 與 ofdm-message-link 架構對照</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a lab-notebook spec sheet. Single 1040px column; side-by-side "SISO | 你的" panes that stack on phones. */
+:root {
+  --bg: #f4f6f5;
+  --paper: #fcfcfb;
+  --ink: #15201d;
+  --ink-2: #4b5753;
+  --muted: #74807b;
+  --line: #d5dcd9;
+  --line-2: #e7ecea;
+  --accent: #0f6b62;
+  --accent-soft: #dcefeb;
+  --warn-ink: #9a4a12;
+  --warn-soft: #fbeadd;
+  --mine: #2a78d6;
+  --siso: #eb6834;
+  --fix1: #1baf7a;
+  --fix2: #eda100;
+  --ovh-1: #c9d1ce;
+  --ovh-2: #aab5b1;
+  --ovh-3: #8a9792;
+  --ovh-4: #e3e8e6;
+  --grid: #e6ebe9;
+  --font-display: "Noto Serif TC", "Songti TC", serif;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101514; --paper: #171d1b; --ink: #e8eeeb; --ink-2: #b7c2be; --muted: #8b9893;
+    --line: #2d3734; --line-2: #222b28; --accent: #5fc7b9; --accent-soft: #173430;
+    --warn-ink: #f2a571; --warn-soft: #3a2416;
+    --mine: #3987e5; --siso: #d95926; --fix1: #199e70; --fix2: #c98500;
+    --ovh-1: #3b4744; --ovh-2: #4f5d59; --ovh-3: #66756f; --ovh-4: #2a3330; --grid: #242d2a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101514; --paper: #171d1b; --ink: #e8eeeb; --ink-2: #b7c2be; --muted: #8b9893;
+  --line: #2d3734; --line-2: #222b28; --accent: #5fc7b9; --accent-soft: #173430;
+  --warn-ink: #f2a571; --warn-soft: #3a2416;
+  --mine: #3987e5; --siso: #d95926; --fix1: #199e70; --fix2: #c98500;
+  --ovh-1: #3b4744; --ovh-2: #4f5d59; --ovh-3: #66756f; --ovh-4: #2a3330; --grid: #242d2a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.7; margin: 0;
+}
+.wrap {
+  max-width: 1040px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+  display: grid; gap: 56px;
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.3; margin: 0; }
+h1 { font-size: clamp(28px, 4.4vw, 42px); font-weight: 800; letter-spacing: 0.01em; }
+h2 { font-size: clamp(22px, 3vw, 28px); font-weight: 800; }
+h3 { font-size: 18px; font-weight: 600; }
+p { margin: 0; }
+.prose { max-width: 68ch; display: grid; gap: 14px; color: var(--ink-2); }
+.prose strong { color: var(--ink); }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--line-2); padding: 1px 5px; border-radius: 4px; color: var(--ink); overflow-wrap: anywhere; }
+a { color: var(--accent); }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--accent); font-weight: 500;
+}
+section { display: grid; gap: 22px; min-width: 0; }
+.sec-head { display: grid; gap: 8px; }
+
+/* hero */
+.hero { display: grid; gap: 20px; }
+.hero .lede { font-size: 18px; max-width: 64ch; color: var(--ink-2); }
+.verdict {
+  border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; max-width: 72ch;
+  font-size: 17px; color: var(--ink);
+}
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.fact { background: var(--paper); padding: 16px 18px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.fact .num { font-family: var(--font-mono); font-size: 26px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.fact .num small { font-size: 14px; color: var(--muted); }
+.fact .cap { font-size: 14px; color: var(--ink-2); line-height: 1.55; }
+
+/* spec table */
+.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 640px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+thead th { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--paper); }
+tbody th { font-weight: 500; color: var(--ink); white-space: nowrap; }
+td { color: var(--ink-2); }
+td.num, th.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+tr:last-child td, tr:last-child th { border-bottom: 0; }
+.tag-s { color: var(--siso); font-weight: 700; }
+.tag-m { color: var(--mine); font-weight: 700; }
+.colhead { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
+
+/* diagrams */
+.figure { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 12px; min-width: 0; }
+.figure .cap { font-size: 14px; color: var(--ink-2); max-width: 75ch; }
+.figure .ttl { font-weight: 700; font-size: 15px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.figure .ttl .mono { color: var(--muted); font-weight: 400; }
+.diagram-scroll { overflow-x: auto; }
+.diagram-scroll svg { display: block; min-width: 640px; width: 100%; height: auto; }
+svg text { font-family: var(--font-mono); fill: var(--ink-2); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+
+/* chain */
+.chain { display: grid; gap: 8px; }
+.chain-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip {
+  font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--paper); color: var(--ink); white-space: nowrap;
+}
+.chip.k { border-color: var(--accent); background: var(--accent-soft); }
+.chip.w { border-color: var(--warn-ink); background: var(--warn-soft); }
+.arrow { color: var(--muted); font-size: 12px; }
+.lane-label { font-family: var(--font-mono); font-size: 12px; color: var(--muted); letter-spacing: 0.06em; }
+.keys { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+.keys span { display: inline-flex; gap: 6px; align-items: center; }
+
+/* technique list */
+.techs { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.tech { display: grid; grid-template-columns: minmax(0, 210px) minmax(0, 1fr); gap: 8px 28px; padding: 20px 0; border-bottom: 1px solid var(--line); }
+.tech h3 { font-size: 17px; }
+.tech .what { display: grid; gap: 10px; color: var(--ink-2); max-width: 70ch; min-width: 0; }
+.tech .src { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.tech .vs { font-size: 14.5px; background: var(--line-2); border-radius: 8px; padding: 10px 14px; }
+.tech .vs b { color: var(--mine); }
+.pill { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.pill.gain { border-color: var(--accent); color: var(--accent); }
+.pill.cost { border-color: var(--warn-ink); color: var(--warn-ink); }
+@media (max-width: 640px) { .tech { grid-template-columns: 1fr; } }
+
+/* charts */
+.chart-card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 18px 18px 14px; display: grid; gap: 12px; min-width: 0; }
+.chart-top { display: flex; flex-wrap: wrap; gap: 10px 18px; justify-content: space-between; align-items: flex-start; }
+.chart-top h3 { font-family: var(--font-body); font-weight: 700; font-size: 16px; }
+.chart-top .sub { font-size: 13.5px; color: var(--ink-2); max-width: 62ch; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex: none; }
+.seg button {
+  font: inherit; font-size: 13px; padding: 5px 12px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+.legend i.dash { border-top-style: dashed; }
+.legend i.box { width: 11px; height: 11px; border: 0; border-radius: 2px; }
+.plot { position: relative; }
+.plot svg { display: block; width: 100%; height: auto; overflow: visible; }
+.plot .axis text { font-size: 11px; fill: var(--muted); }
+.plot .lbl { font-size: 11.5px; fill: var(--ink-2); }
+.tip {
+  position: absolute; pointer-events: none; background: var(--paper); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  min-width: 170px; z-index: 2; line-height: 1.5;
+}
+.tip .h { font-family: var(--font-mono); color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+.tip .r { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.tip .r span:first-child { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); }
+.tip .r b { font-family: var(--font-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+details.data { font-size: 13px; color: var(--ink-2); }
+details.data summary { cursor: pointer; color: var(--accent); }
+details.data .table-scroll { margin-top: 8px; }
+details.data table { font-size: 12.5px; min-width: 520px; }
+details.data td, details.data th { padding: 5px 10px; }
+.note { font-size: 13.5px; color: var(--ink-2); max-width: 75ch; }
+
+/* budget */
+.budget { display: grid; gap: 14px; }
+.brow { display: grid; grid-template-columns: minmax(0, 180px) minmax(0, 1fr) 92px; gap: 12px; align-items: center; }
+.brow .name { font-size: 14px; color: var(--ink); line-height: 1.35; }
+.brow .name small { display: block; color: var(--muted); font-family: var(--font-mono); font-size: 11.5px; }
+.bar { display: flex; height: 26px; border-radius: 5px; overflow: hidden; gap: 2px; background: var(--paper); }
+.bar div { height: 100%; position: relative; }
+.bar div:hover, .bar div:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.brow .val { font-family: var(--font-mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+.brow .val small { display: block; color: var(--muted); font-size: 11px; }
+@media (max-width: 560px) { .brow { grid-template-columns: 1fr 74px; } .brow .name { grid-column: 1 / -1; } }
+
+/* recommendations */
+.recs { display: grid; gap: 0; counter-reset: rec; border-top: 1px solid var(--line); }
+.rec { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 6px 16px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.rec::before { counter-increment: rec; content: counter(rec); font-family: var(--font-mono); font-size: 22px; color: var(--accent); line-height: 1.3; }
+.rec .body { display: grid; gap: 6px; color: var(--ink-2); min-width: 0; }
+.rec .body h3 { color: var(--ink); font-family: var(--font-body); font-weight: 700; font-size: 16px; }
+.rec .gainv { font-family: var(--font-mono); font-size: 13px; color: var(--accent); white-space: nowrap; text-align: right; }
+@media (max-width: 560px) { .rec { grid-template-columns: 34px minmax(0, 1fr); } .rec .gainv { grid-column: 2; text-align: left; } }
+
+.callout { background: var(--warn-soft); border-radius: 10px; padding: 16px 18px; display: grid; gap: 8px; color: var(--ink); max-width: 80ch; }
+.callout b { color: var(--warn-ink); }
+.method { background: var(--paper); border: 1px dashed var(--line); border-radius: 10px; padding: 16px 18px; font-size: 14px; color: var(--ink-2); display: grid; gap: 8px; }
+.method ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 18px; display: grid; gap: 6px; }
+@media (max-width: 760px) { .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 460px) { .facts { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: no-preference) { .seg button { transition: background .15s, color .15s; } }
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">OFDM link 架構對照 · SISO-master vs ofdm-message-link</div>
+  <h1>SISO 為什麼看起來在低 SNR 比較穩？</h1>
+  <p class="lede">我把兩個專案的 TX／RX 程式碼逐行讀過，再把 SISO 的 PHY 用 numpy 照原始碼移植，和你的 PHY 放進同一組 AWGN／multipath channel 裡掃 SNR。下面是兩個架構的差異、SISO 做了哪些強化，以及模擬量到的數字。</p>
+  <p class="verdict"><strong>結論：</strong>SISO 的 PHY 其實沒有比你的強。在同樣的真實 SNR 下，它的 50% 成功點在 6.4 dB（AWGN）與 7.4 dB（multipath），你的 link 目前是 7.4 與 10.0 dB。差距來自你 RX 的兩個問題：Turbo decoder 拿到的 LLR 全部飽和，以及 header 只靠一個沒放大的 training symbol 做 channel estimate。兩個都只要改 RX。修掉之後，你的 link 在模擬中降到 3.5 與 5.5 dB，比 SISO 好 2–3 dB。另外兩邊顯示的 SNR 定義不同：你的 meter 比真實 SNR 低 3–5 dB，SISO 的幾乎等於真實值，所以拿畫面上的數字直接比會誤判。</p>
+  <div class="facts" id="facts"></div>
+</header>
+
+<section id="arch">
+  <div class="sec-head">
+    <div class="eyebrow">01 · 架構</div>
+    <h2>兩套 OFDM 參數並排</h2>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>項目</th><th><span class="colhead"><span class="sw" style="background:var(--siso)"></span>SISO-master</span></th><th><span class="colhead"><span class="sw" style="background:var(--mine)"></span>ofdm-message-link（你的）</span></th></tr></thead>
+      <tbody>
+        <tr><th>傳輸型態</th><td><b>連續串流</b>：沒資料時送 dummy symbol，RX 永遠有訊號可以追</td><td><b>Burst</b>：一個 datagram 一個 burst，前後是靜音</td></tr>
+        <tr><th>Sample rate</th><td class="num">3.2 MS/s（預設）</td><td class="num">5 MS/s（預設 profile）、10 MS/s 可選</td></tr>
+        <tr><th>FFT / CP</th><td class="num">2048 / 256（12.5%）＝ 80 µs</td><td class="num">64 / 16（25%）＝ 3.2 µs</td></tr>
+        <tr><th>Subcarrier 間距</th><td class="num">1.5625 kHz</td><td class="num">78.125 kHz</td></tr>
+        <tr><th>使用中的 tone</th><td class="num">1905 / 2048：1632 data + 273 pilot</td><td class="num">52 / 64：48 data + 4 pilot</td></tr>
+        <tr><th>Pilot</th><td>Comb，每 7 個 tone 一個；振幅 2√2（<b>比 data 高 9 dB</b>），吃掉 57% 發射功率</td><td>每個 symbol 4 個 ±1 pilot，只用來追 common phase 與相位斜率</td></tr>
+        <tr><th>同步</th><td>每個 symbol 用 CP 做 MNC（maximum normalized correlation），3 組 128-sample correlation 相加，取視窗內最大值</td><td>每個 burst 一次 Schmidl–Cox：80-sample preamble、兩半各 32 sample，再做 coherent correlation；兩道門檻都是 0.40</td></tr>
+        <tr><th>CFO</th><td>小數部分：lag 2048 的 CP 相位；整數部分：在 ±71 個 tone 範圍內找 pilot 能量最大處</td><td>Schmidl–Cox 相位，可估範圍 ±1 subcarrier（5 MS/s 時 ±78 kHz）</td></tr>
+        <tr><th>Channel estimate</th><td><b>每個 symbol</b>從 273 個加強 pilot 線性內插</td><td><b>每個 burst 一次</b>：1 個 BPSK training symbol 做 LS，不做平滑；之後只修相位</td></tr>
+        <tr><th>FEC</th><td>DVB-T 式串接碼：RS(204,188, t=8) → byte interleave(16) → K=7 (171,133) r1/2 tail-biting conv → bit interleave(64)；RX 用 <b>hard-decision</b> Viterbi</td><td>LTE Turbo r1/3（QPP interleaver，max-log-MAP，8 次迭代）＋ CRC-32；另有 conv r1/2、r1/3 與 uncoded</td></tr>
+        <tr><th>Header</th><td>12 B 封包標頭放在 payload 裡，跟資料一起受 RS＋conv 保護</td><td>獨立 PHY header：96 bit × 3 次重複，QPSK，CRC-32 全對才算數</td></tr>
+        <tr><th>調變／MCS</th><td>固定 QPSK r≈0.46</td><td>8 種 MCS（QPSK／16QAM × Turbo／conv／uncoded），由 header 告知</td></tr>
+        <tr><th>錯誤單位</th><td class="num">1 symbol ＝ 188 B（0.72 ms）</td><td class="num">1 burst ＝ 最多 968 B（MCS 0 約 3.8 ms）</td></tr>
+        <tr><th>完整性檢查</th><td>RS 解碼失敗就丟；沒有額外 CRC</td><td>Burst header CRC-32、frame CRC-32、Turbo code-block CRC-24B</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="shape">
+  <div class="sec-head">
+    <div class="eyebrow">02 · 訊號長相</div>
+    <h2>時間軸上的差異：SISO 每個 symbol 都能自己同步</h2>
+  </div>
+  <div class="figure">
+    <div class="ttl"><span class="tag-s">SISO</span> 一個 OFDM symbol <span class="mono">2304 samples · 0.72 ms @ 3.2 MS/s</span></div>
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 960 190" role="img" aria-label="SISO symbol: two 128-sample sub-CPs then a 2048-sample body whose last 128 samples equal the sub-CPs; three correlations m0, m1, m2.">
+        <rect x="20" y="70" width="76" height="44" rx="3" style="fill:var(--siso)" opacity="0.85"/>
+        <rect x="98" y="70" width="76" height="44" rx="3" style="fill:var(--siso)" opacity="0.85"/>
+        <rect x="176" y="70" width="680" height="44" rx="3" style="fill:var(--ovh-4)" style="stroke:var(--line)"/>
+        <rect x="780" y="70" width="76" height="44" rx="0" style="fill:var(--siso)" opacity="0.45"/>
+        <rect x="858" y="70" width="80" height="44" rx="3" style="fill:var(--ovh-1)" opacity="0.5"/>
+        <text x="58" y="97" text-anchor="middle" font-size="12" style="fill:var(--paper)">T</text>
+        <text x="136" y="97" text-anchor="middle" font-size="12" style="fill:var(--paper)">T</text>
+        <text x="818" y="97" text-anchor="middle" font-size="12">T</text>
+        <text x="470" y="97" text-anchor="middle" font-size="12">useful body · 2048 samples（含 1632 data + 273 boosted pilot tones）</text>
+        <text x="898" y="97" text-anchor="middle" font-size="11">下一個</text>
+        <text x="58" y="130" text-anchor="middle" font-size="10">sub-CP 128</text>
+        <text x="138" y="130" text-anchor="middle" font-size="10">sub-CP 128</text>
+        <text x="818" y="132" text-anchor="middle" font-size="11">尾端 128</text>
+        <path d="M58 66 C58 20, 818 20, 818 66" fill="none" style="stroke:var(--ink-2)" stroke-width="1.5"/>
+        <text x="438" y="16" text-anchor="middle" font-size="11">m0：lag 2176</text>
+        <path d="M136 66 C136 40, 818 40, 818 66" fill="none" style="stroke:var(--ink-2)" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="478" y="63" text-anchor="middle" font-size="11">m1：lag 2048 → 小數 CFO</text>
+        <path d="M58 138 C58 178, 136 178, 136 138" fill="none" style="stroke:var(--ink-2)" stroke-width="1.5"/>
+        <text x="160" y="172" font-size="11">m2：lag 128</text>
+        <text x="260" y="172" font-size="11">timing = argmax(m0+m1+m2)，門檻只是「過去平均峰值的一半」</text>
+      </svg>
+    </div>
+    <p class="cap">CP 被切成兩段相同的 128 sample，所以同一段波形在一個 symbol 裡出現三次，可以做三組 correlation 相加。每個 correlation 長 128 sample，是你 Schmidl–Cox 半段（32 sample）的 4 倍，timing metric 的雜訊因此小約 6 dB。TX 一直在發，所以 RX 每 0.72 ms 就重新同步一次，沒有「錯過 preamble 就整包掉」這件事。</p>
+  </div>
+  <div class="figure">
+    <div class="ttl"><span class="tag-m">你的</span> 一個 MCS 0 burst（900 B） <span class="mono">19 392 samples · 3.9 ms @ 5 MS/s</span></div>
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 960 184" role="img" aria-label="Burst: guard, 80-sample preamble with two repeated 32-sample halves, one training symbol, three header symbols, 231 payload symbols, guard.">
+        <rect x="20" y="64" width="40" height="44" rx="3" style="fill:var(--ovh-4)" style="stroke:var(--line)"/>
+        <rect x="62" y="64" width="16" height="44" style="fill:var(--mine)" opacity="0.45"/>
+        <rect x="80" y="64" width="34" height="44" style="fill:var(--mine)" opacity="0.85"/>
+        <rect x="116" y="64" width="34" height="44" style="fill:var(--mine)" opacity="0.85"/>
+        <rect x="152" y="64" width="84" height="44" style="fill:var(--fix1)" opacity="0.8"/>
+        <rect x="238" y="64" width="126" height="44" style="fill:var(--fix2)" opacity="0.8"/>
+        <rect x="366" y="64" width="530" height="44" style="fill:var(--ovh-1)" opacity="0.6"/>
+        <rect x="898" y="64" width="40" height="44" rx="3" style="fill:var(--ovh-4)" style="stroke:var(--line)"/>
+        <text x="40" y="126" text-anchor="middle" font-size="11">guard</text>
+        <text x="106" y="126" text-anchor="middle" font-size="11">preamble 80</text>
+        <text x="194" y="126" text-anchor="middle" font-size="11">training ×1</text>
+        <text x="301" y="126" text-anchor="middle" font-size="11">header ×3</text>
+        <text x="631" y="91" text-anchor="middle" font-size="12">payload · 231 OFDM symbols × 80 samples（Turbo r1/3）</text>
+        <text x="918" y="126" text-anchor="middle" font-size="11">guard</text>
+        <path d="M97 60 C97 28, 133 28, 133 60" fill="none" style="stroke:var(--ink-2)" stroke-width="1.5"/>
+        <text x="140" y="30" font-size="11">Schmidl–Cox：32-sample 半段互相關，門檻 0.40</text>
+        <path d="M194 134 C194 168, 631 168, 631 112" fill="none" style="stroke:var(--ink-2)" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="412" y="178" text-anchor="middle" font-size="11">這一個 training symbol 的 LS 估計，用到整個 burst 結束</text>
+      </svg>
+    </div>
+    <p class="cap">整個 burst 的成敗壓在開頭 400 個 sample 上：preamble 沒過門檻、或 3 個 header symbol 的 CRC 沒過，後面 231 個 payload symbol 再乾淨也收不到。而 header 的 channel estimate 來自一個跟 data 同功率的 training symbol，估計誤差和 noise 一樣大。</p>
+  </div>
+  <div class="figure">
+    <div class="ttl">頻域上的 pilot 密度 <span class="mono">示意，前 64 個 tone</span></div>
+    <div class="diagram-scroll"><svg id="tones" viewBox="0 0 960 150" role="img" aria-label="SISO has a boosted pilot every 7 tones; ofdm-message-link has 4 unboosted pilots among 52 tones."></svg></div>
+    <p class="cap">SISO 每 7 個 tone 就有一個比 data 高 9 dB 的 pilot，每個 symbol 都有新的 channel 量測。你的 4 個 pilot 和 data 同功率，只用來修相位；振幅與每個 tone 的 channel 都來自開頭那一個 training symbol。</p>
+  </div>
+</section>
+
+<section id="chain">
+  <div class="sec-head">
+    <div class="eyebrow">03 · 處理鏈</div>
+    <h2>TX → RX，每一塊在做什麼</h2>
+  </div>
+  <div class="keys"><span><span class="sw" style="background:var(--accent-soft);border:1px solid var(--accent)"></span>對低 SNR 有幫助</span><span><span class="sw" style="background:var(--warn-soft);border:1px solid var(--warn-ink)"></span>低 SNR 時的弱點</span></div>
+  <div class="two">
+    <div class="figure chain">
+      <div class="ttl"><span class="tag-s">SISO</span></div>
+      <div class="lane-label">TX · lib/tx_encoder.cc</div>
+      <div class="chain-row">
+        <span class="chip">packet fragment（12 B header）</span><span class="arrow">→</span>
+        <span class="chip">energy dispersal PRBS</span><span class="arrow">→</span>
+        <span class="chip k">RS(204,188)</span><span class="arrow">→</span>
+        <span class="chip k">byte interleave 16</span><span class="arrow">→</span>
+        <span class="chip k">conv K=7 r1/2 tail-biting</span><span class="arrow">→</span>
+        <span class="chip k">bit interleave 64</span><span class="arrow">→</span>
+        <span class="chip">QPSK</span><span class="arrow">→</span>
+        <span class="chip k">273 boosted comb pilots</span><span class="arrow">→</span>
+        <span class="chip">IFFT 2048</span><span class="arrow">→</span>
+        <span class="chip k">CP = 2 × 128</span><span class="arrow">→</span>
+        <span class="chip k">連續發射</span>
+      </div>
+      <div class="lane-label">RX · lib/ofdm_sym_acquisition.c, rx_decoder.cc</div>
+      <div class="chain-row">
+        <span class="chip k">MNC 三路 CP 同步</span><span class="arrow">→</span>
+        <span class="chip">小數 CFO derotate</span><span class="arrow">→</span>
+        <span class="chip">FFT</span><span class="arrow">→</span>
+        <span class="chip k">整數 CFO：pilot 能量搜尋 ±71</span><span class="arrow">→</span>
+        <span class="chip k">每 symbol pilot 內插 channel</span><span class="arrow">→</span>
+        <span class="chip w">hard QPSK 判決</span><span class="arrow">→</span>
+        <span class="chip w">hard Viterbi</span><span class="arrow">→</span>
+        <span class="chip">RS 解碼</span><span class="arrow">→</span>
+        <span class="chip">defrag → UDP</span>
+      </div>
+    </div>
+    <div class="figure chain">
+      <div class="ttl"><span class="tag-m">你的</span></div>
+      <div class="lane-label">TX · phy/burst.py encode_burst</div>
+      <div class="chain-row">
+        <span class="chip">datagram（28 B）＋ fragment</span><span class="arrow">→</span>
+        <span class="chip">frame ＋ CRC-32</span><span class="arrow">→</span>
+        <span class="chip k">Turbo r1/3（LTE QPP）</span><span class="arrow">→</span>
+        <span class="chip">QPSK / 16QAM</span><span class="arrow">→</span>
+        <span class="chip">IFFT 64 ＋ 4 pilots</span><span class="arrow">→</span>
+        <span class="chip">CP 16</span><span class="arrow">→</span>
+        <span class="chip w">header 96 bit × 3 重複</span><span class="arrow">→</span>
+        <span class="chip">preamble ＋ 1 training</span>
+      </div>
+      <div class="lane-label">RX · phy/sync.py, channel.py, burst.py</div>
+      <div class="chain-row">
+        <span class="chip w">Schmidl–Cox 32-sample，門檻 0.40</span><span class="arrow">→</span>
+        <span class="chip">coherent preamble 檢查</span><span class="arrow">→</span>
+        <span class="chip">CFO 修正</span><span class="arrow">→</span>
+        <span class="chip w">1 個 training symbol LS</span><span class="arrow">→</span>
+        <span class="chip w">header 多數決 ＋ soft 退路</span><span class="arrow">→</span>
+        <span class="chip">pilot 修相位 ＋ SFO 追蹤</span><span class="arrow">→</span>
+        <span class="chip w">LLR：noise variance = 1e-6</span><span class="arrow">→</span>
+        <span class="chip k">Turbo max-log-MAP ×8</span><span class="arrow">→</span>
+        <span class="chip">CRC → reassembly</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="techniques">
+  <div class="sec-head">
+    <div class="eyebrow">04 · SISO 的強化手段</div>
+    <h2>它做了哪些事讓連線比較穩</h2>
+    <p class="prose">以下每一項都附上原始碼位置，以及對照你的實作。標 <span class="pill gain">gain</span> 的是它真正賺到的地方，<span class="pill cost">cost</span> 是它為此付出、或留下的弱點。</p>
+  </div>
+  <div class="techs">
+    <div class="tech">
+      <div><h3>連續發射，每個 symbol 自己同步</h3><div class="src">app/siso-uhd-tx.cc stream()<br>lib/ofdm_sym_acquisition.c</div></div>
+      <div class="what">
+        <p><span class="pill gain">gain</span> TX 的 stream thread 沒有資料時會送 dummy symbol，所以空中永遠有訊號。RX 每次取 2·2048＋256 個 sample，對 2048 個候選起點算三組正規化 CP correlation，<b>直接取最大值</b>。門檻是相對的（大於過去峰值 IIR 平均的一半），不會因為 SNR 降低就整個偵測不到。前端增益與 AGC 也一直處於穩態，沒有 burst 開頭的暫態。</p>
+        <p><span class="pill cost">cost</span> 不能 TDD、不能多台共用頻道，閒置時照樣佔滿頻寬與功率。</p>
+        <p class="vs"><b>你的：</b>Schmidl–Cox 在 32 sample 上做 correlation，門檻 0.40 在 <code>SyncConfig</code> 註解裡寫明約對應 +4 dB。模擬中 SNR 0 dB 時 79% 的 burst 連 preamble 都沒抓到，1 dB 時還有 57%。</p>
+      </div>
+    </div>
+    <div class="tech">
+      <div><h3>加強 comb pilot，每個 symbol 重估 channel</h3><div class="src">lib/reference_signal.c</div></div>
+      <div class="what">
+        <p><span class="pill gain">gain</span> 1905 個 tone 裡有 273 個 pilot，值是 (±1±j)·2，功率 8，data 只有 1，所以 pilot 比 data 高 9 dB。data tone 的 channel 由左右兩個 pilot 線性內插，每 0.72 ms 更新一次。Pilot SNR 高，channel 估計誤差遠小於 data noise，也能跟上 symbol 之間的變化。</p>
+        <p><span class="pill gain">gain</span> 同一組 pilot 也拿來做整數 CFO：在 ±71 個 tone 範圍內找 pilot 能量最大的位移，可抓 ±111 kHz。便宜的 TCXO（如 Pluto 的 ±25 ppm，在 2.4 GHz 就是 ±60 kHz）也不怕。</p>
+        <p><span class="pill cost">cost</span> pilot 吃掉 <b>57%</b> 發射功率，data tone 的 Es/N0 比平均 SNR 低 3 dB。</p>
+        <p class="vs"><b>你的：</b>一個和 data 同功率的 training symbol，在 52 個 tone 上各做一次 LS（<code>estimate_channel</code>），沒有平滑。等化後的 noise 約變成兩倍（−3 dB），header 就是用這個 estimate 解的。</p>
+      </div>
+    </div>
+    <div class="tech">
+      <div><h3>DVB-T 式串接碼與三層 interleaver</h3><div class="src">lib/tx_encoder.cc, reed_solomon.c,<br>convolutional_codec.cc, interleaver.cc</div></div>
+      <div class="what">
+        <p><span class="pill gain">gain</span> 內碼 K=7 (171,133) r1/2 convolutional（tail-biting，沒有 tail 開銷），外碼 RS(204,188) 可修 8 個 byte。中間的 byte interleaver 把 Viterbi 的連續錯誤打散到不同 RS symbol，bit interleaver 把 frequency-selective fading 打散到不同 trellis 位置。Energy dispersal（PRBS 擾碼）避免重複資料造成頻譜尖峰。</p>
+        <p><span class="pill cost">cost</span> RX 用 <code>qpsk_demap_hard</code> 加 <code>decode_Hard_SSE2</code>，是 <b>hard decision</b>，比 soft Viterbi 少約 2 dB。程式也算了 symbol interleaver，但送出去的是沒交錯的版本（<code>post_symbol_map /*post_interleave3*/</code>）。</p>
+        <p class="vs"><b>你的：</b>Turbo r1/3 理論上強很多，正確 soft 輸入下 QPSK 約在 0 dB 附近就能解。問題出在送進去的 LLR，見下方第 05 節。</p>
+      </div>
+    </div>
+    <div class="tech">
+      <div><h3>沒有獨立的脆弱 header</h3><div class="src">lib/packet_fragmentation.c</div></div>
+      <div class="what">
+        <p><span class="pill gain">gain</span> MCS 固定，RX 不必先解 header 才知道怎麼解 payload。12 B 封包標頭（sync 0x47、封包序號、片段序號、長度、port、timestamp）就放在 188 B 裡，和資料一起受 RS＋conv 保護。</p>
+        <p class="vs"><b>你的：</b>96 bit × 3 次重複只有約 4.8 dB 的能量增益、沒有 coding gain，而且要 96 bit 全對 CRC 才過。加上 channel estimate 的 3 dB 損失，模擬中它是整條 link 最先失效的地方，和 <code>docs/08-measurements.md</code> 8.5 節「遺失的 burst 幾乎都是 header 解不出來」一致。</p>
+      </div>
+    </div>
+    <div class="tech">
+      <div><h3>錯誤單位小</h3><div class="src">lib/config.h</div></div>
+      <div class="what">
+        <p><span class="pill gain">gain</span> 一個 symbol 就是一個獨立的 188 B 區塊。短暫衰落只會掉幾個 0.72 ms 的 symbol，對 H.265 影像串流比較溫和。</p>
+        <p class="vs"><b>你的：</b>MCS 0 的 900 B burst 長 3.9 ms，中間任何地方出事整包都掉。</p>
+      </div>
+    </div>
+    <div class="tech">
+      <div><h3>較窄的頻寬、較長的 CP</h3><div class="src">app/siso-*-tx.cc（rate 3.2）</div></div>
+      <div class="what">
+        <p><span class="pill gain">gain</span> 3.2 MS/s 收進來的 noise 比 5 MS/s 少 1.9 dB、比 10 MS/s 少 4.9 dB；同樣的發射功率與距離，SISO 的 SNR 就比較高。這是實機上最直接的差距，和 PHY 設計無關。80 µs 的 CP 也可以容忍很長的 multipath（你的 3.2 µs 在室內足夠）。</p>
+        <p><span class="pill cost">cost</span> 1.56 kHz 的 subcarrier 間距對相位雜訊與 Doppler 敏感得多；它靠每個 symbol 重新估 CFO 與 channel 才撐住。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="sim">
+  <div class="sec-head">
+    <div class="eyebrow">05 · 模擬</div>
+    <h2>放進同一個 channel 比</h2>
+  </div>
+  <div class="method">
+    <b style="color:var(--ink)">怎麼量的</b>
+    <ul>
+      <li><b>你的</b>：直接呼叫 repo 裡的 <code>encode_burst</code>／<code>decode_burst</code>（含原生 Turbo decoder），900 B MCS 0 或 MCS 4 frame，每個 SNR 150 個 burst。</li>
+      <li><b>SISO</b>：把 <code>lib/</code> 的 TX 鏈與 RX 的 MNC 同步、整數 CFO 搜尋、pilot 內插、hard Viterbi、RS 判斷逐行移植成 numpy，連續送 80 個 symbol，用 siso-rx 的串流迴圈收。RS 成功與否以「≤ 8 個 byte 錯」判定。</li>
+      <li>Channel：AWGN，或 5-tap multipath <span class="mono">[0.82+0.13j, 0, 0.21−0.17j, 0, 0.08j]</span>；兩邊都加 10 kHz CFO。</li>
+      <li><b>SNR 的定義兩邊相同</b>：訊號在空中時的平均功率 ÷ 整個 sample-rate 頻寬內的 noise。</li>
+      <li>沒有模擬：相位雜訊、IQ imbalance、ADC 量化、AGC、外部干擾。實機的門檻會比這裡高幾 dB。</li>
+    </ul>
+  </div>
+
+  <div class="chart-card" id="cardA">
+    <div class="chart-top">
+      <div><h3>成功率 vs SNR</h3><p class="sub">你的：900 B burst 完整收到的比例。SISO：每個 188 B symbol 的成功率（實線），以及換算成 900 B 需要連續 5.1 個 symbol 都成功（虛線）。</p></div>
+      <div class="seg" role="group" aria-label="Channel"><button type="button" id="a-awgn" aria-pressed="true">AWGN</button><button type="button" id="a-mp" aria-pressed="false">Multipath</button></div>
+    </div>
+    <div class="legend" id="legA"></div>
+    <div class="plot" id="plotA"></div>
+    <details class="data"><summary>顯示數據表</summary><div class="table-scroll" id="tableA"></div></details>
+  </div>
+
+  <div class="callout">
+    <p><b>關鍵發現 1：LLR 全部飽和。</b><code>link.py</code> 建 <code>StreamingBurstDecoder</code> 時沒有傳 <code>input_noise_variance</code>，於是 <code>burst.py</code> 退回 <code>1e-6</code>。QPSK 的 LLR = 2√2·y/σ²，σ² 小了好幾個數量級，算出來的值全部被 <code>SOFT_LLR_CLIP = 64</code> 截斷，每個 bit 的可信度都一樣，Turbo decoder 等於拿到 hard decision，iteration 也幾乎沒有作用。只要把正確的 noise variance 傳進去（上圖綠線），MCS 0 在 AWGN 下就賺 2.2 dB、multipath 下 2.7 dB；16QAM 的 LLR 更依賴振幅資訊，MCS 4 一次賺回 4.8 dB。不需要改 wire format。</p>
+  </div>
+
+  <div class="chart-card" id="cardB">
+    <div class="chart-top">
+      <div><h3>你的 burst 死在哪一關</h3><p class="sub">每個 SNR 下 150 個 MCS 0 burst 的結局。藍色是 preamble 沒抓到，橘色是 header CRC 失敗，綠色是 header 過了但 payload 失敗。</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="seg" role="group" aria-label="Receiver"><button type="button" id="b-app" aria-pressed="true">現在的 RX</button><button type="button" id="b-fix" aria-pressed="false">兩項修正後</button></div>
+        <div class="seg" role="group" aria-label="Channel"><button type="button" id="b-awgn" aria-pressed="true">AWGN</button><button type="button" id="b-mp" aria-pressed="false">Multipath</button></div>
+      </div>
+    </div>
+    <div class="legend" id="legB"></div>
+    <div class="plot" id="plotB"></div>
+    <details class="data"><summary>顯示數據表</summary><div class="table-scroll" id="tableB"></div></details>
+  </div>
+
+  <div class="callout">
+    <p><b>關鍵發現 2：header 是低 SNR 的天花板。</b>修好 LLR 之後，payload 幾乎不再失敗，剩下的失敗幾乎都是 header。改用平滑過的 channel estimate（把 52 個 LS 值擬合成 ≤ 20 tap 的時域 channel，估計誤差降約 4 dB），50% 點再往下移約 1.7 dB。再往下就輪到 preamble 門檻 0.40：SNR 1 dB 時已有一半的 burst 沒被偵測到。</p>
+  </div>
+
+  <div class="chart-card" id="cardC">
+    <div class="chart-top">
+      <div><h3>畫面上的 SNR 不能直接比</h3><p class="sub">橫軸是模擬設定的真實 SNR，縱軸是各自 RX 會印出的數字。SISO 用 CP correlation 算 ρ/(1−ρ)；你的是解碼成功 burst 的 decision-directed EVM，含 channel estimate 誤差，所以偏低 3–5 dB，而且只在解得出來時才有值。</p></div>
+      <div class="seg" role="group" aria-label="Channel"><button type="button" id="c-awgn" aria-pressed="true">AWGN</button><button type="button" id="c-mp" aria-pressed="false">Multipath</button></div>
+    </div>
+    <div class="legend" id="legC"></div>
+    <div class="plot" id="plotC"></div>
+  </div>
+
+  <div class="chart-card" id="cardD">
+    <div class="chart-top">
+      <div><h3>同樣的接收功率，誰的 goodput 高</h3><p class="sub">橫軸是 C/N0（接收功率 ÷ noise 功率譜密度），這是發射功率、距離、天線固定時唯一公平的比法：SISO 用 3.2 MS/s，你的用 5 MS/s，各自的 SNR = C/N0 − 10·log10(sample rate)。縱軸是扣掉所有 header 後的 payload 速率上限 × 成功率。</p></div>
+      <div class="seg" role="group" aria-label="Channel"><button type="button" id="d-awgn" aria-pressed="true">AWGN</button><button type="button" id="d-mp" aria-pressed="false">Multipath</button></div>
+    </div>
+    <div class="legend" id="legD"></div>
+    <div class="plot" id="plotD"></div>
+    <p class="note">SISO 用每個 symbol 的成功率計算（上限）；若 UDP 封包跨多個 symbol，缺一個 symbol 整包就不完整，實際會更低。你的 burst 速率以 airtime 計算，未含主機端 CPU 限制（實測 MCS 0 約 230 burst/s）。</p>
+  </div>
+</section>
+
+<section id="throughput">
+  <div class="sec-head">
+    <div class="eyebrow">06 · Throughput</div>
+    <h2>每個 sample 花在哪裡</h2>
+    <p class="prose">把一段 airtime 拆成各種用途。SISO 的 payload 佔比比你的 MCS 0 高很多：code rate 0.43 對 0.33、CP 只佔 11%、沒有 preamble／header／guard。代價是它固定在這一個操作點。你的 MCS 4 每個 sample 帶的 bit 比 SISO 多，但需要的 SNR 也高很多。</p>
+  </div>
+  <div class="chart-card">
+    <div class="legend" id="legE"></div>
+    <div class="budget" id="budget"></div>
+    <p class="note">bit/sample × sample rate ＝ payload 速率上限。把你的 link 也降到 3.2 MS/s，MCS 0 只剩約 1.19 Mbit/s；SISO 在同頻寬下是 1.96 Mbit/s。</p>
+  </div>
+</section>
+
+<section id="recs">
+  <div class="sec-head">
+    <div class="eyebrow">07 · 可以借鏡的地方</div>
+    <h2>依效益排序的修改建議</h2>
+  </div>
+  <div class="recs">
+    <div class="rec"><div class="body"><h3>把真實的 noise variance 傳給 soft demapper</h3><p>在 RX 端估 σ²：用 preamble 兩個相同半段的差（<code>r[n] − r[n+32]</code> 的功率 ÷ 2）、guard tone 或 null subcarrier 的能量，或 pilot 殘差。估好後傳給 <code>StreamingBurstDecoder(input_noise_variance=…)</code>，或改成每個 burst 自己估。只改 RX，不動 wire format。</p></div><div class="gainv">MCS 0 +2.2–2.7 dB<br>MCS 4 +4.8 dB</div></div>
+    <div class="rec"><div class="body"><h3>平滑 channel estimate</h3><p>把 52 個 LS 值擬合成 CP 長度內的時域 channel（DFT-based／LS fit），或把 3 個 header symbol 解出來後當作已知 symbol 再估一次。SISO 的做法是加強 pilot，但那要改 wire format，也會吃掉功率。</p></div><div class="gainv">再 +1.7 dB</div></div>
+    <div class="rec"><div class="body"><h3>Header 改用真的 FEC</h3><p>把 96 bit 用 K=7 r1/3 convolutional（你已經有 native Viterbi）或短 Turbo 編碼取代 3 次重複，並以 |H|² 加權 soft combining。重複碼幾乎沒有 coding gain，這一步可以讓 header 比 payload 更耐 noise，而不是反過來。</p></div><div class="gainv">header +3 dB 以上（估計）</div></div>
+    <div class="rec"><div class="body"><h3>讓 SNR meter 可以和別人比</h3><p>另外顯示 pre-equalization SNR，例如照 SISO 用 preamble 兩半的正規化 correlation ρ 算 ρ/(1−ρ)。現在的 EVM-SNR 比真實低 3–5 dB，又只在解碼成功時才更新，衰落時看起來還是很好。</p></div><div class="gainv">診斷</div></div>
+    <div class="rec"><div class="body"><h3>較長的 preamble 或兩段 training</h3><p>Schmidl–Cox 半段從 32 拉長到 64 或重複兩次，timing metric 的雜訊降 3 dB，可以把門檻從 0.40 調低。第二個 training symbol 也讓 channel estimate 平均兩次。代價是每個 burst 多 80–160 sample（不到 1%）。</p></div><div class="gainv">acquisition +3 dB</div></div>
+    <div class="rec"><div class="body"><h3>補一個 r≈1/2 的 Turbo MCS</h3><p>用 LTE 的 rate matching（puncture parity）在 MCS 0 與 MCS 4 之間補 QPSK r1/2、r2/3，就能在 SISO 的操作點拿到接近的 bit/sample，同時保有 soft Turbo 的增益。<code>mcs_table.py</code> 已經預留了 index 空間。</p></div><div class="gainv">+50% throughput</div></div>
+    <div class="rec"><div class="body"><h3>降低 sample rate 換 SNR</h3><p>Pluto↔N210 這種 link budget 吃緊的組合，2.5 或 3.2 MS/s 的 profile 會直接多 2–3 dB。最便宜、立刻可以試。</p></div><div class="gainv">+1.9–3 dB</div></div>
+  </div>
+</section>
+
+<footer>
+  <p>資料來源：SISO-master（上傳的 zip）的 <code>lib/</code>、<code>app/</code> 原始碼，以及 s87315teve/ofdm-message-link 的 <code>src/ofdm_link/phy/</code>。SISO 的同步法出自隨附論文 C. El Hajjar, <i>Synchronization Algorithms for OFDM Systems</i>, FAU Erlangen 2007，第 4.2.2 節 MNC。</p>
+  <p>模擬是模型，不是實測。SISO 的 pilot m-sequence 因為沒有 <code>lfsr.c</code> 原始碼而用等價的 ±1 序列代替，不影響結果。</p>
+</footer>
+</div>
+
+<script>
+const DATA = {"mine":{"QPSK_awgn":[{"snr":-4,"app_ok":0.0,"app_acq":1.0,"app_header":0.0,"app_payload":0.0,"llr_ok":0.0,"llr_acq":1.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":1.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":-3,"app_ok":0.0,"app_acq":0.98,"app_header":0.02,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.98,"llr_header":0.02,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.98,"llr_smooth_header":0.02,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":-2,"app_ok":0.0,"app_acq":0.9866666666666667,"app_header":0.013333333333333334,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.9866666666666667,"llr_header":0.013333333333333334,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.9866666666666667,"llr_smooth_header":0.013333333333333334,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":-1,"app_ok":0.0,"app_acq":0.96,"app_header":0.04,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.96,"llr_header":0.04,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.96,"llr_smooth_header":0.04,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":0,"app_ok":0.0,"app_acq":0.7866666666666666,"app_header":0.21333333333333335,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.7866666666666666,"llr_header":0.21333333333333335,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.7866666666666666,"llr_smooth_header":0.21333333333333335,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":1,"app_ok":0.0,"app_acq":0.5666666666666667,"app_header":0.43333333333333335,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.5666666666666667,"llr_header":0.43333333333333335,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.5666666666666667,"llr_smooth_header":0.42,"llr_smooth_payload":0.013333333333333334,"app_meter_db":null},{"snr":2,"app_ok":0.0,"app_acq":0.25333333333333335,"app_header":0.74,"app_payload":0.006666666666666667,"llr_ok":0.0,"llr_acq":0.25333333333333335,"llr_header":0.74,"llr_payload":0.006666666666666667,"llr_smooth_ok":0.0,"llr_smooth_acq":0.25333333333333335,"llr_smooth_header":0.68,"llr_smooth_payload":0.06666666666666667,"app_meter_db":null},{"snr":3,"app_ok":0.0,"app_acq":0.02,"app_header":0.9533333333333334,"app_payload":0.02666666666666667,"llr_ok":0.013333333333333334,"llr_acq":0.02,"llr_header":0.9533333333333334,"llr_payload":0.013333333333333334,"llr_smooth_ok":0.36,"llr_smooth_acq":0.02,"llr_smooth_header":0.5666666666666667,"llr_smooth_payload":0.05333333333333334,"app_meter_db":null},{"snr":4,"app_ok":0.0,"app_acq":0.006666666666666667,"app_header":0.8333333333333334,"app_payload":0.16,"llr_ok":0.13333333333333333,"llr_acq":0.006666666666666667,"llr_header":0.8333333333333334,"llr_payload":0.02666666666666667,"llr_smooth_ok":0.6333333333333333,"llr_smooth_acq":0.006666666666666667,"llr_smooth_header":0.35333333333333333,"llr_smooth_payload":0.006666666666666667,"app_meter_db":null},{"snr":5,"app_ok":0.0,"app_acq":0.0,"app_header":0.5733333333333334,"app_payload":0.4266666666666667,"llr_ok":0.4266666666666667,"llr_acq":0.0,"llr_header":0.5733333333333334,"llr_payload":0.0,"llr_smooth_ok":0.94,"llr_smooth_acq":0.0,"llr_smooth_header":0.06,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":6,"app_ok":0.013333333333333334,"app_acq":0.0,"app_header":0.2,"app_payload":0.7866666666666666,"llr_ok":0.8,"llr_acq":0.0,"llr_header":0.2,"llr_payload":0.0,"llr_smooth_ok":0.96,"llr_smooth_acq":0.0,"llr_smooth_header":0.04,"llr_smooth_payload":0.0,"app_meter_db":3.2733833519535223},{"snr":7,"app_ok":0.34,"app_acq":0.0,"app_header":0.10666666666666667,"app_payload":0.5533333333333333,"llr_ok":0.8866666666666667,"llr_acq":0.0,"llr_header":0.10666666666666667,"llr_payload":0.006666666666666667,"llr_smooth_ok":0.9933333333333333,"llr_smooth_acq":0.0,"llr_smooth_header":0.006666666666666667,"llr_smooth_payload":0.0,"app_meter_db":3.658115732174543},{"snr":8,"app_ok":0.7,"app_acq":0.0,"app_header":0.0,"app_payload":0.3,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":4.707575861441762},{"snr":9,"app_ok":0.88,"app_acq":0.0,"app_header":0.0,"app_payload":0.12,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":5.624832960754315},{"snr":10,"app_ok":0.9733333333333334,"app_acq":0.0,"app_header":0.0,"app_payload":0.02666666666666667,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":6.715078058892055},{"snr":11,"app_ok":0.9866666666666667,"app_acq":0.0,"app_header":0.0,"app_payload":0.013333333333333334,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":7.700312059871448},{"snr":12,"app_ok":1.0,"app_acq":0.0,"app_header":0.0,"app_payload":0.0,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":8.80351174607674},{"snr":13,"app_ok":1.0,"app_acq":0.0,"app_header":0.0,"app_payload":0.0,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":9.866823526397464},{"snr":14,"app_ok":1.0,"app_acq":0.0,"app_header":0.0,"app_payload":0.0,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":10.891423345894136}],"QPSK_multipath":[{"snr":-4,"app_ok":0.0,"app_acq":1.0,"app_header":0.0,"app_payload":0.0,"llr_ok":0.0,"llr_acq":1.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":1.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":-3,"app_ok":0.0,"app_acq":0.98,"app_header":0.02,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.98,"llr_header":0.02,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.98,"llr_smooth_header":0.02,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":-2,"app_ok":0.0,"app_acq":0.9733333333333334,"app_header":0.02666666666666667,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.9733333333333334,"llr_header":0.02666666666666667,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.9733333333333334,"llr_smooth_header":0.02666666666666667,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":-1,"app_ok":0.0,"app_acq":0.9333333333333333,"app_header":0.06666666666666667,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.9333333333333333,"llr_header":0.06666666666666667,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.9333333333333333,"llr_smooth_header":0.06666666666666667,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":0,"app_ok":0.0,"app_acq":0.72,"app_header":0.28,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.72,"llr_header":0.28,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.72,"llr_smooth_header":0.28,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":1,"app_ok":0.0,"app_acq":0.43333333333333335,"app_header":0.5666666666666667,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.43333333333333335,"llr_header":0.5666666666666667,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.43333333333333335,"llr_smooth_header":0.5666666666666667,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":2,"app_ok":0.0,"app_acq":0.16,"app_header":0.84,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.16,"llr_header":0.84,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.16,"llr_smooth_header":0.8333333333333334,"llr_smooth_payload":0.006666666666666667,"app_meter_db":null},{"snr":3,"app_ok":0.0,"app_acq":0.013333333333333334,"app_header":0.98,"app_payload":0.006666666666666667,"llr_ok":0.0,"llr_acq":0.013333333333333334,"llr_header":0.98,"llr_payload":0.006666666666666667,"llr_smooth_ok":0.02,"llr_smooth_acq":0.013333333333333334,"llr_smooth_header":0.8866666666666667,"llr_smooth_payload":0.08,"app_meter_db":null},{"snr":4,"app_ok":0.0,"app_acq":0.0,"app_header":0.9733333333333334,"app_payload":0.02666666666666667,"llr_ok":0.02,"llr_acq":0.0,"llr_header":0.9733333333333334,"llr_payload":0.006666666666666667,"llr_smooth_ok":0.16666666666666666,"llr_smooth_acq":0.0,"llr_smooth_header":0.8,"llr_smooth_payload":0.03333333333333333,"app_meter_db":null},{"snr":5,"app_ok":0.0,"app_acq":0.0,"app_header":0.92,"app_payload":0.08,"llr_ok":0.05333333333333334,"llr_acq":0.0,"llr_header":0.92,"llr_payload":0.02666666666666667,"llr_smooth_ok":0.37333333333333335,"llr_smooth_acq":0.0,"llr_smooth_header":0.6066666666666667,"llr_smooth_payload":0.02,"app_meter_db":null},{"snr":6,"app_ok":0.0,"app_acq":0.0,"app_header":0.7466666666666667,"app_payload":0.25333333333333335,"llr_ok":0.24666666666666667,"llr_acq":0.0,"llr_header":0.7466666666666667,"llr_payload":0.006666666666666667,"llr_smooth_ok":0.6533333333333333,"llr_smooth_acq":0.0,"llr_smooth_header":0.3333333333333333,"llr_smooth_payload":0.013333333333333334,"app_meter_db":null},{"snr":7,"app_ok":0.0,"app_acq":0.0,"app_header":0.5733333333333334,"app_payload":0.4266666666666667,"llr_ok":0.4066666666666667,"llr_acq":0.0,"llr_header":0.5733333333333334,"llr_payload":0.02,"llr_smooth_ok":0.8066666666666666,"llr_smooth_acq":0.0,"llr_smooth_header":0.19333333333333333,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":8,"app_ok":0.02666666666666667,"app_acq":0.0,"app_header":0.26666666666666666,"app_payload":0.7066666666666667,"llr_ok":0.7133333333333334,"llr_acq":0.0,"llr_header":0.26666666666666666,"llr_payload":0.02,"llr_smooth_ok":0.9333333333333333,"llr_smooth_acq":0.0,"llr_smooth_header":0.06666666666666667,"llr_smooth_payload":0.0,"app_meter_db":4.377445728832827},{"snr":9,"app_ok":0.19333333333333333,"app_acq":0.0,"app_header":0.13333333333333333,"app_payload":0.6733333333333333,"llr_ok":0.86,"llr_acq":0.0,"llr_header":0.13333333333333333,"llr_payload":0.006666666666666667,"llr_smooth_ok":0.9866666666666667,"llr_smooth_acq":0.0,"llr_smooth_header":0.013333333333333334,"llr_smooth_payload":0.0,"app_meter_db":4.511264129893974},{"snr":10,"app_ok":0.5133333333333333,"app_acq":0.0,"app_header":0.04666666666666667,"app_payload":0.44,"llr_ok":0.9466666666666667,"llr_acq":0.0,"llr_header":0.04666666666666667,"llr_payload":0.006666666666666667,"llr_smooth_ok":0.9933333333333333,"llr_smooth_acq":0.0,"llr_smooth_header":0.006666666666666667,"llr_smooth_payload":0.0,"app_meter_db":5.646678538934227},{"snr":11,"app_ok":0.8,"app_acq":0.0,"app_header":0.006666666666666667,"app_payload":0.19333333333333333,"llr_ok":0.9933333333333333,"llr_acq":0.0,"llr_header":0.006666666666666667,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":6.195095216896914},{"snr":12,"app_ok":0.94,"app_acq":0.0,"app_header":0.006666666666666667,"app_payload":0.05333333333333334,"llr_ok":0.9933333333333333,"llr_acq":0.0,"llr_header":0.006666666666666667,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":7.334437611873168},{"snr":13,"app_ok":0.9866666666666667,"app_acq":0.0,"app_header":0.0,"app_payload":0.013333333333333334,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":8.522317349111928},{"snr":14,"app_ok":1.0,"app_acq":0.0,"app_header":0.0,"app_payload":0.0,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":9.43092697076045}],"QAM16_awgn":[{"snr":2,"app_ok":0.0,"app_acq":0.2866666666666667,"app_header":0.7066666666666667,"app_payload":0.006666666666666667,"llr_ok":0.0,"llr_acq":0.2866666666666667,"llr_header":0.7066666666666667,"llr_payload":0.006666666666666667,"llr_smooth_ok":0.0,"llr_smooth_acq":0.2866666666666667,"llr_smooth_header":0.6066666666666667,"llr_smooth_payload":0.10666666666666667,"app_meter_db":null},{"snr":3,"app_ok":0.0,"app_acq":0.04,"app_header":0.9333333333333333,"app_payload":0.02666666666666667,"llr_ok":0.0,"llr_acq":0.04,"llr_header":0.9333333333333333,"llr_payload":0.02666666666666667,"llr_smooth_ok":0.0,"llr_smooth_acq":0.04,"llr_smooth_header":0.6133333333333333,"llr_smooth_payload":0.3466666666666667,"app_meter_db":null},{"snr":4,"app_ok":0.0,"app_acq":0.006666666666666667,"app_header":0.7933333333333333,"app_payload":0.2,"llr_ok":0.0,"llr_acq":0.006666666666666667,"llr_header":0.7933333333333333,"llr_payload":0.2,"llr_smooth_ok":0.0,"llr_smooth_acq":0.006666666666666667,"llr_smooth_header":0.32666666666666666,"llr_smooth_payload":0.6666666666666666,"app_meter_db":null},{"snr":5,"app_ok":0.0,"app_acq":0.0,"app_header":0.58,"app_payload":0.42,"llr_ok":0.0,"llr_acq":0.0,"llr_header":0.58,"llr_payload":0.42,"llr_smooth_ok":0.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.10666666666666667,"llr_smooth_payload":0.8933333333333333,"app_meter_db":null},{"snr":6,"app_ok":0.0,"app_acq":0.0,"app_header":0.26,"app_payload":0.74,"llr_ok":0.0,"llr_acq":0.0,"llr_header":0.26,"llr_payload":0.74,"llr_smooth_ok":0.25333333333333335,"llr_smooth_acq":0.0,"llr_smooth_header":0.04,"llr_smooth_payload":0.7066666666666667,"app_meter_db":null},{"snr":7,"app_ok":0.0,"app_acq":0.0,"app_header":0.08666666666666667,"app_payload":0.9133333333333333,"llr_ok":0.08,"llr_acq":0.0,"llr_header":0.08666666666666667,"llr_payload":0.8333333333333334,"llr_smooth_ok":0.8533333333333334,"llr_smooth_acq":0.0,"llr_smooth_header":0.006666666666666667,"llr_smooth_payload":0.14,"app_meter_db":null},{"snr":8,"app_ok":0.0,"app_acq":0.0,"app_header":0.0,"app_payload":1.0,"llr_ok":0.41333333333333333,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.5866666666666667,"llr_smooth_ok":0.9866666666666667,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.013333333333333334,"app_meter_db":null},{"snr":9,"app_ok":0.0,"app_acq":0.0,"app_header":0.0,"app_payload":1.0,"llr_ok":0.7866666666666666,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.21333333333333335,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":10,"app_ok":0.0,"app_acq":0.0,"app_header":0.0,"app_payload":1.0,"llr_ok":0.9466666666666667,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.05333333333333334,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":11,"app_ok":0.0,"app_acq":0.0,"app_header":0.0,"app_payload":1.0,"llr_ok":0.9933333333333333,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.006666666666666667,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":12,"app_ok":0.2,"app_acq":0.0,"app_header":0.0,"app_payload":0.8,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":10.065630976054061},{"snr":13,"app_ok":0.5066666666666667,"app_acq":0.0,"app_header":0.0,"app_payload":0.49333333333333335,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":10.550218062762733},{"snr":14,"app_ok":0.7266666666666667,"app_acq":0.0,"app_header":0.0,"app_payload":0.2733333333333333,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":11.068802956771039},{"snr":15,"app_ok":0.9733333333333334,"app_acq":0.0,"app_header":0.0,"app_payload":0.02666666666666667,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":11.73627542872519},{"snr":16,"app_ok":0.9933333333333333,"app_acq":0.0,"app_header":0.0,"app_payload":0.006666666666666667,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":12.442422996580675},{"snr":17,"app_ok":0.9933333333333333,"app_acq":0.0,"app_header":0.0,"app_payload":0.006666666666666667,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":13.299325892000384},{"snr":18,"app_ok":1.0,"app_acq":0.0,"app_header":0.0,"app_payload":0.0,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":14.146602980442093}],"QAM16_multipath":[{"snr":2,"app_ok":0.0,"app_acq":0.17333333333333334,"app_header":0.8266666666666667,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.17333333333333334,"llr_header":0.8266666666666667,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.17333333333333334,"llr_smooth_header":0.8266666666666667,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":3,"app_ok":0.0,"app_acq":0.02666666666666667,"app_header":0.9733333333333334,"app_payload":0.0,"llr_ok":0.0,"llr_acq":0.02666666666666667,"llr_header":0.9733333333333334,"llr_payload":0.0,"llr_smooth_ok":0.0,"llr_smooth_acq":0.02666666666666667,"llr_smooth_header":0.9133333333333333,"llr_smooth_payload":0.06,"app_meter_db":null},{"snr":4,"app_ok":0.0,"app_acq":0.0,"app_header":0.9733333333333334,"app_payload":0.02666666666666667,"llr_ok":0.0,"llr_acq":0.0,"llr_header":0.9733333333333334,"llr_payload":0.02666666666666667,"llr_smooth_ok":0.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.7733333333333333,"llr_smooth_payload":0.22666666666666666,"app_meter_db":null},{"snr":5,"app_ok":0.0,"app_acq":0.0,"app_header":0.92,"app_payload":0.08,"llr_ok":0.0,"llr_acq":0.0,"llr_header":0.92,"llr_payload":0.08,"llr_smooth_ok":0.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.5533333333333333,"llr_smooth_payload":0.44666666666666666,"app_meter_db":null},{"snr":6,"app_ok":0.0,"app_acq":0.0,"app_header":0.8466666666666667,"app_payload":0.15333333333333332,"llr_ok":0.0,"llr_acq":0.0,"llr_header":0.8466666666666667,"llr_payload":0.15333333333333332,"llr_smooth_ok":0.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.3466666666666667,"llr_smooth_payload":0.6533333333333333,"app_meter_db":null},{"snr":7,"app_ok":0.0,"app_acq":0.0,"app_header":0.5466666666666666,"app_payload":0.4533333333333333,"llr_ok":0.0,"llr_acq":0.0,"llr_header":0.5466666666666666,"llr_payload":0.4533333333333333,"llr_smooth_ok":0.08666666666666667,"llr_smooth_acq":0.0,"llr_smooth_header":0.16666666666666666,"llr_smooth_payload":0.7466666666666667,"app_meter_db":null},{"snr":8,"app_ok":0.0,"app_acq":0.0,"app_header":0.26,"app_payload":0.74,"llr_ok":0.04,"llr_acq":0.0,"llr_header":0.26,"llr_payload":0.7,"llr_smooth_ok":0.6466666666666666,"llr_smooth_acq":0.0,"llr_smooth_header":0.02666666666666667,"llr_smooth_payload":0.32666666666666666,"app_meter_db":null},{"snr":9,"app_ok":0.0,"app_acq":0.0,"app_header":0.15333333333333332,"app_payload":0.8466666666666667,"llr_ok":0.36666666666666664,"llr_acq":0.0,"llr_header":0.15333333333333332,"llr_payload":0.48,"llr_smooth_ok":0.8866666666666667,"llr_smooth_acq":0.0,"llr_smooth_header":0.04,"llr_smooth_payload":0.07333333333333333,"app_meter_db":null},{"snr":10,"app_ok":0.0,"app_acq":0.0,"app_header":0.06666666666666667,"app_payload":0.9333333333333333,"llr_ok":0.6866666666666666,"llr_acq":0.0,"llr_header":0.06666666666666667,"llr_payload":0.24666666666666667,"llr_smooth_ok":0.9733333333333334,"llr_smooth_acq":0.0,"llr_smooth_header":0.02,"llr_smooth_payload":0.006666666666666667,"app_meter_db":null},{"snr":11,"app_ok":0.0,"app_acq":0.0,"app_header":0.02666666666666667,"app_payload":0.9733333333333334,"llr_ok":0.84,"llr_acq":0.0,"llr_header":0.02666666666666667,"llr_payload":0.13333333333333333,"llr_smooth_ok":0.9933333333333333,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.006666666666666667,"app_meter_db":null},{"snr":12,"app_ok":0.0,"app_acq":0.0,"app_header":0.0,"app_payload":1.0,"llr_ok":0.9666666666666667,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.03333333333333333,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":null},{"snr":13,"app_ok":0.05333333333333334,"app_acq":0.0,"app_header":0.0,"app_payload":0.9466666666666667,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":9.909582491528871},{"snr":14,"app_ok":0.25333333333333335,"app_acq":0.0,"app_header":0.0,"app_payload":0.7466666666666667,"llr_ok":0.9933333333333333,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.006666666666666667,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":10.17238081598919},{"snr":15,"app_ok":0.6333333333333333,"app_acq":0.0,"app_header":0.0,"app_payload":0.36666666666666664,"llr_ok":0.9933333333333333,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.006666666666666667,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":10.8197679522425},{"snr":16,"app_ok":0.86,"app_acq":0.0,"app_header":0.0,"app_payload":0.14,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":11.507591424513603},{"snr":17,"app_ok":0.9133333333333333,"app_acq":0.0,"app_header":0.0,"app_payload":0.08666666666666667,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":12.269909028666667},{"snr":18,"app_ok":0.98,"app_acq":0.0,"app_header":0.0,"app_payload":0.02,"llr_ok":1.0,"llr_acq":0.0,"llr_header":0.0,"llr_payload":0.0,"llr_smooth_ok":1.0,"llr_smooth_acq":0.0,"llr_smooth_header":0.0,"llr_smooth_payload":0.0,"app_meter_db":13.070731488680496}]},"siso":{"awgn":[{"snr":-4,"sym_ok":0.0,"acquired":0.9615384615384616,"meter_db":-4.204450032220658},{"snr":-3,"sym_ok":0.0,"acquired":0.9615384615384616,"meter_db":-3.0743907608879493},{"snr":-2,"sym_ok":0.0,"acquired":0.9743589743589743,"meter_db":-2.374092189600905},{"snr":-1,"sym_ok":0.0,"acquired":0.9871794871794872,"meter_db":-1.3587953569308133},{"snr":0,"sym_ok":0.0,"acquired":1.0,"meter_db":-0.3260246829030393},{"snr":1,"sym_ok":0.0,"acquired":1.0,"meter_db":0.7190630499449712},{"snr":2,"sym_ok":0.0,"acquired":1.0,"meter_db":1.6259547437786723},{"snr":3,"sym_ok":0.0,"acquired":1.0,"meter_db":2.607565831955956},{"snr":4,"sym_ok":0.0,"acquired":1.0,"meter_db":3.7040088407767024},{"snr":5,"sym_ok":0.0,"acquired":1.0,"meter_db":4.677610268165665},{"snr":6,"sym_ok":0.1794871794871795,"acquired":1.0,"meter_db":5.845366363075881},{"snr":7,"sym_ok":0.9743589743589743,"acquired":1.0,"meter_db":6.822063886864109},{"snr":8,"sym_ok":1.0,"acquired":1.0,"meter_db":7.764272191134376},{"snr":9,"sym_ok":1.0,"acquired":1.0,"meter_db":9.058672980650625},{"snr":10,"sym_ok":1.0,"acquired":1.0,"meter_db":10.080927649758397},{"snr":11,"sym_ok":1.0,"acquired":1.0,"meter_db":11.140344404045937},{"snr":12,"sym_ok":1.0,"acquired":1.0,"meter_db":12.053930263855063}],"multipath":[{"snr":-4,"sym_ok":0.0,"acquired":0.9615384615384616,"meter_db":-4.258622595092004},{"snr":-3,"sym_ok":0.0,"acquired":0.9615384615384616,"meter_db":-2.985420178569456},{"snr":-2,"sym_ok":0.0,"acquired":1.0,"meter_db":-2.7938173546029557},{"snr":-1,"sym_ok":0.0,"acquired":0.9871794871794872,"meter_db":-1.4763006284387306},{"snr":0,"sym_ok":0.0,"acquired":1.0,"meter_db":-0.42346889290756057},{"snr":1,"sym_ok":0.0,"acquired":1.0,"meter_db":0.6603386098184639},{"snr":2,"sym_ok":0.0,"acquired":1.0,"meter_db":1.5744923005723206},{"snr":3,"sym_ok":0.0,"acquired":1.0,"meter_db":2.5790163785889257},{"snr":4,"sym_ok":0.0,"acquired":1.0,"meter_db":3.6207951348311287},{"snr":5,"sym_ok":0.0,"acquired":1.0,"meter_db":4.853111658980577},{"snr":6,"sym_ok":0.0,"acquired":1.0,"meter_db":5.844242491192102},{"snr":7,"sym_ok":0.20512820512820512,"acquired":1.0,"meter_db":6.771376299579906},{"snr":8,"sym_ok":0.9615384615384616,"acquired":1.0,"meter_db":8.025887607364346},{"snr":9,"sym_ok":1.0,"acquired":1.0,"meter_db":8.646225457730992},{"snr":10,"sym_ok":1.0,"acquired":1.0,"meter_db":9.876189303856673},{"snr":11,"sym_ok":1.0,"acquired":1.0,"meter_db":10.768917419349027},{"snr":12,"sym_ok":1.0,"acquired":1.0,"meter_db":11.835244956281004}]},"facts":{"siso50":6.4,"app50":7.4,"fix50":3.5,"mcs4app":13.0,"mcs4llr":8.2},"rates":{"mcs0":1.8564356435643563,"mcs4":3.532182103610675,"siso":1.9555555555555555}};
+const BUDGET = [{"frame":0,"cp":0.1111111111111111,"null":0.062065972222222224,"pilot":0.11848958333333333,"fec":0.3819444444444445,"hdr":0.020833333333333332,"payload":0.3055555555555556,"bps":0.6111111111111112,"name":"SISO","sub":"QPSK \u00b7 RS+conv r0.46 \u00b7 3.2 MS/s","mbps":1.9555555555555557},{"frame":0.04702970297029703,"cp":0.1905940594059406,"null":0.14294554455445543,"pilot":0.04764851485148515,"fec":0.382013201320132,"hdr":0.004125412541254125,"payload":0.18564356435643564,"bps":0.3712871287128713,"name":"\u4f60\u7684 MCS 0","sub":"QPSK \u00b7 Turbo r1/3 \u00b7 900 B burst","mbps":1.8564356435643563},{"frame":0.08948194662480377,"cp":0.18210361067503925,"null":0.13657770800627944,"pilot":0.04552590266875981,"fec":0.36342229199372056,"hdr":0.006279434850863423,"payload":0.17660910518053374,"bps":0.706436420722135,"name":"\u4f60\u7684 MCS 4","sub":"16QAM \u00b7 Turbo r1/3 \u00b7 900 B burst","mbps":3.532182103610675}];
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) {
+    const v = attrs[k];
+    if ((k === "fill" || k === "stroke") && typeof v === "string" && v.startsWith("var(")) e.style[k] = v;
+    else e.setAttribute(k, v);
+  }
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const pct = v => (v * 100).toFixed(v === 0 || v === 1 ? 0 : 1) + "%";
+
+/* facts */
+(function facts() {
+  const f = DATA.facts;
+  const items = [
+    [f.siso50, "dB", "SISO 的 50% 成功點（AWGN 真實 SNR，每個 188 B symbol）"],
+    [f.app50, "dB", "你的 MCS 0 現在的 50% 點（900 B burst）"],
+    [f.fix50, "dB", "你的 MCS 0 修正 LLR 並平滑 channel estimate 後"],
+    [`${f.mcs4app} → ${f.mcs4llr}`, "dB", "你的 MCS 4 只修 LLR 的 50% 點，16QAM 受害最深"],
+    ["−3 ~ −5", "dB", "你的 SNR meter 相對真實 SNR 的偏差；SISO 的在 ±0.5 dB 內"],
+    ["0.61 / 0.37", "bit/sample", "payload 效率：SISO 對你的 MCS 0（MCS 4 是 0.71）"],
+  ];
+  const host = document.getElementById("facts");
+  for (const [n, u, c] of items) {
+    const d = document.createElement("div"); d.className = "fact";
+    d.innerHTML = `<div class="num">${n} <small>${u}</small></div><div class="cap">${c}</div>`;
+    host.appendChild(d);
+  }
+})();
+
+/* tone diagram */
+(function tones() {
+  const svg = document.getElementById("tones");
+  const w = 960, x0 = 150, n = 64, step = (w - x0 - 20) / n;
+  const rows = [["SISO", 30, i => i % 7 === 0 ? "p" : "d", "var(--siso)"],
+                ["你的", 92, i => { const k = i - 32; if (k === 0 || k < -26 || k > 26) return "z"; return [-21, -7, 7, 21].includes(k) ? "p" : "d"; }, "var(--mine)"]];
+  for (const [name, y, kind, col] of rows) {
+    el("text", { x: 10, y: y + 26, "font-size": 13 }, svg).textContent = name;
+    for (let i = 0; i < n; i++) {
+      const k = kind(i), x = x0 + i * step;
+      if (k === "z") { el("rect", { x: x + 1, y: y + 30, width: step - 2, height: 2, fill: "var(--ovh-2)" }, svg); continue; }
+      const h = k === "p" ? (name === "SISO" ? 40 : 14) : 14;
+      el("rect", { x: x + 1, y: y + 32 - h, width: step - 2, height: h, rx: 1, fill: k === "p" ? col : "var(--ovh-2)", opacity: k === "p" ? 1 : 0.7 }, svg);
+    }
+  }
+  el("text", { x: x0, y: 145, "font-size": 11 }, svg).textContent = "灰：data tone（功率 1）  彩色：pilot（高度＝相對振幅）  底線：null／guard";
+})();
+
+/* generic line chart */
+function lineChart(host, opt) {
+  host.innerHTML = "";
+  const W = 880, H = 340, m = { l: 56, r: 18, t: 14, b: 44 };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": opt.aria }, host);
+  const [x0, x1] = opt.x, [y0, y1] = opt.y;
+  const X = v => m.l + (v - x0) / (x1 - x0) * (W - m.l - m.r);
+  const Y = v => H - m.b - (v - y0) / (y1 - y0) * (H - m.t - m.b);
+  const g = el("g", { class: "axis" }, svg);
+  for (const t of opt.yTicks) {
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), stroke: "var(--grid)", "stroke-width": 1 }, g);
+    el("text", { x: m.l - 8, y: Y(t) + 4, "text-anchor": "end" }, g).textContent = opt.yFmt(t);
+  }
+  for (const t of opt.xTicks) {
+    el("line", { x1: X(t), x2: X(t), y1: H - m.b, y2: H - m.b + 4, stroke: "var(--line)" }, g);
+    el("text", { x: X(t), y: H - m.b + 18, "text-anchor": "middle" }, g).textContent = t;
+  }
+  el("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--line)" }, g);
+  el("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle" }, g).textContent = opt.xLabel;
+  el("text", { x: 14, y: (m.t + H - m.b) / 2, "text-anchor": "middle", transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` }, g).textContent = opt.yLabel;
+  if (opt.diag) el("line", { x1: X(Math.max(x0, y0)), y1: Y(Math.max(x0, y0)), x2: X(Math.min(x1, y1)), y2: Y(Math.min(x1, y1)), stroke: "var(--muted)", "stroke-dasharray": "3 4", "stroke-width": 1 }, svg);
+  const clip = v => Math.max(y0, Math.min(y1, v));
+  const labels = [];
+  for (const s of opt.series) {
+    const pts = s.pts.filter(p => p[1] !== null && p[0] >= x0 && p[0] <= x1);
+    if (!pts.length) continue;
+    const d = pts.map((p, i) => (i ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(clip(p[1])).toFixed(1)).join(" ");
+    el("path", { d, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-dasharray": s.dash ? "6 4" : "none", "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    if (opt.endLabels) {
+      const lp = pts[pts.length - 1];
+      labels.push({ y: Y(clip(lp[1])), x: X(lp[0]), text: s.short || s.name, color: s.color });
+    }
+  }
+  // end labels with collision avoidance
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 14) labels[i].y = labels[i - 1].y + 14;
+  for (const L of labels) {
+    el("circle", { cx: L.x, cy: L.y, r: 0 }, svg);
+    el("text", { x: W - m.r + 8, y: L.y + 4, class: "lbl" }, svg).textContent = L.text;
+  }
+  // hover
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--muted)", "stroke-width": 1, opacity: 0 }, svg);
+  const dots = opt.series.map(s => el("circle", { r: 4.5, fill: s.color, stroke: "var(--paper)", "stroke-width": 2, opacity: 0 }, svg));
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; host.appendChild(tip);
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+  const interp = (pts, x) => {
+    const p = pts.filter(q => q[1] !== null);
+    if (!p.length || x < p[0][0] - 1e-9 || x > p[p.length - 1][0] + 1e-9) return null;
+    for (let i = 1; i < p.length; i++) if (x <= p[i][0]) { const a = p[i - 1], b = p[i]; return a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]); }
+    return p[p.length - 1][1];
+  };
+  function move(ev) {
+    const r = svg.getBoundingClientRect();
+    const sx = (ev.clientX - r.left) / r.width * W;
+    let xv = x0 + (sx - m.l) / (W - m.l - m.r) * (x1 - x0);
+    xv = Math.max(x0, Math.min(x1, Math.round(xv / opt.snap) * opt.snap));
+    cross.setAttribute("x1", X(xv)); cross.setAttribute("x2", X(xv)); cross.setAttribute("opacity", 1);
+    let rows = "";
+    opt.series.forEach((s, i) => {
+      const v = interp(s.pts, xv);
+      if (v === null) { dots[i].setAttribute("opacity", 0); return; }
+      dots[i].setAttribute("cx", X(xv)); dots[i].setAttribute("cy", Y(clip(v))); dots[i].setAttribute("opacity", 1);
+      rows += `<div class="r"><span><i class="sw" style="background:${s.color}"></i>${s.name}</span><b>${opt.tipFmt(v)}</b></div>`;
+    });
+    tip.innerHTML = `<div class="h">${opt.tipX(xv)}</div>${rows}`;
+    tip.hidden = false;
+    const hr = host.getBoundingClientRect();
+    let left = ev.clientX - hr.left + 14;
+    if (left + tip.offsetWidth > hr.width) left = ev.clientX - hr.left - tip.offsetWidth - 14;
+    tip.style.left = Math.max(0, left) + "px";
+    tip.style.top = Math.max(0, ev.clientY - hr.top - tip.offsetHeight - 10) + "px";
+  }
+  function leave() { tip.hidden = true; cross.setAttribute("opacity", 0); dots.forEach(d => d.setAttribute("opacity", 0)); }
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerleave", leave);
+}
+function legend(host, series) {
+  host.innerHTML = series.map(s => `<span><i class="${s.box ? "box" : ""} ${s.dash ? "dash" : ""}" style="${s.box ? "background" : "border-color"}:${s.color}"></i>${s.name}</span>`).join("");
+}
+function table(host, head, rows) {
+  host.innerHTML = `<table><thead><tr>${head.map((h, i) => `<th class="${i ? "num" : ""}">${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map((c, i) => i ? `<td class="num">${c}</td>` : `<th class="num">${c}</th>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+function toggle(ids, onChange) {
+  const btns = ids.map(id => document.getElementById(id));
+  btns.forEach((b, i) => b.addEventListener("click", () => { btns.forEach(x => x.setAttribute("aria-pressed", x === b)); onChange(i); }));
+}
+
+/* A: success vs SNR */
+const SIS_PER_900 = 900 / 176;
+function drawA(ch) {
+  const mine = DATA.mine["QPSK_" + ch], siso = DATA.siso[ch];
+  const series = [
+    { name: "你的（現在的 RX）", short: "現在", color: css("--mine"), pts: mine.map(r => [r.snr, r.app_ok]) },
+    { name: "SISO（每 188 B symbol）", short: "SISO", color: css("--siso"), pts: siso.map(r => [r.snr, r.sym_ok]) },
+    { name: "SISO（換算 900 B）", short: "SISO 900B", color: css("--siso"), dash: true, pts: siso.map(r => [r.snr, Math.pow(r.sym_ok, SIS_PER_900)]) },
+    { name: "你的 ＋ 正確 LLR", short: "＋LLR", color: css("--fix1"), pts: mine.map(r => [r.snr, r.llr_ok]) },
+    { name: "你的 ＋ LLR ＋ 平滑 CE", short: "＋LLR＋CE", color: css("--fix2"), pts: mine.map(r => [r.snr, r.llr_smooth_ok]) },
+  ];
+  legend(document.getElementById("legA"), series);
+  lineChart(document.getElementById("plotA"), {
+    aria: "Success rate versus SNR", x: [-2, 14], y: [0, 1], xTicks: [-2, 0, 2, 4, 6, 8, 10, 12, 14], yTicks: [0, .25, .5, .75, 1],
+    yFmt: v => (v * 100) + "%", xLabel: "真實 SNR（dB，sample-rate 頻寬內）", yLabel: "成功率", series, snap: 1,
+    tipFmt: pct, tipX: x => `SNR ${x} dB`,
+  });
+  const rows = mine.filter(r => r.snr >= -2 && r.snr <= 14).map(r => {
+    const s = siso.find(q => q.snr === r.snr);
+    return [r.snr, pct(r.app_ok), pct(r.llr_ok), pct(r.llr_smooth_ok), s ? pct(s.sym_ok) : "–"];
+  });
+  table(document.getElementById("tableA"), ["SNR dB", "你的 現在", "＋LLR", "＋LLR＋CE", "SISO symbol"], rows);
+}
+toggle(["a-awgn", "a-mp"], i => drawA(i ? "multipath" : "awgn"));
+
+/* B: failure stages (stacked bars) */
+let bRx = "app", bCh = "awgn";
+function drawB() {
+  const rows = DATA.mine["QPSK_" + bCh].filter(r => r.snr >= -2 && r.snr <= 12);
+  const p = bRx === "app" ? "app" : "llr_smooth";
+  const cats = [
+    { k: "acq", name: "preamble 沒抓到", color: css("--mine") },
+    { k: "header", name: "header CRC 失敗", color: css("--siso") },
+    { k: "payload", name: "payload 失敗", color: css("--fix1") },
+    { k: "ok", name: "成功", color: css("--ovh-1") },
+  ];
+  legend(document.getElementById("legB"), cats.map(c => ({ ...c, box: true })));
+  const host = document.getElementById("plotB"); host.innerHTML = "";
+  const W = 880, H = 300, m = { l: 56, r: 16, t: 10, b: 42 };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Failure stage per SNR" }, host);
+  const bw = (W - m.l - m.r) / rows.length;
+  const Y = v => H - m.b - v * (H - m.t - m.b);
+  const g = el("g", { class: "axis" }, svg);
+  for (const t of [0, .25, .5, .75, 1]) {
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(t), y2: Y(t), stroke: "var(--grid)" }, g);
+    el("text", { x: m.l - 8, y: Y(t) + 4, "text-anchor": "end" }, g).textContent = (t * 100) + "%";
+  }
+  el("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle" }, g).textContent = "真實 SNR（dB）";
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; host.appendChild(tip);
+  rows.forEach((r, i) => {
+    const x = m.l + i * bw + 3, w = bw - 6;
+    let acc = 0;
+    const grp = el("g", {}, svg);
+    for (const c of cats) {
+      const v = r[`${p}_${c.k}`];
+      if (v > 0) {
+        const y1 = Y(acc), y2 = Y(acc + v);
+        el("rect", { x, y: y2 + 1, width: w, height: Math.max(0, y1 - y2 - 2), fill: c.color }, grp);
+      }
+      acc += v;
+    }
+    el("text", { x: x + w / 2, y: H - m.b + 16, "text-anchor": "middle" }, g).textContent = r.snr;
+    const hit = el("rect", { x: m.l + i * bw, y: m.t, width: bw, height: H - m.t - m.b, fill: "transparent" }, svg);
+    hit.addEventListener("pointermove", ev => {
+      tip.innerHTML = `<div class="h">SNR ${r.snr} dB · 150 bursts</div>` + cats.map(c => `<div class="r"><span><i class="sw" style="background:${c.color}"></i>${c.name}</span><b>${pct(r[`${p}_${c.k}`])}</b></div>`).join("");
+      tip.hidden = false;
+      const hr = host.getBoundingClientRect();
+      let left = ev.clientX - hr.left + 14;
+      if (left + tip.offsetWidth > hr.width) left = ev.clientX - hr.left - tip.offsetWidth - 14;
+      tip.style.left = Math.max(0, left) + "px"; tip.style.top = Math.max(0, ev.clientY - hr.top - tip.offsetHeight - 10) + "px";
+    });
+    hit.addEventListener("pointerleave", () => { tip.hidden = true; });
+  });
+  table(document.getElementById("tableB"), ["SNR dB", ...cats.map(c => c.name)], rows.map(r => [r.snr, ...cats.map(c => pct(r[`${p}_${c.k}`]))]));
+}
+toggle(["b-app", "b-fix"], i => { bRx = i ? "fix" : "app"; drawB(); });
+toggle(["b-awgn", "b-mp"], i => { bCh = i ? "multipath" : "awgn"; drawB(); });
+
+/* C: meter calibration */
+function drawC(ch) {
+  const mine = DATA.mine["QPSK_" + ch].concat(DATA.mine["QAM16_" + ch].filter(r => r.snr > 14)).filter(r => r.app_meter_db !== null);
+  const siso = DATA.siso[ch];
+  const series = [
+    { name: "你的 RX 顯示的 SNR", short: "你的 meter", color: css("--mine"), pts: mine.map(r => [r.snr, r.app_meter_db]) },
+    { name: "SISO 印出的 SNR", short: "SISO meter", color: css("--siso"), pts: siso.map(r => [r.snr, r.meter_db]) },
+  ];
+  legend(document.getElementById("legC"), series.concat([{ name: "顯示值 ＝ 真實值", color: css("--muted"), dash: true }]));
+  lineChart(document.getElementById("plotC"), {
+    aria: "Displayed SNR versus true SNR", x: [-4, 18], y: [-4, 18], xTicks: [-4, 0, 4, 8, 12, 16], yTicks: [-4, 0, 4, 8, 12, 16],
+    yFmt: v => v, xLabel: "真實 SNR（dB）", yLabel: "畫面上的 SNR（dB）", series, snap: 1, diag: true,
+    tipFmt: v => v.toFixed(1) + " dB", tipX: x => `真實 SNR ${x} dB`,
+  });
+}
+toggle(["c-awgn", "c-mp"], i => drawC(i ? "multipath" : "awgn"));
+
+/* D: goodput vs C/N0 */
+function drawD(ch) {
+  const R = DATA.rates;
+  const off5 = 10 * Math.log10(5e6), off32 = 10 * Math.log10(3.2e6);
+  const q = DATA.mine["QPSK_" + ch], h = DATA.mine["QAM16_" + ch], s = DATA.siso[ch];
+  const series = [
+    { name: "你的 MCS 0（現在）", short: "MCS0 現在", color: css("--mine"), pts: q.map(r => [r.snr + off5, R.mcs0 * r.app_ok]) },
+    { name: "SISO（3.2 MS/s）", short: "SISO", color: css("--siso"), pts: s.map(r => [r.snr + off32, R.siso * r.sym_ok]) },
+    { name: "你的 MCS 0（修正後）", short: "MCS0 修正", color: css("--fix1"), pts: q.map(r => [r.snr + off5, R.mcs0 * r.llr_smooth_ok]) },
+    { name: "你的 MCS 4（修正後）", short: "MCS4 修正", color: css("--fix2"), pts: h.map(r => [r.snr + off5, R.mcs4 * r.llr_smooth_ok]) },
+    { name: "你的 MCS 4（現在）", short: "MCS4 現在", color: css("--mine"), dash: true, pts: h.map(r => [r.snr + off5, R.mcs4 * r.app_ok]) },
+  ];
+  legend(document.getElementById("legD"), series);
+  lineChart(document.getElementById("plotD"), {
+    aria: "Goodput versus C/N0", x: [64, 86], y: [0, 3.6], xTicks: [64, 68, 72, 76, 80, 84], yTicks: [0, 1, 2, 3],
+    yFmt: v => v, xLabel: "C/N0（dB-Hz）", yLabel: "Goodput（Mbit/s）", series, snap: 0.5,
+    tipFmt: v => v.toFixed(2) + " Mbit/s", tipX: x => `C/N0 ${x.toFixed(1)} dB-Hz`,
+  });
+}
+toggle(["d-awgn", "d-mp"], i => drawD(i ? "multipath" : "awgn"));
+
+/* E: budget */
+(function budget() {
+  const cats = [
+    { k: "payload", name: "Payload", color: "var(--fix1)" },
+    { k: "fec", name: "FEC 冗餘", color: "var(--ovh-3)" },
+    { k: "hdr", name: "封包標頭／padding", color: "var(--ovh-2)" },
+    { k: "pilot", name: "Pilot", color: "var(--siso)" },
+    { k: "null", name: "空的 tone", color: "var(--ovh-1)" },
+    { k: "cp", name: "Cyclic prefix", color: "var(--mine)" },
+    { k: "frame", name: "Preamble／header／guard", color: "var(--fix2)" },
+  ];
+  legend(document.getElementById("legE"), cats.map(c => ({ ...c, box: true })));
+  const host = document.getElementById("budget");
+  for (const row of BUDGET) {
+    const d = document.createElement("div"); d.className = "brow";
+    const bar = cats.filter(c => row[c.k] > 0).map(c => `<div tabindex="0" style="flex:${row[c.k]};background:${c.color}" title="${c.name}：${(row[c.k] * 100).toFixed(1)}%" aria-label="${c.name} ${(row[c.k] * 100).toFixed(1)}%"></div>`).join("");
+    d.innerHTML = `<div class="name">${row.name}<small>${row.sub}</small></div><div class="bar">${bar}</div><div class="val">${row.bps.toFixed(3)}<small>bit/sample</small></div>`;
+    host.appendChild(d);
+  }
+  const t = document.createElement("details"); t.className = "data";
+  t.innerHTML = `<summary>顯示數據表</summary><div class="table-scroll"></div>`;
+  host.appendChild(t);
+  table(t.querySelector(".table-scroll"), ["", ...cats.map(c => c.name), "Mbit/s"], BUDGET.map(r => [r.name, ...cats.map(c => (r[c.k] * 100).toFixed(1) + "%"), r.mbps.toFixed(2)]));
+})();
+
+function drawAll() {
+  const p = id => document.querySelector(`#${id}[aria-pressed="true"]`);
+  drawA(p("a-mp") ? "multipath" : "awgn"); drawB(); drawC(p("c-mp") ? "multipath" : "awgn"); drawD(p("d-mp") ? "multipath" : "awgn");
+}
+drawAll();
+const mq = matchMedia("(prefers-color-scheme: dark)");
+mq.addEventListener && mq.addEventListener("change", drawAll);
+new MutationObserver(drawAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
+</body></html>
