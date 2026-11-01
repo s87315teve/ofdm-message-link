@@ -348,3 +348,100 @@ def test_snr_at_matches_within_one_preamble_and_forgets_old_bursts():
     assert decoder.snr_at(3000) is None
     assert decoder.snr_at(1000 + 321) is None
     assert decoder.snr_at(1000, tolerance=0) == 10.0
+
+
+# -- own leakage without a decodable CONTROL frame (review finding 2) ----------
+
+
+def _leak_stream(profile):
+    """Three peer bursts, one own burst with no CONTROL frame, three more peer bursts.
+
+    The own burst stands for leakage whose CONTROL subframe failed its CRC:
+    the receiver's first valid subframe is DATA, from a sequence counter far
+    from the peer's.
+    """
+
+    import itertools
+
+    peer = MessageTransmitter(profile, seed_range=(64, 127), mcs_entry=mcs_entry(12))
+    own = MessageTransmitter(profile, seed_range=(1, 63), mcs_entry=mcs_entry(12))
+    own._sequence = itertools.count(20000)
+
+    def peer_burst():
+        return peer.encode_datagrams(_datagrams(peer, 1), control_payloads=[link_header(2, 1)])
+
+    bursts = [peer_burst() for _ in range(3)]
+    bursts.append(own.encode_datagrams(_datagrams(own, 1)))
+    bursts += [peer_burst() for _ in range(3)]
+    return _awgn(_stream(bursts), SNR_DB, seed=11)
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_own_bursts_are_dropped_by_their_scrambler_seed(profile, workers):
+    receiver = MessageReceiver(profile, own_seed_range=(1, 63), decode_workers=workers)
+    try:
+        delivered = _feed(receiver, _leak_stream(profile))
+    finally:
+        receiver.close()
+    stats = receiver.stats
+    assert [message.sequence for message in delivered] == [0, 1, 2, 3, 4, 5]
+    assert (stats.own_seed_drops, stats.dropped_bursts) == (1, 1)
+    assert stats.missing_bursts == 0 and stats.sequence_resyncs == 0
+    assert all(r.subframes_lost == 0 for r in receiver.drain_burst_reports())
+
+
+def test_the_receiver_takes_its_seed_range_from_the_control_handler(profile):
+    handler = _Handler()
+    handler.own_seed_range = (1, 63)
+    receiver = MessageReceiver(profile, control_handler=handler)
+    _feed(receiver, _leak_stream(profile))
+    assert receiver.stats.own_seed_drops == 1 and receiver.stats.missing_bursts == 0
+
+
+def test_with_a_handler_one_stray_burst_does_not_ruin_the_loss_count(profile):
+    receiver = MessageReceiver(profile, control_handler=_Handler())  # no seed range
+    _feed(receiver, _leak_stream(profile))
+    stats = receiver.stats
+    assert stats.missing_bursts == 0 and stats.own_seed_drops == 0
+    reports = receiver.drain_burst_reports()
+    assert [r.first_sequence for r in reports] == [0, 1, 2, 20000, 3, 4, 5]
+    assert all(r.subframes_lost == 0 for r in reports)
+
+
+def test_without_duplex_options_the_receiver_counts_as_before(profile):
+    receiver = MessageReceiver(profile)  # rx_app
+    _feed(receiver, _leak_stream(profile))
+    assert receiver.stats.missing_bursts == 20000 - 2 - 1
+    assert receiver.stats.own_seed_drops == 0
+
+
+def test_sequence_tracker_resyncs_only_on_a_confirmed_jump():
+    from ofdm_message_link.link import _SequenceTracker
+
+    tracker = _SequenceTracker(max_gap=1024)
+    for sequence in (0, 1, 30000, 2, 4):  # one stray value, then a real gap of one
+        tracker.observe(sequence)
+    assert (tracker.last, tracker.missing, tracker.resyncs) == (4, 1, 0)
+    for sequence in (40000, 40001, 40003):  # a confirmed new position (peer restart)
+        tracker.observe(sequence)
+    assert (tracker.last, tracker.missing, tracker.resyncs) == (40003, 2, 1)
+    for sequence in (10, 11):  # a restart backwards
+        tracker.observe(sequence)
+    assert (tracker.last, tracker.resyncs) == (11, 2)
+    legacy = _SequenceTracker()
+    for sequence in (0, 30000):
+        legacy.observe(sequence)
+    assert legacy.missing == 29999
+
+
+def test_burst_report_loss_is_bounded_and_seed_ranges_are_validated(profile):
+    from ofdm_message_link.link import DUPLEX_MAX_SEQUENCE_GAP, node_seed_range
+
+    receiver = MessageReceiver(profile, control_handler=_Handler())
+    assert receiver._bounded_lost(50_000) == DUPLEX_MAX_SEQUENCE_GAP
+    assert MessageReceiver(profile)._bounded_lost(50_000) == 50_000
+    assert node_seed_range(1) == (1, 63) and node_seed_range(2) == (64, 127)
+    with pytest.raises(ValueError):
+        node_seed_range(3)
+    with pytest.raises(ValueError):
+        MessageReceiver(profile, own_seed_range=(0, 63))

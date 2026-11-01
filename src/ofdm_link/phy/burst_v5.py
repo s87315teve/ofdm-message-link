@@ -146,6 +146,9 @@ class DecodedPsduBurst:
     burst_end: int
     diagnostics: BurstDiagnostics
     payload_symbols: NDArray[np.complex64]
+    # The SIG's scrambler seed (1-127, 0 = off): a link layer that splits the
+    # seed range between its nodes can tell its own transmitter's leakage.
+    scrambler_seed: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.body, bytes):
@@ -489,6 +492,7 @@ def _decode_v5_acquired(
         burst_end=observed_end,
         diagnostics=diagnostics,
         payload_symbols=payload_symbols,
+        scrambler_seed=header.scrambler_seed,
     )
 
 

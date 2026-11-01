@@ -171,6 +171,7 @@ class LinkController:
         sample_rate: float | None = None,
         codec: ControlCodec | None = None,
         on_event: Callable[[str, Mapping[str, Any]], None] | None = None,
+        own_seed_range: tuple[int, int] | None = None,
     ) -> None:
         if mode not in {"auto", "fixed"}:
             raise ValueError("mode must be 'auto' or 'fixed'")
@@ -178,6 +179,10 @@ class LinkController:
             raise ValueError("the MCS ladder is empty")
         self.node_id = int(node_id)
         self.peer_id = int(peer_id)
+        # The scrambler seeds this node's transmitter uses
+        # (link.node_seed_range); a MessageReceiver built with this
+        # controller as its handler drops bursts with those seeds.
+        self.own_seed_range = None if own_seed_range is None else tuple(own_seed_range)
         self._la = la
         self._reporter = reporter
         self._ladder = tuple(ladder)

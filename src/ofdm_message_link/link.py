@@ -32,7 +32,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -83,8 +83,36 @@ _SEQUENCE_MODULUS = 1 << 16
 # Non-zero 802.11 scrambler seeds; 0 would switch the scrambler off.
 _SCRAMBLER_SEEDS = 127
 DEFAULT_SEED_RANGE = (1, _SCRAMBLER_SEEDS)
+# The duplex nodes split the seeds (design section 3.1): node 1 sends with
+# 1-63, node 2 with 64-127, so the SIG alone names the sender.
+NODE_SEED_RANGES = {1: (1, 63), 2: (64, _SCRAMBLER_SEEDS)}
 # DATA burst reports kept between two drains.
 BURST_REPORT_HISTORY = 256
+DUPLEX_MAX_SEQUENCE_GAP = 1024
+"""Largest DATA sequence jump a receiver with a control handler believes.
+
+A jump beyond it is not counted as loss: it is a burst that does not belong
+to the peer's sequence (the node's own leakage that escaped the drop, or a
+restarted peer).  The tracker re-synchronises only when the next sequence
+confirms the new position, so one stray burst leaves the count untouched.
+The price: a real outage of more than 1024 consecutive DATA subframes (about
+0.2 s at full aggregation) is counted as a resync, not as loss; the link
+adaptation sees such an outage as missing feedback instead.
+"""
+
+
+def node_seed_range(node_id: int) -> tuple[int, int]:
+    """The scrambler seeds duplex node ``node_id`` (1 or 2) transmits with.
+
+    Give the same range to that node's ``MessageTransmitter(seed_range=...)``
+    and, as ``own_seed_range``, to its ``MessageReceiver`` (or its control
+    handler), so the receiver drops its own transmitter's leakage from the SIG.
+    """
+
+    try:
+        return NODE_SEED_RANGES[int(node_id)]
+    except (KeyError, TypeError, ValueError):
+        raise ValueError(f"no seed range for node {node_id!r}; nodes are 1 and 2") from None
 
 
 def load_link_config(config_path: str | Path, overlays: Sequence[str | Path] = ()) -> LinkConfig:
@@ -544,6 +572,11 @@ class ReceiveStats:
     # a control handler dropped whole (a node's own leakage).
     control_frames: int = 0
     dropped_bursts: int = 0
+    # Of dropped_bursts, those recognised by their SIG scrambler seed (the
+    # receiver's own seed range); and DATA sequence re-synchronisations
+    # after an implausible jump (see DUPLEX_MAX_SEQUENCE_GAP).
+    own_seed_drops: int = 0
+    sequence_resyncs: int = 0
 
     @property
     def expected_bursts(self) -> int:
@@ -646,18 +679,37 @@ class _BurstContext:
 
 @dataclass
 class _SequenceTracker:
-    """Track a wrapping 16-bit sequence counter across a lossy link."""
+    """Track a wrapping 16-bit sequence counter across a lossy link.
+
+    ``max_gap`` None keeps the one-way receiver's rule: any forward jump is
+    loss.  With a ``max_gap``, a jump of more than ``max_gap`` (either way) is
+    held as a candidate and changes nothing; if the next sequence continues
+    from the candidate rather than from ``last``, the tracker re-synchronises
+    there without counting loss (``resyncs``).
+    """
 
     last: int | None = None
     gaps: int = 0
     missing: int = 0
-    _seen: set[int] = field(default_factory=set)
+    max_gap: int | None = None
+    resyncs: int = 0
+    _candidate: int | None = None
 
     def observe(self, sequence: int) -> None:
         if self.last is None:
             self.last = sequence
             return
         forward = (sequence - self.last) % _SEQUENCE_MODULUS
+        if self.max_gap is not None and forward > self.max_gap:
+            candidate, self._candidate = self._candidate, sequence
+            if candidate is not None and 0 < (sequence - candidate) % _SEQUENCE_MODULUS <= (
+                self.max_gap
+            ):
+                self.last = sequence
+                self.resyncs += 1
+                self._candidate = None
+            return
+        self._candidate = None
         # A wrap-distance in the upper half means the burst arrived out of
         # order rather than that nearly 65k bursts vanished.  Reordering is
         # not expected on this link, so do not invent loss from it.
@@ -705,6 +757,17 @@ class MessageReceiver:
     handed to it.  Every burst that carried at least one of our DATA frames
     is also summarised as a :class:`~ofdm_message_link.la.api.BurstReport`
     for :meth:`drain_burst_reports`.
+
+    Duplex options, all without effect when not given (``rx_app``):
+
+    * ``own_seed_range`` (inclusive scrambler seeds this node's own
+      transmitter uses, see :func:`node_seed_range`; taken from the control
+      handler's ``own_seed_range`` attribute when not passed): a v5 burst
+      whose SIG seed lies in it is the node's own leakage and is dropped
+      whole, even when its CONTROL subframe did not decode.
+    * ``max_sequence_gap``: see :data:`DUPLEX_MAX_SEQUENCE_GAP`, the default
+      when a control handler or an own seed range is set; otherwise no limit.
+      It also bounds ``BurstReport.subframes_lost``.
     """
 
     def __init__(
@@ -715,10 +778,28 @@ class MessageReceiver:
         max_observations: int = 64,
         decode_workers: int = 1,
         control_handler: ControlHandler | None = None,
+        own_seed_range: tuple[int, int] | None = None,
+        max_sequence_gap: int | None = None,
         clock=time.monotonic,
     ) -> None:
         if not isinstance(profile, PhyProfile):
             raise TypeError("profile must be a PhyProfile")
+        if own_seed_range is None and control_handler is not None:
+            offered = getattr(control_handler, "own_seed_range", None)
+            own_seed_range = offered if isinstance(offered, tuple) else None
+        if own_seed_range is not None:
+            low, high = own_seed_range
+            if not (type(low) is int and type(high) is int and 1 <= low <= high <= 127):
+                raise ValueError("own_seed_range must be (low, high) with 1 <= low <= high <= 127")
+            own_seed_range = (low, high)
+        if max_sequence_gap is None and (
+            control_handler is not None or own_seed_range is not None
+        ):
+            max_sequence_gap = DUPLEX_MAX_SEQUENCE_GAP
+        if max_sequence_gap is not None and (
+            type(max_sequence_gap) is not int or max_sequence_gap < 1
+        ):
+            raise ValueError("max_sequence_gap must be a positive integer")
         if type(decode_workers) is not int or decode_workers < 1:
             raise ValueError("decode_workers must be a positive integer")
         self._profile = profile
@@ -729,7 +810,8 @@ class MessageReceiver:
             symbol_demapper=self._selection.symbol_demapper,
         )
         self._reassembler = Reassembler(max_pending=max_pending_messages)
-        self._tracker = _SequenceTracker()
+        self._own_seed_range = own_seed_range
+        self._tracker = _SequenceTracker(max_gap=max_sequence_gap)
         self._origin = datagram.local_origin()
         self._stats = ReceiveStats()
         self._observations: deque[BurstObservation] = deque(maxlen=max_observations)
@@ -763,6 +845,7 @@ class MessageReceiver:
             self._stats,
             sequence_gaps=self._tracker.gaps,
             missing_bursts=self._tracker.missing,
+            sequence_resyncs=self._tracker.resyncs,
             incomplete_messages_dropped=self._reassembler.incomplete_dropped,
         )
 
@@ -915,6 +998,16 @@ class MessageReceiver:
         into the loss of every datagram it shared a burst with.
         """
 
+        seed = getattr(burst, "scrambler_seed", None)
+        own = self._own_seed_range
+        if own is not None and seed is not None and own[0] <= seed <= own[1]:
+            # The node's own transmitter, recognised from the SIG alone.
+            self._stats = replace(
+                self._stats,
+                dropped_bursts=self._stats.dropped_bursts + 1,
+                own_seed_drops=self._stats.own_seed_drops + 1,
+            )
+            return []
         parsed = unpack_ampdu(burst.body)
         context = _BurstContext(
             wire_version=burst.diagnostics.wire_version,
@@ -1015,10 +1108,14 @@ class MessageReceiver:
                 mcs_index=context.mcs_index,
                 snr_db=self._snr_at(context.burst_start),
                 subframes_ok=subframes_ok,
-                subframes_lost=self._tracker.missing - missing_before,
+                subframes_lost=self._bounded_lost(self._tracker.missing - missing_before),
                 fcs_ok=fcs_ok,
             )
         )
+
+    def _bounded_lost(self, lost: int) -> int:
+        limit = self._tracker.max_gap
+        return lost if limit is None else min(lost, limit)
 
     def _snr_at(self, burst_start: int | None) -> float | None:
         return None if burst_start is None else self._decoder.snr_at(burst_start)
