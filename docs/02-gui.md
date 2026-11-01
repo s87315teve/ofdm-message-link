@@ -168,4 +168,21 @@ EOF
 檔案預設到 16 MiB 就輪替成 `PATH.1`（`--stats-log-max-mb`、`--stats-log-backups` 可調）。
 計數欄位是從視窗開啟起累計，所以最新一行永遠是總數。
 
+## 2.8 雙向 node 的視窗（`node_app`）
+
+標題是 `OFDM node 1`（或 2）。最上面是 demo banner 與一行 profile（node、TX／RX 頻率、sample rate、
+LA 演算法、ports），下面三排 cards：
+
+| 排 | Cards |
+|---|---|
+| TX | TX light、Queue、Airtime（2 s）、Sent goodput |
+| RX | Link light、SNR（2 s）、Loss（10 s）、Rx goodput |
+| LA | 目前的 TX MCS 與最後一次決定的原因；SNR_eff 與 offset；peer 回報的 loss（10 s）；feedback age（< 0.2 s 綠、< 0.5 s 黃、其他紅 = stale） |
+
+Cards 下方的 60 秒圖：主軸是 TX MCS index，副軸是 LA 用的 filtered peer SNR；feedback stale 的時段
+塗紅。Tabs：**Live**（RX spectrum、constellation、RX goodput）、**Send**（輸入訊息、batch）、
+**Link adaptation**（auto／fixed 切換、fixed 時的 MCS 選單、threshold 表、最近 20 個決定）、
+**Log**、**Hardware**（RX 的 Radio panel、TX gain、profile 的 TX 頻率、原始統計）。
+`--gain-profile` 在視窗模式也有效；`--stats-log` 每 0.5 s 一行，格式見 [7.8 節](07-reference.md)。
+
 下一篇：[用 UDP 傳資料與傳影像](03-your-own-app.md)。

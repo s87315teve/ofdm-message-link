@@ -109,6 +109,23 @@ class RotatingLog:
         self.rotations += 1
 
 
+def open_stats_log(args: argparse.Namespace) -> RotatingLog | None:
+    """The ``--stats-log`` file, capped at ``--stats-log-max-mb`` by rotation.
+
+    Every line carries cumulative counters, so the newest line still gives the
+    totals since the start after older lines have been rotated away.  Used by
+    node_app; rx_app has the same function.
+    """
+
+    if getattr(args, "stats_log", None) is None:
+        return None
+    return RotatingLog(
+        args.stats_log,
+        max_bytes=max_bytes_from_mb(getattr(args, "stats_log_max_mb", DEFAULT_MAX_MB)),
+        backups=getattr(args, "stats_log_backups", DEFAULT_BACKUPS),
+    )
+
+
 def copy_stream(source, log: RotatingLog, chunk_bytes: int = 65536) -> None:
     """Copy a binary stream into ``log`` until end of file."""
 

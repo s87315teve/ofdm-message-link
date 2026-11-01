@@ -73,6 +73,10 @@ header 裡：兩端 sample rate 不同，等於對「一個 sample 代表多少�
 - RX 另外預設 `--decode-workers 4`，把 payload decode 分到 4 個 process。Preamble acquisition 與
   header 仍由單一 owner 依序處理，交付順序不變。
 
+雙向的 `node_app` 一個 Pluto 一個 process，TX 與 RX 在**同一個** engine 子 process：一個 Pluto
+只能開一個 libiio context，兩個方向共用 `pluto.SharedPlutoContext`。Payload decode 預設 3 個
+process（兩個 node 在同一台 PC 時的 CPU 預算）。見 [7.8 節](07-reference.md#78-node_app雙向-node-的命令列)。
+
 為什麼用 process 而不是 thread：Python 的 interpreter lock 讓多個 thread 無法同時跑 Python 程式碼，
 decode 分到 thread 上幾乎不會變快；分到 process 才能真的用到多個 CPU 核心。
 
@@ -94,6 +98,10 @@ decode 分到 thread 上幾乎不會變快；分到 process 才能真的用到�
 | `dashboard_widgets.py` / `plots.py` | Cards、trend、constellation、spectrum |
 | `qt_runtime.py` / `window_layout.py` | Qt 啟動、Ctrl-C、`--geometry` 與影像 demo 視窗排列 |
 | `log_limits.py` | log 大小上限與輪替、清舊 run 目錄 |
+| `node_app.py` / `node_options.py` | 雙向 node：命令列、headless 迴圈、control socket、stats line |
+| `node_engine.py` | 雙向 node 的子 process：TX 與 RX 共用一個 radio、link controller |
+| `node_window.py` | 雙向 node 的視窗：TX、RX、LA 三排 cards 與 MCS 軌跡 |
+| `control.py` / `la/` | Control／feedback wire format；可替換的 link adaptation |
 | `udp_send.py` / `udp_recv.py` | 最小的 socket 生產者／消費者範例 |
 
 PHY library，在 `src/ofdm_link/`：
@@ -121,7 +129,8 @@ PHY library，在 `src/ofdm_link/`：
 ## 1.6 這個範例刻意不做的事
 
 - **TCP**：TCP 的 handshake 與 ACK 需要反向路徑，單向 link 做不起來。
-- **雙向 / ARQ / TDD**：需要 MAC layer 來排程誰在什麼時候發射，這裡沒有。
+- **ARQ / TDD**：需要 MAC layer 來排程誰在什麼時候發射與重送，這裡沒有。雙向只有 FDD 的
+  `node_app`（兩個頻率，各自發射），語意仍是 UDP：掉了的 burst 不會重送。
 - **完整的 channel model**：`--snr-db` 只加 AWGN，沒有 fading、CFO 或 sample clock offset。
   （`ofdm_link.radio.simulation` 有比較完整的模型，測試會用到，但 GUI 沒有接上它。）
 

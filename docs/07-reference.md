@@ -216,4 +216,79 @@ preamble 偵測、channel estimation、burst header，以及完整 burst 在有 
 - Codec 在 [`ofdm_message_link/control.py`](../src/ofdm_message_link/control.py)，report 的資料結構在
   [`ofdm_message_link/la/api.py`](../src/ofdm_message_link/la/api.py)。
 
+## 7.8 `node_app`：雙向 node 的命令列
+
+一個 Pluto 一個 process。Node 同時發送與接收（FDD）：node 1 在 2420 MHz 發、2460 MHz 收，node 2
+相反（[`configs/profiles/duplex_fdd_2420_2460.yaml`](../configs/profiles/duplex_fdd_2420_2460.yaml)，
+備用 `duplex_fdd_2405_2475.yaml`）。一個 Pluto 只能開一個 libiio context（第二個回 EBUSY），所以 TX 與
+RX 共用一個 `pluto.SharedPlutoContext`，在同一個 engine 子 process 裡。
+
+```bash
+# 視窗模式
+python -m ofdm_message_link.node_app --node-id 1 --transport pluto \
+    --enable-rf --acknowledgement 'I acknowledge that this process will transmit RF'
+# Headless，給腳本量測用
+python -m ofdm_message_link.node_app --node-id 1 --transport pluto --headless \
+    --serial 104473541196000419000c00f2ff1e6e77 --tx-gain -5 --duration 90 \
+    --gain-profile 0:-5,30:-20,60:-5 --link-adaptation olla \
+    --stats-log node1_stats.jsonl --la-log la_1.jsonl --ready-file node1.ready \
+    --enable-rf --acknowledgement 'I acknowledge that this process will transmit RF'
+# 不用 radio：兩個 node 在同一台 PC 上經 UDP 交換 samples
+python -m ofdm_message_link.node_app --node-id 1 --headless &
+python -m ofdm_message_link.node_app --node-id 2 --headless &
+```
+
+**Ports**（`base = 52200 + 10·node_id`，不與 52001／52002／52012／52022／52101 衝突）：
+
+| Node | ingress | egress | control | UDP sample |
+|---:|---:|---:|---:|---:|
+| 1 | 52211 | 52212 | 52213 | 52214 |
+| 2 | 52221 | 52222 | 52223 | 52224 |
+
+Ingress 與 control socket 都不設 `SO_REUSEADDR`：port 已被佔用時直接 EADDRINUSE 失敗，不會兩個
+process 默默分流。
+
+| 選項 | 說明 |
+|---|---|
+| `--node-id {1,2}` | 必填；決定 profile 中的頻率、ports 與 scrambler seed 範圍（1–63／64–127） |
+| `--overlay` | 預設 `configs/profiles/duplex_fdd_2420_2460.yaml`；必須有 `duplex` 段 |
+| `--tx-freq` / `--rx-freq` | 覆寫 profile 的頻率；信號邊緣離開 2400–2483.5 MHz 時警告 |
+| `--tx-gain` / `--rx-gain` | 預設 −89.75 / 15 dB。`--gain` 會被拒絕（node 有兩個 gain） |
+| `--rx-analog-bw HZ` | AD9361 RX analog filter，預設 = sample rate |
+| `--rx-kernel-buffers N` | libiio RX kernel buffers，預設 4 |
+| `--tx-duty-cap D` | `pluto`：TX duty 不超過 D，預設 0.7（USB 2.0 同時帶 5 MS/s RX 時的上限，見 M0）；1 = 不限 |
+| `--headless` | 不開視窗，隱含 `--auto-start`；`pluto` 需要 `--serial` |
+| `--duration S` | Ready 後 S 秒停止（headless） |
+| `--gain-profile "T:DB,..."` | 依 ready 後的秒數排程 TX gain，例如 `0:-5,30:-20,60:-5` |
+| `--control-port P` | localhost UDP JSON control socket，預設依 node；0 = 關閉 |
+| `--link-adaptation SPEC` | `fixed`（預設，固定在 `--mcs-index`）、`olla`、`arf`、`pkg.mod:Class`、`file.py:Class` |
+| `--link-adaptation-arg K=V` | LA class 的參數，可重複 |
+| `--feedback-reporter SPEC` / `--feedback-reporter-arg K=V` | RX 端量測與回報模組，預設 `default` |
+| `--mcs-index N` | 固定或起始的 MCS，預設 8 |
+| `--control-mcs-index N` | Control-only burst 的 MCS，預設 profile 的值（8） |
+| `--decode-workers N` | 預設 3（兩個 node 在同一台 PC 時的 CPU 預算） |
+| `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`；control socket 的 `mark` 也寫入 |
+| `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON |
+| `--ready-file PATH` | 兩個方向都在跑時建立，停止時刪除 |
+| `--ingress-port` / `--egress-host` / `--egress-port` | 覆寫依 node 的預設 |
+| `--udp-listen-port` / `--udp-peer-port` | `--transport udp` 的 sample ports，預設自己與 peer 的 base+4 |
+| `--enable-rf` / `--acknowledgement` | `--transport pluto` 必要，和 `tx_app` 相同 |
+
+**Control socket**：每個 datagram 一個 JSON request，回一個 JSON answer。
+
+| Request | 動作 |
+|---|---|
+| `{"cmd":"set_gain","dir":"tx","db":-20}` | 立即改 gain，回 `{"ok":true,"readback":-20.0}` |
+| `{"cmd":"set_mcs","mcs":12}` | 固定 MCS；`"mcs":null` 交回 LA |
+| `{"cmd":"set_la","mode":"auto"}` | `auto` 或 `fixed`（凍結目前的 MCS） |
+| `{"cmd":"mark","text":"phase 2"}` | 同時寫入 stats log 與 LA log |
+| `{"cmd":"stats"}` / `{"cmd":"stop"}` | 最近一行 stats／停止 |
+
+Headless 收到 SIGTERM／SIGINT 或 `--duration` 到時：先停 TX（attenuator 回到最小輸出），再停 RX，
+刪除 ready file，exit 0；radio 啟動失敗時 exit 2，engine 子 process 中途結束時 exit 3。
+
+**USB 限制（M0，`experiments/duplex_fdd/results/usb/`）**：Pluto 同時以 5 MS/s 接收時，TX duty 到
+0.7 都沒有 overflow；要求 0.8 以上時 TX 只到 0.78，其中一個 Pluto 每分鐘 overflow 約 180–220 次。
+8 個 kernel buffers 沒有改善。
+
 回到 [README](../README.md)。
