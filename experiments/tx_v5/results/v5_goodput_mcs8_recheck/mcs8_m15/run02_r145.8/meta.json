@@ -1,0 +1,15 @@
+{
+ "tx_root": "/home/steve/Desktop/steve/my_github/ofdm-message-link",
+ "tx_extra_args": "",
+ "root": "/home/steve/Desktop/steve/my_github/ofdm-message-link",
+ "tx_gain_db": -15.0,
+ "mcs_index": 8,
+ "rate": 145.79999999999998,
+ "size": 900,
+ "load_1min_at_start": 1.42,
+ "window_s": 31.245236668997677,
+ "rx_main_cpu_pct": 19.138917279936976,
+ "n_workers": 8,
+ "worker_cpu_mean_pct": 11.721786712001533,
+ "worker_cpu_sum_pct": 93.77429369601226
+}
