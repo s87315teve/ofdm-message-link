@@ -307,3 +307,89 @@ def test_ingress_keeps_reuse_address_by_default():
         assert first._socket.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
     finally:
         first.stop()
+
+
+# -- a raising policy (review finding 3) ------------------------------------------
+
+
+class _RaisingPolicy(_Policy):
+    def __init__(self, entry, *, fail=("entry",)):
+        super().__init__(entry)
+        self.fail = set(fail)
+        self.counts = {}
+
+    def _maybe_raise(self, name):
+        self.counts[name] = self.counts.get(name, 0) + 1
+        if name in self.fail:
+            raise RuntimeError(f"buggy {name}")
+
+    def entry_for_next_burst(self, now):
+        self._maybe_raise("entry")
+        return super().entry_for_next_burst(now)
+
+    def control_plan(self, now, *, idle):
+        self._maybe_raise("plan")
+        return super().control_plan(now, idle=idle)
+
+    def idle_wait_s(self, now):
+        self._maybe_raise("idle")
+        return 0.0
+
+    def on_sent(self, burst, now):
+        self._maybe_raise("sent")
+        super().on_sent(burst, now)
+
+
+def _run_briefly(worker, sink, seconds=0.3):
+    worker.start()
+    worker.attach(sink)
+    started = time.process_time()
+    time.sleep(seconds)
+    cpu = time.process_time() - started
+    worker.stop()
+    return cpu
+
+
+@pytest.mark.parametrize("fail", [("entry",), ("entry", "plan"), ("plan", "sent")])
+def test_a_raising_policy_falls_back_and_keeps_the_data_flowing(profile, fail):
+    policy = _RaisingPolicy(mcs_entry(12), fail=fail)
+    worker, bridge = _start(profile, policy=policy, entry=mcs_entry(8))
+    for index in range(3):
+        assert worker.submit("t", bytes([index]) * 100)
+    sink = _Sink()
+    _run_briefly(worker, sink)
+    data = [r for r in bridge.sent.values if not r.control_only]
+    assert sum(r.message_count for r in data) == 3
+    if "entry" in fail:
+        assert all(r.mcs_index == 8 for r in data)  # the active entry
+    if "plan" in fail:
+        assert all(r.control_subframes == 0 for r in data)
+    assert worker.policy_errors >= 1
+    # One report per failing method, then rate-limited.
+    assert 1 <= len(bridge.failed.values) <= len(fail)
+
+
+@pytest.mark.parametrize("fail", [("idle",), ("plan",), ("idle", "plan")])
+def test_a_raising_policy_does_not_spin_the_idle_worker(profile, fail):
+    policy = _RaisingPolicy(mcs_entry(12), fail=fail)
+    worker, bridge = _start(profile, policy=policy)
+    cpu = _run_briefly(worker, _Sink())
+    assert len(bridge.failed.values) <= 1
+    assert sum(policy.counts.values()) < 40  # 50 ms back-off after each failure
+    assert cpu < 0.25
+
+
+def test_a_worker_error_backs_off_and_is_reported_once_per_second(profile):
+    class BrokenSink(_Sink):
+        calls = 0
+
+        def send(self, samples):
+            BrokenSink.calls += 1
+            raise OSError("radio gone")
+
+    worker, bridge = _start(profile)
+    for index in range(50):
+        worker.submit("t", bytes([index]) * 100)
+    _run_briefly(worker, BrokenSink())
+    assert BrokenSink.calls <= 10  # 50 ms back-off
+    assert len(bridge.failed.values) == 1
