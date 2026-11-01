@@ -76,7 +76,7 @@ rx level now -64.7 dBFS   quietest -65.2 dBFS   loudest -43.9 dBFS   spread 21.3
 
 1. 回到模擬（`--transport udp`）。模擬會通、實機不通，問題就在 radio 這一段。
 2. 改用 cable 加 attenuator。Cable 會通、antenna 不通，問題在 antenna、距離或干擾。
-3. 退回 MCS 0。它需要的 SNR 最低。
+3. 退回 MCS 8（`--mcs-index 8`）。它需要的 SNR 最低。
 4. RX 加上 `--stats-log rx.jsonl`，從每一行的 `decoder` 欄位看 burst 卡在哪一步（`Decode` tab 顯示
    的是同一組計數）：
 

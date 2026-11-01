@@ -29,8 +29,8 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 |---|---|
 | `Goodput (2 s)` | 最近 2 秒送達 UDP 的 application bytes，Mbit/s |
 | `Loss (10 s)` | 最近 10 秒遺失率 = missing ÷（decoded + missing）；10 秒內沒有預期中的 burst 時顯示 `—` |
-| `SNR (2 s)` | 最近 2 秒**每一個抓到 preamble 的 burst**（包括後來沒解出來的）的平均 SNR，由 preamble 估計；2 秒內沒有 burst 時顯示 `—` |
-| `MCS` | 最後一個解出 burst 的 header 所帶的 MCS |
+| `SNR (2 s)` | 最近 2 秒**每一個抓到 preamble 的 burst**（包括後來沒解出來的）的平均 SNR，由 preamble（v5 是 LTF）估計；2 秒內沒有 burst 時顯示 `—` |
+| `MCS` | 最後一個解出 burst 的 header（v5 是 SIG）所帶的 MCS index |
 | `Link` | 燈號加一行原因或建議 |
 
 燈號依序判斷，第一個成立者勝出。規則集中在
@@ -43,19 +43,41 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 | 紅 `DOWN` | 超過 2 秒沒有 burst | `No bursts for 3 s` |
 | 紅 `LOSSY` | 最近 10 秒遺失率 ≥ 1 % | `Loss 4.2 % in the last 10 s` |
 | 黃 `LOSS` | 最近 10 秒遺失率 > 0 | `Loss 0.3 % in the last 10 s` |
-| 黃 `MARGINAL` | SNR < 門檻 + 1 dB | `SNR 15.4 dB is within 1 dB of 15 dB needed for MCS 4` |
-| 綠 `GOOD` | 其餘 | `No loss, SNR 2.3 dB above MCS 4 threshold` |
+| 黃 `MARGINAL` | SNR < 門檻 + 1 dB | `SNR 14.6 dB is within 1 dB of 14 dB needed for MCS 12` |
+| 綠 `GOOD` | 其餘 | `No loss, SNR 2.3 dB above MCS 12 threshold` |
 
 **黃燈 `LOSS` 在真的 radio 上很常見，不代表設定有問題。** 規則是「10 秒內掉 1 個 burst 就變黃」，
 而影像 demo 每 10 秒約有 1,400 個 burst；2.4 GHz 又和 Wi-Fi 共用，偶爾被蓋掉一個是正常的。
 實測中遺失率 0.05% 時燈號有一半時間是黃的，畫面看起來完全正常。需要處理的是紅燈 `LOSSY`
 （≥ 1%），或是畫面持續破圖。模擬環境沒有干擾，所以在模擬裡看到黃燈就值得追查。
 
-SNR 門檻只有兩個有實測值：MCS 4 為 15 dB、MCS 0 為 9 dB（來源見[實測紀錄 8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz)）。
-v1.0.0 的門檻是 11 dB 與 8 dB，但那是舊的 SNR 定義（見 2.6），比現在的低 2–4 dB，兩組數字不能直接比較。
-用發射功率比較才公平：同一組 Pluto，新的 RX 在 MCS 0 少發約 10 dB、MCS 4 少發約 5 dB 仍然不掉包。
-其他 MCS 只依遺失率判斷，原因會註明 `no SNR threshold measured for MCS N`。紅燈或黃燈且 SNR
-已低於目前 MCS 的門檻時，原因後面會附上 `— try MCS 0`。
+SNR 門檻來自 Pluto 對 Pluto 的實測，規則是「遺失 < 1% 的最低 SNR + 1 dB，四捨五入到 0.5 dB」。
+門檻定義在 `dashboard.py` 的 `SNR_THRESHOLD_DB`：
+
+| MCS | 格式 | 門檻 | 來源 |
+|---:|---|---:|---|
+| 8 | QPSK 1/3 | 7.5 dB | [8.8](08-measurements.md#88-wire-v5pluto--pluto245-ghz) |
+| 9 | QPSK 1/2 | 9.0 dB | 8.8 |
+| 10 | QPSK 2/3 | 11.0 dB | 8.8 |
+| 12 | 16QAM 1/2 | 14.0 dB | 8.8 |
+| 13 | 16QAM 2/3 | 15.5 dB | 8.8 |
+| 14 | 16QAM 3/4 | 17.5 dB | 8.8 |
+| 15 | 64QAM 1/2 | 16.5 dB | 8.8 |
+| 16 | 64QAM 2/3 | 21.0 dB | 8.8 |
+| 17 | 64QAM 3/4 | 22.0 dB | 8.8 |
+| 0（舊格式） | QPSK Turbo 1/3 | 9.0 dB | [8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz) |
+| 4（舊格式） | 16QAM Turbo 1/3 | 15.0 dB | 8.7 |
+
+- MCS 0 與 4 只用在 RX 收到舊版 TX 的 burst 時。
+- **v5 與舊格式的門檻不能直接比。** v5 的 SNR 由 LTF 估計，同一個 TX gain 下比舊格式的讀數高約 3 dB：
+  v5 的波形 PAPR 比較低，peak 縮放之後真的多出約 3 dB 的發射功率。用同樣的 SNR 比，MCS 8 比 MCS 0
+  少需要約 3 dB；用 TX gain 比，少發約 6 dB。
+- MCS 15 的門檻比 MCS 14 低：同樣 3 bit/symbol，64QAM 1/2 比 16QAM 3/4 耐雜訊。
+- v1.0.0 的門檻是 11 dB（MCS 4）與 8 dB（MCS 0），但那是舊的 SNR 定義（見 2.6），比現在的低 2–4 dB。
+
+表中沒有的 MCS（11、1–3、5–7）只依遺失率判斷，原因會註明 `no SNR threshold measured for MCS N`。
+紅燈或黃燈且 SNR 已低於目前 MCS 的門檻時，原因後面會附上 `— try MCS N`：只建議同一種格式（v5 或舊格式）
+而且 TX 選單裡有的 MCS，因為舊版 TX 不能改送 v5。
 
 ## 2.3 TX 的 cards 與 light
 
@@ -66,8 +88,13 @@ TX 不知道 RX 有沒有收到（單向），所以不顯示遺失或 SNR。
 | `Goodput (2 s)` | 最近 2 秒送出去的 application bytes，應與 RX 相近 |
 | `Airtime (2 s)` | 最近 2 秒發射時間佔比 |
 | `Queue` | 等待發送的訊息數，應維持在個位數 |
-| `MCS for next message` | 下拉選單，可現場切換（下一則訊息起生效） |
+| `MCS for next message` | 下拉選單，可現場切換（下一則訊息起生效）。列出 v5 的 MCS 8、9、10、12–17，例如 `MCS 10 — QPSK 2/3, 4.0 Mbit/s PHY`：格式、code rate，以及目前 sample rate 下的 PHY rate。MCS 11 只能用 `--mcs-index 11` 選，選單會標 `[experiment]` |
 | `TX` | 燈號，旁邊是 `RF ON`（真的 radio）或 `SIMULATED`（udp） |
+
+`Send` tab 的 MCS 說明列出 spectral efficiency、一個完整 frame 的 burst 長度，以及 aggregation 的上限
+（例如 `up to 16 datagrams share a burst of at most 8 ms`）。`Hardware` tab 的 `subframes/burst` 是
+平均每個 burst 帶幾個 datagram，後面括號是目前的上限與 `max_wait`。負載低時接近 1；送得越快，
+queue 越長，這個數字越大（見[參考資料 7.2](07-reference.md#72-設定檔)的 `mac.aggregation`）。
 
 TX 燈號：灰 `OFF` = radio 尚未啟動；紅 `FAULT` = 最近 10 秒 UHD 的 `tx_time_error`、underflow 或
 sequence error 有增加（只有 USRP 會回報這些；用 Pluto 或模擬時不會出現紅燈，trend 的標題也只寫
@@ -85,12 +112,12 @@ sequence error 有增加（只有 USRP 會回報這些；用 Pluto 或模擬時�
   burst 通過 synchronization 與 CRC。
 - **兩張圖都沒資料**：根本還沒收到 samples。
 - Constellation 在 idle 時不會拿 raw noise 來畫。繞著原點的 noise cloud 看起來像訊號，會誤導判斷。
-- 黃色參考點依實際 decoded burst 切換成 QPSK 的 4 點或 16QAM 的 16 點。
+- 黃色參考點依實際 decoded burst 切換成 QPSK 的 4 點、16QAM 的 16 點或 64QAM 的 64 點。
 - GUI 預設每秒刷新 15 次（`--ui-fps` 調整）。統計文字每 0.5 秒更新。
 
 **怎麼從 constellation 看 SNR：** 每一團點越小、越集中在黃色參考點上，SNR 越高。點團開始互相
 碰到時，demapper 就會把某些 symbol 判到隔壁去，這時就要靠 FEC 修回來。16QAM 的點比 QPSK 密，
-所以同樣大小的點團在 16QAM 會先互相碰到。這就是 16QAM 需要較高 SNR 的原因。
+所以同樣大小的點團在 16QAM 會先互相碰到。這就是 16QAM 需要較高 SNR 的原因；64QAM 又更密。
 
 ### RX level
 
@@ -121,12 +148,16 @@ SNR 附近突然從接近 0 升到接近 100%。換一個 MCS 再做一次，比
 
 | 欄位 | 意義 | 限制 |
 |---|---|---|
-| `bursts decoded` | 通過 CRC 的 burst 數 | — |
-| `bursts missing` | 由 PHY sequence gap 推得的遺失 burst | **無法區分**「preamble 沒偵測到」與「CRC 失敗」，單向 link 本來就分不出來 |
-| `burst loss ratio` | missing ÷ (decoded + missing) | 即 PER |
+| `frames decoded` | 通過 CRC-32 的 frame 數，一個 datagram 一個 | 一個 v5 burst 可以帶好幾個 frame，所以這不是 burst 數 |
+| `frames missing` | 由 PHY sequence gap 推得的遺失 frame | **無法區分**「preamble 沒偵測到」與「CRC 失敗」，單向 link 本來就分不出來 |
+| `burst loss ratio` | missing ÷ (decoded + missing)，以 frame 計 | 即 PER |
+| `PSDUs received` | 解出 SIG、跑完 payload decode 的 v5 burst | 只算 v5 |
+| `PSDU FCS failed` | 整個 burst 的 FCS 失敗 | 其中 CRC-32 正確的 frame 照樣交付 |
+| `subframes OK` / `subframes CRC bad` | v5 burst 裡 CRC-32 正確／錯誤的 frame | 每個 CRC 錯誤的 frame 是一個 sequence gap |
+| `bad delimiters` / `delimiter resyncs` | 壞掉的 A-MPDU delimiter；之後找到下一個 delimiter 的次數 | 只在 FCS 失敗的 burst 出現 |
 | `incomplete messages` | 缺 fragment 而被丟棄的訊息 | 永遠無法修復 |
 | `foreign bursts` | CRC 有效但不是這個專案的格式 | 同一 channel 上的其他應用，不是 link 故障 |
-| `mean SNR` | 由 preamble 估計：兩個重複的半段相同的部分是訊號，不同的部分是雜訊，只看資料 carrier 所在的頻帶 | 每個 burst 單獨估約有 ±1 dB 的誤差，畫面上的 2 秒平均穩定得多。量的是熱雜訊，IQ imbalance、相位雜訊之類的失真不算在內，所以實機上同樣的 SNR 會比模擬難解 |
+| `mean SNR` | 由 preamble 估計：兩個重複的部分（舊格式是 preamble 的兩個半段，v5 是 LTF 的兩個 symbol）相同的部分是訊號，不同的部分是雜訊，只看資料 carrier 所在的頻帶 | 每個 burst 單獨估約有 ±1 dB 的誤差，畫面上的 2 秒平均穩定得多。量的是熱雜訊，IQ imbalance、相位雜訊之類的失真不算在內，所以實機上同樣的 SNR 會比模擬難解 |
 | `mean EVM` | Decision-directed：以最近的 constellation 點為參考算出的誤差 | Error rate 一高就**會飽和**。只從解得出來的 burst 計算 |
 | `mean one-way latency` | End-to-end latency | **只在收發同機時顯示**。跨主機沒有共同時間基準，所以直接顯示 `n/a` 而不是給假數字 |
 | `delivered goodput` | Application bits ÷ wall clock | 包含打字等待時間，只是觀察用 |
@@ -141,7 +172,8 @@ SNR 附近突然從接近 0 升到接近 100%。換一個 MCS 再做一次，比
 ## 2.7 `--stats-log`：把統計存成檔案
 
 RX 加上 `--stats-log PATH` 之後，每次統計刷新（0.5 秒）附加一行 JSON，內容與畫面同一次計算：
-`receiver`、`decoder`、`transport` 的累計計數，以及 `link_state`、`link_reason`、`loss_10s`
+`receiver`、`decoder`、`transport` 的累計計數（`receiver` 裡有上面的 `psdus_received`、`psdus_fcs_failed`、
+`subframes_ok`、`subframes_bad`、`bad_delimiters`、`delimiter_resyncs`），以及 `link_state`、`link_reason`、`loss_10s`
 （比例，不是 %）、`snr_2s`、`mcs_index`。做實驗時用這個取數據，比看畫面抄數字可靠。
 
 `snr_2s` 與 `mean_effective_snr_db` 是 preamble 估計的 SNR，同一行的 `"snr_method": "preamble"`
