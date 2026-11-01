@@ -84,6 +84,27 @@ section below.
   clean at 9.6 dB. At node 1 −20 dB the A→B SNR (9.6 dB) is above T(8) = 7.5 dB, so the M2 dip
   variant is not needed.
 
+## Is the 0.7 duty cap what limits MCS 8? No (`cap_mcs8_cap0.7/`, `cap_mcs8_cap1.0/`)
+
+This was checked after M3, with the start-to-start burst interval. Fixed MCS 8, both nodes at
+−5 dB, 180 datagrams/s each way, 30 s, `--tx-duty-cap 0.7` and then `1.0`. The cap wrapper now also
+reports what it sees: burst airtime handed down, and wall time spent inside the Pluto push.
+
+| cap | dir | goodput Mb/s | loss (all at the sender) | sender airtime | cap waits | push wall time / airtime |
+|---:|---|---:|---:|---:|---:|---:|
+| 0.7 | A→B | 1.125 | 8.6 % | 0.67 | 0 | 25.95 s / 19.65 s = 1.32 |
+| 0.7 | B→A | 1.102 | 10.1 % | 0.66 | 0 | 26.13 s / 19.34 s = 1.35 |
+| 1.0 (no cap) | A→B | 1.135 | 7.7 % | 0.68 | – | – |
+| 1.0 (no cap) | B→A | 1.110 | 10.0 % | 0.66 | – | – |
+
+Without the cap the node sends the same as with it, and the cap never waited. What limits it is the
+Pluto push: while the receiver streams 5 MS/s, a push of a burst takes about 1.33× the burst's
+airtime. That gives an airtime ceiling of 1/1.33 ≈ 0.75. The node cannot reach it exactly
+because it also encodes, and it stops at 0.66–0.70. This is the USB 2.0 limit of M0 (TX+RX
+~36 MB/s; TX duty topped out at 0.78 there). It is the same at every MCS: MCS 12, 15 and 17 also
+ran at airtime 0.6–0.7 in M2–M4. The cap at 0.7 sits just below this ceiling and protects
+`…6e77`'s receiver, which overflows at TX duty ≥ 0.8 (M0).
+
 ## First smoke run (`smoke/`, before the RX acquisition fix)
 
 20 s, MCS 8, both nodes at −20 dB, 100/s each way: A→B 10.8 % loss (SNR 10 dB), B→A 43 % (SNR

@@ -1,0 +1,24 @@
+{
+ "AB": {
+  "corrupt_lines": 2,
+  "error_lines": 2,
+  "progress": {
+   "frame": 883,
+   "out_time_us": 58866667,
+   "dup_frames": 0,
+   "drop_frames": 0
+  },
+  "frames": 883
+ },
+ "BA": {
+  "corrupt_lines": 96,
+  "error_lines": 65,
+  "progress": {
+   "frame": 877,
+   "out_time_us": 58466667,
+   "dup_frames": 0,
+   "drop_frames": 0
+  },
+  "frames": 877
+ }
+}

@@ -71,7 +71,7 @@ producer_cmd() {  # label ingress-port input-args...
 }
 consumer_cmd() {  # label egress-port; default error handling, we want the counts
     printf '%s\n' ffmpeg -nostdin -nostats -loglevel level+warning -progress "$OUT/video_$1_progress.txt" \
-        -i "udp://127.0.0.1:$2?fifo_size=100000&overrun_nonfatal=1" -f null -
+        -i "udp://127.0.0.1:$2?fifo_size=100000&overrun_nonfatal=1&timeout=5000000" -f null -
 }
 
 if [ "$INNER" -ne 1 ]; then
@@ -113,7 +113,14 @@ mapfile -t c < <(producer_cmd BA "$INGRESS_B" -re -f lavfi -i "$LAVFI_SRC")
 wait "$PROD_AB" || echo "A->B producer exited non-zero (see video_AB_tx.log)" >&2
 wait "$PROD_BA" || echo "B->A producer exited non-zero (see video_BA_tx.log)" >&2
 sleep 3   # let the last bursts arrive
+# A consumer blocked in a UDP read does not act on SIGTERM until a packet arrives; the URL's
+# 5-s timeout ends it on its own, and SIGKILL is the fallback.
 kill -TERM "$CONS_AB" "$CONS_BA" 2>/dev/null || true
+for _ in 1 2 3 4 5 6 7 8; do
+    kill -0 "$CONS_AB" 2>/dev/null || kill -0 "$CONS_BA" 2>/dev/null || break
+    sleep 1
+done
+kill -KILL "$CONS_AB" "$CONS_BA" 2>/dev/null || true
 wait "$CONS_AB" "$CONS_BA" 2>/dev/null || true
 PIDS=()
 
