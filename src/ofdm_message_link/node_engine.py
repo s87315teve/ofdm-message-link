@@ -428,8 +428,18 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
     )
     egress = EgressForwarder(*spec.egress)
     rx_worker = ReceiveWorker(receiver, sink, sink, egress=egress, observer=controller)
+    submit_failures = {"count": 0, "last_report": 0.0}
+
+    def submit_counted(source: str, payload: bytes) -> bool:
+        """The ingress path: a full send queue drops the datagram, and that is counted."""
+
+        accepted = tx_worker.submit(source, payload)
+        if not accepted:
+            submit_failures["count"] += 1
+        return accepted
+
     ingress = IngressListener(
-        spec.ingress_host, spec.ingress_port, tx_worker.submit, reuse_address=False
+        spec.ingress_host, spec.ingress_port, submit_counted, reuse_address=False
     )
     ingress_error = None
     try:
@@ -440,7 +450,6 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
     worker = NodeWorker(tx_worker, rx_worker, controller=controller,
                         ingress_error=ingress_error, failed=sink.failed.emit)
     worker.start()
-    submit_failures = {"count": 0, "last_report": 0.0}
 
     def apply_gain(direction: str, gain_db: float) -> float:
         readback = worker.set_gain(direction, gain_db)
