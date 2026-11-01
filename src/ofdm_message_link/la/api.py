@@ -73,8 +73,8 @@ and run ``node_app --link-adaptation my_la.py:Threshold --link-adaptation-arg
 margin_db=1.5``.  Rules:
 
 * ``decide`` is called before every data burst: keep it cheap, and return an
-  index from ``context.ladder`` (anything else is replaced by the nearest
-  lower rung and logged).
+  index from ``context.ladder`` (any transmit-visible v5 index is accepted;
+  anything else is replaced by the nearest slower rung and logged).
 * ``snapshot`` returns JSON-able values only; the GUI and ``--la-log`` show it.
 * Calls never overlap (the controller holds one lock), so no locking is needed.
   Times are ``time.monotonic()`` seconds.
