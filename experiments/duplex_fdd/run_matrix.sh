@@ -34,12 +34,14 @@ usage: experiments/duplex_fdd/run_matrix.sh MATRIX --out-root DIR [--enable-rf] 
   --enable-rf       passed to run_duplex.sh (required for a real run)
   --workers N       decode workers per node (default: run_duplex.sh default)
   --m2-dip          add the -5 -> -15 -> -5 M2 variant at MCS 8 and 12 (when SNR at -20 dB < 9 dB)
+  --m2-gain2-offset DB  M2: node 2 (B->A) transmits DB above node 1, capped at 0 dB (the bench
+                    path is asymmetric: A needs ~6 dB more peer TX than B, results/si/README.md)
   --skip-existing   skip runs whose DIR/meta.json and load_*.json exist
   everything after -- goes to every run_duplex.sh call (e.g. --serial1 ...).
 EOF
 }
 
-MATRIX="" OUT_ROOT="" DRY=0 RF=() WORKERS=() DIP=0 SKIP=0 PASS=()
+MATRIX="" OUT_ROOT="" DRY=0 RF=() WORKERS=() DIP=0 SKIP=0 PASS=() GAIN2_OFFSET=0
 while [ $# -gt 0 ]; do
     case "$1" in
         fixed|la|all) MATRIX="$1" ;;
@@ -48,6 +50,7 @@ while [ $# -gt 0 ]; do
         --enable-rf) RF=(--enable-rf) ;;
         --workers) WORKERS=(--decode-workers "$2"); shift ;;
         --m2-dip) DIP=1 ;;
+        --m2-gain2-offset) GAIN2_OFFSET="$2"; shift ;;
         --skip-existing) SKIP=1 ;;
         --) shift; PASS=("$@"); break ;;
         -h|--help) usage; exit 0 ;;
@@ -82,7 +85,9 @@ if [ "$MATRIX" = fixed ] || [ "$MATRIX" = all ]; then
     for point in "${M2_POINTS[@]}"; do
         read -r mcs gain rate <<< "$point"
         tag="m2_mcs${mcs}_g${gain}"
-        common=(--mcs "$mcs" --la fixed --tx-gain "$gain" --duration "$M2_DURATION")
+        gain2=$(python3 -c "print(min(0.0, $gain + $GAIN2_OFFSET))")
+        common=(--mcs "$mcs" --la fixed --tx-gain1 "$gain" --tx-gain2 "$gain2"
+                --duration "$M2_DURATION")
         do_run "${tag}_duplex" "${common[@]}" --rate-ab "$rate" --rate-ba "$rate"
         do_run "${tag}_oneway_AB" "${common[@]}" --rate-ab "$rate" --rate-ba 0
         do_run "${tag}_oneway_BA" "${common[@]}" --rate-ab 0 --rate-ba "$rate"
