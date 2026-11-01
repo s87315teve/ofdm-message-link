@@ -272,7 +272,7 @@ def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
         "Several datagrams can share one v5 burst. The caps bound the burst's "
         "airtime (timing drift, decode latency) and the latency a datagram can "
         "wait for company. Each option overrides mac.aggregation in the "
-        "configuration (defaults: on, 16 subframes, 0 ms wait, 8 ms airtime).",
+        "configuration (defaults: on, 16 subframes, 0 ms wait, 8 ms airtime, 4 ms burst interval).",
     )
     group.add_argument(
         "--aggregation",
@@ -301,6 +301,19 @@ def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
             "arrived, waiting for more to share it. Fuller bursts at a cost of up "
             "to MS of added latency per datagram; 0 never waits, so a lone "
             "datagram leaves as soon as the radio is free"
+        ),
+    )
+    group.add_argument(
+        "--min-burst-interval-ms",
+        type=_milliseconds(0.0, 50.0),
+        default=None,
+        metavar="MS",
+        help=(
+            "burst-rate cap: hold a burst until MS after the previous one went "
+            "to the radio, packing more datagrams into it meanwhile (default 4, "
+            "at most 250 bursts/s). Adds at most MS of latency, and only when "
+            "bursts are back to back; a datagram after an idle period leaves at "
+            "once, and a full burst is never held. 0 disables the cap"
         ),
     )
     group.add_argument(
@@ -340,6 +353,9 @@ def aggregation_limits(args: argparse.Namespace, config: LinkConfig) -> Aggregat
         max_psdu_bytes=int(section.max_psdu_bytes),
         max_burst_airtime_s=(
             float(given("max_burst_airtime_ms", section.max_burst_airtime_ms)) / 1e3
+        ),
+        min_burst_interval_s=(
+            float(given("min_burst_interval_ms", section.min_burst_interval_ms)) / 1e3
         ),
     )
 

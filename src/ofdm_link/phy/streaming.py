@@ -192,6 +192,11 @@ class StreamingBurstDecoder:
         self._input_noise_variance = input_noise_variance
         self._buffer = np.empty(0, dtype=np.complex64)
         self._buffer_start = 0
+        # Whether samples arrived since the last drain finished.  A drain
+        # always runs until it can make no more progress on the buffer it
+        # has, so draining again before new samples arrive only rescans the
+        # retained tail it just judged -- a whole acquisition pass per chunk.
+        self._unscanned = False
         self._pending_acquisition: AnyAcquisition | None = None
         self._required_sample_count: int | None = None
         self._next_candidate_start: int | None = None
@@ -328,21 +333,25 @@ class StreamingBurstDecoder:
         decoded: list[AnyDecodedBurst] = []
         cursor = 0
         while cursor < values.size:
-            decoded.extend(self._drain())
+            if self._unscanned:
+                decoded.extend(self._drain())
             if self._buffer.size == self._config.max_input_samples:
                 self._retain_possible_preamble_prefix()
 
             room = self._config.max_input_samples - self._buffer.size
             take = min(room, values.size - cursor)
-            self._buffer = np.concatenate((self._buffer, values[cursor : cursor + take])).astype(
-                np.complex64, copy=False
-            )
+            self._append(values[cursor : cursor + take])
             cursor += take
 
         decoded.extend(self._drain())
         return tuple(decoded)
 
+    def _append(self, values: NDArray[np.complex64]) -> None:
+        self._buffer = np.concatenate((self._buffer, values)).astype(np.complex64, copy=False)
+        self._unscanned = True
+
     def _drain(self) -> list[AnyDecodedBurst]:
+        self._unscanned = False
         decoded: list[AnyDecodedBurst] = []
         while True:
             if self._pending_acquisition is None and not self._acquire_next():
@@ -461,14 +470,13 @@ class StreamingBurstDecoder:
         segments: list[BurstSegment] = []
         cursor = 0
         while cursor < values.size:
-            segments.extend(self._drain_segments())
+            if self._unscanned:
+                segments.extend(self._drain_segments())
             if self._buffer.size == self._config.max_input_samples:
                 self._retain_possible_preamble_prefix()
             room = self._config.max_input_samples - self._buffer.size
             take = min(room, values.size - cursor)
-            self._buffer = np.concatenate((self._buffer, values[cursor : cursor + take])).astype(
-                np.complex64, copy=False
-            )
+            self._append(values[cursor : cursor + take])
             cursor += take
         segments.extend(self._drain_segments())
         return tuple(segments)
@@ -514,6 +522,7 @@ class StreamingBurstDecoder:
             raise BurstValidationError("feed and feed_segments cannot share one decoder")
 
     def _drain_segments(self) -> list[BurstSegment]:
+        self._unscanned = False
         segments: list[BurstSegment] = []
         while True:
             if self._pending_acquisition is None and not self._acquire_next():

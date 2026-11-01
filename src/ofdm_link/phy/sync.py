@@ -331,6 +331,116 @@ def _shared_correlation(values: NDArray[np.complex64], lag: int) -> SharedCorrel
     )
 
 
+# Products on each side of a metric window whose mean is taken as the steady
+# (DC or CW tone) part of the lag-32 correlation.  Long against a preamble, so
+# the mean is well averaged, short against the seconds a radio's DC offset
+# drifts over.
+_STEADY_SIDE = 448
+# Fewest products a side needs before its mean is trusted.
+_STEADY_MINIMUM = 128
+# Offsets between two measurements of the steady part.
+_STEADY_STEP = 16
+# Standard deviations of white-noise scatter a steady product must exceed
+# before it counts as an interferer.
+_STEADY_SIGNIFICANCE = 4.0
+
+
+def _held(grid_values: NDArray[np.generic], limit: int) -> NDArray[np.generic]:
+    """Each grid value held over its ``_STEADY_STEP`` offsets, cut to ``limit``."""
+
+    return np.repeat(grid_values, _STEADY_STEP)[:limit]
+
+
+def _steady_grid(
+    shared: SharedCorrelation, limit: int, width: int = 128
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
+    """Steady lag-32 product on the ``_STEADY_STEP`` grid of window offsets.
+
+    A DC offset ``c`` puts ``|c|^2`` into every product and a CW tone a
+    constant phasor; neither averages out over a window of ``width``
+    products, so without this the normalized metric stays above threshold
+    over the whole buffer and no preamble stands out.  The mean is taken
+    separately over the ``_STEADY_SIDE`` products before the window and
+    those after it, and the side with the smaller mean is used (smallest-of,
+    as in a CFAR detector): a steady interferer is on both sides, a preamble
+    near the window only on one, and must not be subtracted from the noise
+    in front of it.
+
+    The third result marks the grid points where an interferer is actually
+    there: every trusted side's mean exceeds ``_STEADY_SIGNIFICANCE`` times
+    the scatter white products would give it (their power over the root of
+    their count).  A preamble or STF raises one side only.
+    """
+
+    products = shared.real_cum.size
+    side = _STEADY_SIDE
+    step = _STEADY_STEP
+    # The steady part changes slowly by definition, so it is measured every
+    # ``step`` offsets (:func:`_held` holds it in between): a sixteenth of
+    # the work of the full-rate metric it corrects.
+    grid = np.arange(0, limit, step)
+    before_count = np.minimum(grid, side)
+    after_count = np.minimum(products - width - grid, side)
+    trusted_before = before_count >= _STEADY_MINIMUM
+    trusted_after = after_count >= _STEADY_MINIMUM
+    before_scale = np.where(trusted_before, 1.0 / np.maximum(before_count, 1), 0.0)
+    after_scale = np.where(trusted_after, 1.0 / np.maximum(after_count, 1), 0.0)
+    # Each side's sum is a difference of the cumulative sum at two shifted
+    # positions; padding the cumulative sum with its end values on both sides
+    # turns every clipped position into a plain strided slice.
+    start = side + width
+    means = []
+    for cumulative in (shared.real_cum, shared.imag_cum, shared.energy_cum):
+        z = np.concatenate(
+            (np.zeros(side + 1), cumulative, np.full(side + width, cumulative[-1]))
+        )
+        before = z[side : side + limit : step] - z[:limit:step]
+        after = z[start + side : start + side + limit : step] - z[start : start + limit : step]
+        means.append((before * before_scale, after * after_scale))
+    (before_real, after_real), (before_imag, after_imag), (before_power, after_power) = means
+    before_steady = before_real**2 + before_imag**2
+    after_steady = after_real**2 + after_imag**2
+    # An untrusted side never wins the smallest-of choice; with neither side
+    # trusted both means are zero and nothing is subtracted.
+    use_before = np.where(trusted_before, before_steady, np.inf) <= np.where(
+        trusted_after, after_steady, np.inf
+    )
+    real = np.where(use_before, before_real, after_real)
+    imag = np.where(use_before, before_imag, after_imag)
+    # |mean|^2 against (k * power)^2 / count, compared squared.
+    k2 = _STEADY_SIGNIFICANCE * _STEADY_SIGNIFICANCE
+    loud_before = before_steady * np.maximum(before_count, 1) > k2 * before_power**2
+    loud_after = after_steady * np.maximum(after_count, 1) > k2 * after_power**2
+    significant = (
+        (loud_before | ~trusted_before) & (loud_after | ~trusted_after)
+        & (trusted_before | trusted_after)
+    )
+    return real, imag, significant
+
+
+def _significant_steady(
+    shared: SharedCorrelation, width: int, limit: int
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]] | None:
+    """Full-rate steady lag-32 part for the first ``limit`` windows, or ``None``.
+
+    Zero wherever no interferer is significant, and ``None`` when none is
+    anywhere -- first judged on the whole buffer's mean product, which a
+    clean buffer passes at no cost -- so a clean buffer's gate is untouched.
+    """
+
+    count = shared.real_cum.size
+    total = shared.real_cum[-1] ** 2 + shared.imag_cum[-1] ** 2
+    k2 = _STEADY_SIGNIFICANCE * _STEADY_SIGNIFICANCE
+    if limit <= 0 or not total * count > k2 * shared.energy_cum[-1] ** 2:
+        return None
+    real, imag, significant = _steady_grid(shared, limit, width)
+    if not np.any(significant):
+        return None
+    real = np.where(significant, real, 0.0)
+    imag = np.where(significant, imag, 0.0)
+    return _held(real, limit), _held(imag, limit), _held(np.hypot(real, imag), limit)
+
+
 def acquire_preamble(
     samples: ArrayLike, config: SyncConfig | None = None
 ) -> AcquisitionResult | None:
@@ -423,9 +533,32 @@ def _acquisition_candidates(
     # wherever the energy gate passed, and the energy is positive there.
     # Comparing that way keeps the whole-buffer pass to multiplications and
     # leaves the division for the handful of candidates that qualify.
-    threshold_energy = energy * energy
-    threshold_energy *= settings.detection_threshold
-    eligible = numerator >= threshold_energy
+    steady = _significant_steady(shared, half_length, last_useful + 1)
+    if steady is None:
+        threshold_energy = energy * energy
+        threshold_energy *= settings.detection_threshold
+        eligible = numerator >= threshold_energy
+    else:
+        # A DC offset or CW tone holds the repeated-half metric above
+        # threshold at every offset, and every offset then went through the
+        # coherent stage: tens of times the cost of a clean buffer.  Where
+        # one is significant the gate judges the correlation with its
+        # steady part removed, normalized as in the v5 detector; elsewhere
+        # the correction is exactly zero and the gate is unchanged.  Only
+        # the gate: what a candidate reports (CFO, metric) is measured as
+        # before.
+        steady_real, steady_imag, steady_magnitude = (
+            component[useful] for component in steady
+        )
+        gate_real = real_part - half_length * steady_real
+        gate_imag = imag_part - half_length * steady_imag
+        gate_energy = energy - half_length * steady_magnitude
+        gate_numerator = gate_real * gate_real
+        gate_numerator += gate_imag * gate_imag
+        threshold_energy = gate_energy * (gate_energy + 2.0 * half_length * steady_magnitude)
+        threshold_energy *= settings.detection_threshold
+        eligible = gate_numerator >= threshold_energy
+        eligible &= gate_energy > 0.0
     eligible &= powered
     if not np.any(eligible):
         return ()
@@ -439,18 +572,15 @@ def _acquisition_candidates(
     candidate_metric = numerator[eligible_offsets] / np.square(candidate_energy)
     candidate_cfo = np.arctan2(candidate_imag, candidate_real) / np.pi
 
-    reference, reference_energy, positions = _coherent_reference(settings)
+    reference, reference_energy, _ = _coherent_reference(settings)
     windows = sliding_window_view(values, settings.preamble_length)[candidate_starts]
-    correction = np.exp(
-        -2j
-        * np.pi
-        * candidate_cfo[:, np.newaxis]
-        * positions[np.newaxis, :]
-        / settings.fft_size
+    coherent = _cfo_corrected_correlation(
+        windows, reference, -2.0 * np.pi * candidate_cfo / settings.fft_size
     )
-    corrected = windows * correction
-    coherent = corrected @ reference
-    window_energy = np.sum(np.abs(corrected) ** 2, axis=1)
+    # A CFO rotation leaves every sample's magnitude alone, so the corrected
+    # window's energy is the raw window's.
+    components = windows.view(np.float32).astype(np.float64)
+    window_energy = np.einsum("ij,ij->i", components, components)
     confidence = np.zeros(candidate_starts.size, dtype=np.float64)
     usable = window_energy >= settings.minimum_power * settings.preamble_length
     confidence[usable] = (
@@ -491,6 +621,39 @@ def _acquisition_candidates(
             strict=True,
         )
     )
+
+
+# Rotation phasors are built as a coarse step times a fine step, so a window of
+# ``n`` samples needs ``n / _PHASOR_BLOCK + _PHASOR_BLOCK`` complex exponentials
+# per candidate instead of ``n``.  With hundreds of candidates per buffer (a v5
+# STF holds the lag-32 metric above the legacy threshold for ~120 offsets) the
+# exponentials were most of the legacy detector's time.
+_PHASOR_BLOCK = 8
+
+
+def _cfo_corrected_correlation(
+    windows: NDArray[np.complexfloating],
+    reference: NDArray[np.complex128],
+    step: NDArray[np.float64],
+) -> NDArray[np.complex128]:
+    """``sum_n windows[k, n] * exp(1j * step[k] * n) * reference[n]`` for every row ``k``.
+
+    The same value as rotating each window by its own CFO correction and
+    correlating it with ``reference``, to within rounding: sample
+    ``n = B q + r`` takes the phasor ``exp(1j step B q) * exp(1j step r)``.
+    """
+
+    rows, length = windows.shape
+    block = _PHASOR_BLOCK
+    blocks = -(-length // block)
+    weighted = np.zeros((rows, blocks * block), dtype=np.complex128)
+    np.multiply(windows, reference, out=weighted[:, :length])
+    fine = np.exp(1j * step[:, np.newaxis] * np.arange(block, dtype=np.float64))
+    coarse = np.exp(
+        1j * step[:, np.newaxis] * np.arange(0, blocks * block, block, dtype=np.float64)
+    )
+    partial = weighted.reshape(rows, blocks, block) @ fine[:, :, np.newaxis]
+    return (partial[:, :, 0] * coarse).sum(axis=1)
 
 
 def separated_candidates(
@@ -537,8 +700,8 @@ def acquire_all(
         V5_FIXED_LENGTH,
         V5_PREAMBLE_LENGTH,
         V5Acquisition,
+        _v5_candidates,
         prefilter_for_acquisition,
-        v5_candidates,
     )
 
     if legacy is None and v5 is None:
@@ -560,7 +723,8 @@ def acquire_all(
         )
     if v5 is None:
         return legacy_found
-    v5_found = () if shared is None or lag != 32 else v5_candidates(values, shared, v5)
+    # ``values`` is already checked and ``shared`` is its correlation.
+    v5_found = () if shared is None or lag != 32 else _v5_candidates(values, shared, v5)
     if not v5_found:
         return legacy_found
     if not legacy_found:

@@ -931,10 +931,18 @@ class MessageReceiver:
                 for burst in self._decoder.feed(piece):
                     delivered.extend(self._accept(burst, None))
             return tuple(delivered)
+        # Segments go out in full batches as soon as there are enough, so the
+        # workers start while later pieces are still being scanned, and the
+        # remainder goes at the end of the chunk.
         results: list = []
+        waiting: list = []
         for piece in pieces:
-            for segment in self._decoder.feed_segments(piece):
-                results.extend(self._pool.submit(segment))
+            waiting.extend(self._decoder.feed_segments(piece))
+            if len(waiting) >= self._pool.max_batch:
+                results.extend(self._pool.submit_many(waiting))
+                waiting.clear()
+        if waiting:
+            results.extend(self._pool.submit_many(waiting))
         results.extend(self._pool.collect())
         return self._accept_results(results)
 

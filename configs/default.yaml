@@ -98,6 +98,14 @@ mac:
     # At most 80 000 samples (8 ms at 10 MS/s, 16 ms at 5): the longest burst
     # whose drift at 50 ppm the receiver's timing correction covers.
     max_burst_airtime_ms: 8.0
+    # Burst-rate cap: hold a burst until this long after the previous one
+    # went to the radio and fill it meanwhile (0 disables).  Short datagrams
+    # otherwise go out one per burst at 230-300 bursts/s, which overflows the
+    # receiver's per-burst cost and nears the Pluto's push limit (0.413 ms +
+    # 0.194 us/sample).  Measured on two PlutoSDRs, 300 B at MCS 14: 0.53 Mb/s
+    # uncapped, 5.92 Mb/s with ~14 subframes per burst.  Costs up to this much
+    # latency, and only when bursts are back to back.  4 ms = at most 250/s.
+    min_burst_interval_ms: 4.0
 
 radio:
   adapter: simulation

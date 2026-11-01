@@ -337,3 +337,51 @@ def test_no_cross_family_acquisition_at_low_snr() -> None:
         for _ in range(20):
             assert acquire_all(_awgn(legacy, snr, rng, 0.8), None, V5) == ()
             assert acquire_all(_awgn(v5, snr, rng, 0.8), LEGACY, None) == ()
+
+
+
+@pytest.mark.parametrize("interferer", ["dc", "tone"])
+@pytest.mark.parametrize("amplitude", [0.003, 0.01])
+def test_a_steady_interferer_does_not_flood_the_coherent_stages(
+    monkeypatch: pytest.MonkeyPatch, interferer: str, amplitude: float
+) -> None:
+    # A Pluto's LO leakage (or a CW tone) at or above the noise held both
+    # repeated-half metrics above threshold at every offset: each offset of
+    # an empty buffer went through the legacy coherent stage and every
+    # 320-sample neighbourhood through the v5 ones, about 50 times the CPU
+    # of a clean buffer on the single receive owner.
+    from ofdm_link.phy import sync as sync_module
+    from ofdm_link.phy import sync_v5 as sync_v5_module
+
+    legacy_rows: list[int] = []
+    v5_rows: list[int] = []
+    real_legacy = sync_module._cfo_corrected_correlation
+    real_local = sync_v5_module._LocalInterference
+
+    def counted_legacy(windows, reference, step):
+        legacy_rows.append(windows.shape[0])
+        return real_legacy(windows, reference, step)
+
+    def counted_local(values, starts):
+        v5_rows.append(starts.size)
+        return real_local(values, starts)
+
+    monkeypatch.setattr(sync_module, "_cfo_corrected_correlation", counted_legacy)
+    monkeypatch.setattr(sync_v5_module, "_LocalInterference", counted_local)
+    rng = np.random.default_rng(7)
+    size = 8832
+    noise = 0.003 / np.sqrt(2) * (rng.standard_normal(size) + 1j * rng.standard_normal(size))
+    if interferer == "dc":
+        steady = amplitude * np.exp(0.7j) * np.ones(size)
+    else:
+        steady = amplitude * np.exp(2j * np.pi * 0.0246 * np.arange(size))
+
+    found = acquire_all((noise + steady).astype(np.complex64), LEGACY, V5)
+
+    assert found == ()
+    # Unfixed, every offset reached the legacy coherent stage and one peak
+    # per 320 samples (27 here) the v5 ones.  A strong interferer still lets
+    # a few through: the smallest-of steady estimate reads it a few percent
+    # low.
+    assert sum(legacy_rows) < size // 20
+    assert sum(v5_rows) < 10

@@ -1002,10 +1002,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    # Plots use NumPy too; keep its BLAS pool from spinning idle cores.
+    # Plots use NumPy too; keep its BLAS pool from spinning idle cores.  With
+    # --engine thread the receive path runs here, so keep freed buffers too.
+    from ofdm_link.runtime.allocator import keep_freed_memory
     from ofdm_link.runtime.cpu_budget import apply_cpu_budget
 
     apply_cpu_budget(1)
+    keep_freed_memory()
     resolved = options.resolve(args)
     if args.snr_db is not None and resolved.uses_radio:
         raise SystemExit("--snr-db applies to the udp transport only; the radio has a real channel")

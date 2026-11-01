@@ -15,6 +15,13 @@ however the workers finish, so the caller sees exactly the sequence a single
 inline decoder would have produced.  In-flight work is bounded: when it is
 full, :meth:`SegmentDecodePool.submit` waits for the oldest result and counts
 the wait, which pushes back on the sample source instead of growing a queue.
+
+Segments travel in batches of up to ``max_batch`` (:meth:`submit_many`).  The
+executor costs the submitting process a handful of thread wake-ups per task --
+its management thread, the call-queue feeder, the wake-up pipe -- and each
+one takes the GIL from the receive owner, whose acquisition is the
+bottleneck; at 500 bursts/s those handoffs cost the owner about a quarter of
+its time.  A batch pays them once.
 """
 
 from __future__ import annotations
@@ -58,6 +65,10 @@ def _safe_context() -> multiprocessing.context.BaseContext:
 
 
 _MAX_WORKERS = 64
+# Segments per task: enough to amortize the executor's per-task thread
+# handoffs, few enough that a 65536-sample chunk of short bursts still
+# spreads over several workers.
+DEFAULT_MAX_BATCH = 4
 _READY_TIMEOUT_S = 120.0
 
 Annotate = Callable[[AnyDecodedBurst], Any]
@@ -90,11 +101,13 @@ _WORKER: dict[str, Any] = {}
 
 
 def _initialize_worker(config: LinkConfig, annotate: Annotate | None) -> None:
+    from .allocator import keep_freed_memory
     from .cpu_budget import apply_cpu_budget
     from .factory import build_burst_config, select_frame_decoder
 
     # One numeric thread per worker; the parallelism is the worker count.
     apply_cpu_budget(1)
+    keep_freed_memory()
     selection = select_frame_decoder(config)
     _WORKER["burst_config"] = build_burst_config(config)
     _WORKER["frame_decoder"] = selection.frame_decoder
@@ -132,15 +145,18 @@ def decode_segment(
     )
 
 
-def _run_in_worker(segment: BurstSegment) -> SegmentDecodeResult:
+def _run_in_worker(segments: tuple[BurstSegment, ...]) -> tuple[SegmentDecodeResult, ...]:
     if not _worker_is_ready():
         raise DecodePoolError("segment decode worker was not initialized")
-    return decode_segment(
-        segment,
-        _WORKER["burst_config"],
-        frame_decoder=_WORKER["frame_decoder"],
-        symbol_demapper=_WORKER["symbol_demapper"],
-        annotate=_WORKER["annotate"],
+    return tuple(
+        decode_segment(
+            segment,
+            _WORKER["burst_config"],
+            frame_decoder=_WORKER["frame_decoder"],
+            symbol_demapper=_WORKER["symbol_demapper"],
+            annotate=_WORKER["annotate"],
+        )
+        for segment in segments
     )
 
 
@@ -153,6 +169,7 @@ class SegmentDecodePool:
         *,
         workers: int,
         max_in_flight: int | None = None,
+        max_batch: int = DEFAULT_MAX_BATCH,
         annotate: Annotate | None = None,
     ) -> None:
         if not isinstance(config, LinkConfig):
@@ -162,11 +179,16 @@ class SegmentDecodePool:
         limit = 4 * workers if max_in_flight is None else max_in_flight
         if type(limit) is not int or limit < workers:
             raise ValueError("max_in_flight must be an integer of at least workers")
+        if type(max_batch) is not int or max_batch < 1:
+            raise ValueError("max_batch must be a positive integer")
         if annotate is not None and not callable(annotate):
             raise TypeError("annotate must be a module-level callable or None")
         self._workers = workers
         self._max_in_flight = limit
-        self._pending: deque[Future[SegmentDecodeResult]] = deque()
+        self._max_batch = max_batch
+        # One entry per task, with the number of segments it carries.
+        self._pending: deque[tuple[Future[tuple[SegmentDecodeResult, ...]], int]] = deque()
+        self._in_flight = 0
         self._submitted = 0
         self._completed = 0
         self._backpressure_waits = 0
@@ -198,28 +220,47 @@ class SegmentDecodePool:
     def workers(self) -> int:
         return self._workers
 
-    def submit(self, segment: BurstSegment) -> tuple[SegmentDecodeResult, ...]:
-        """Queue one segment; return any results that are ready, in order.
+    @property
+    def max_batch(self) -> int:
+        return self._max_batch
 
-        When the in-flight bound is reached this waits for the oldest result
-        first, so a caller that submits faster than the workers decode is
-        slowed down rather than allowed to queue without limit.
+    def submit(self, segment: BurstSegment) -> tuple[SegmentDecodeResult, ...]:
+        """Queue one segment; return any results that are ready, in order."""
+
+        return self.submit_many((segment,))
+
+    def submit_many(self, segments) -> tuple[SegmentDecodeResult, ...]:
+        """Queue segments in stream order; return any results that are ready.
+
+        They go to the workers in tasks of up to ``max_batch``.  When the
+        in-flight bound (counted in segments) is reached this waits for the
+        oldest task first, so a caller that submits faster than the workers
+        decode is slowed down rather than allowed to queue without limit.
         """
 
         if self._closed:
             raise DecodePoolError("segment decode pool is closed")
-        if not isinstance(segment, BurstSegment):
-            raise TypeError("segment must be a BurstSegment")
+        batch = tuple(segments)
+        if not all(isinstance(segment, BurstSegment) for segment in batch):
+            raise TypeError("segments must be BurstSegments")
         ready: list[SegmentDecodeResult] = []
-        while len(self._pending) >= self._max_in_flight:
-            self._backpressure_waits += 1
-            ready.append(self._take_oldest(timeout=None))
-        try:
-            self._pending.append(self._executor.submit(_run_in_worker, segment))
-        except BrokenExecutor as error:
-            self.close()
-            raise DecodePoolError("a segment decode worker died") from error
-        self._submitted += 1
+        cursor = 0
+        while cursor < len(batch):
+            while self._in_flight >= self._max_in_flight:
+                self._backpressure_waits += 1
+                ready.extend(self._take_oldest(timeout=None))
+            take = min(
+                self._max_batch, len(batch) - cursor, self._max_in_flight - self._in_flight
+            )
+            try:
+                future = self._executor.submit(_run_in_worker, batch[cursor : cursor + take])
+            except BrokenExecutor as error:
+                self.close()
+                raise DecodePoolError("a segment decode worker died") from error
+            self._pending.append((future, take))
+            self._in_flight += take
+            self._submitted += take
+            cursor += take
         ready.extend(self.collect())
         return tuple(ready)
 
@@ -227,8 +268,8 @@ class SegmentDecodePool:
         """Return every result whose predecessors are all done, in order."""
 
         ready: list[SegmentDecodeResult] = []
-        while self._pending and self._pending[0].done():
-            ready.append(self._take_oldest(timeout=0.0))
+        while self._pending and self._pending[0][0].done():
+            ready.extend(self._take_oldest(timeout=0.0))
         return tuple(ready)
 
     def drain(self, timeout: float | None = None) -> tuple[SegmentDecodeResult, ...]:
@@ -236,19 +277,20 @@ class SegmentDecodePool:
 
         ready: list[SegmentDecodeResult] = []
         while self._pending:
-            ready.append(self._take_oldest(timeout=timeout))
+            ready.extend(self._take_oldest(timeout=timeout))
         return tuple(ready)
 
-    def _take_oldest(self, timeout: float | None) -> SegmentDecodeResult:
-        future = self._pending[0]
+    def _take_oldest(self, timeout: float | None) -> tuple[SegmentDecodeResult, ...]:
+        future, count = self._pending[0]
         try:
-            result = future.result(timeout=timeout)
+            results = future.result(timeout=timeout)
         except BrokenExecutor as error:
             self.close()
             raise DecodePoolError("a segment decode worker died") from error
         self._pending.popleft()
-        self._completed += 1
-        return result
+        self._in_flight -= count
+        self._completed += count
+        return results
 
     def worker_cpu_seconds(self) -> float | None:
         """User plus system CPU time of the live workers, or None off Linux.
@@ -273,7 +315,7 @@ class SegmentDecodePool:
         return SegmentDecodePoolSnapshot(
             workers=self._workers,
             max_in_flight=self._max_in_flight,
-            in_flight=len(self._pending),
+            in_flight=self._in_flight,
             submitted=self._submitted,
             completed=self._completed,
             backpressure_waits=self._backpressure_waits,
@@ -286,6 +328,7 @@ class SegmentDecodePool:
             return
         self._closed = True
         self._pending.clear()
+        self._in_flight = 0
         self._executor.shutdown(wait=True, cancel_futures=True)
 
     def __enter__(self) -> SegmentDecodePool:

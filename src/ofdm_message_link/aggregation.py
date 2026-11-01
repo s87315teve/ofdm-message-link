@@ -26,17 +26,27 @@ PSDU_FCS_BYTES = 4
 
 @dataclass(frozen=True, slots=True)
 class AggregationLimits:
-    """Caps on one aggregate; ``enabled=False`` sends one MPDU per burst."""
+    """Caps on one aggregate; ``enabled=False`` sends one MPDU per burst.
+
+    ``min_burst_interval_s`` is a burst-rate cap: a burst is held until that
+    long after the previous one was handed to the radio, collecting more
+    datagrams meanwhile.  0 disables it.  The dataclass default is 0 so a bare
+    ``AggregationLimits()`` keeps the plain opportunistic behaviour; the
+    configuration's default (4 ms) is applied by ``options.aggregation_limits``.
+    """
 
     enabled: bool = True
     max_wait_s: float = 0.0
     max_subframes: int = 16
     max_psdu_bytes: int = 8192
     max_burst_airtime_s: float = 0.008
+    min_burst_interval_s: float = 0.0
 
     def __post_init__(self) -> None:
         if self.max_wait_s < 0:
             raise ValueError("max_wait_s must be non-negative")
+        if self.min_burst_interval_s < 0:
+            raise ValueError("min_burst_interval_s must be non-negative")
         if self.max_subframes < 1:
             raise ValueError("max_subframes must be at least 1")
         if self.max_psdu_bytes < 1:
