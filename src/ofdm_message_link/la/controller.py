@@ -138,6 +138,12 @@ class _ControlModuleCodec:
         header = self._header(self._c.PDU_FEEDBACK, src_node, dst_node, flags)
         return self._c.encode_lcp(header, self._c.encode_feedback(report))
 
+    def unsupported_version(self, payload: bytes) -> bool:
+        """True for an LCP (right magic) of a version this codec does not read."""
+
+        version = self._c.lcp_version(payload)
+        return version is not None and version != self._c.LCP_VERSION
+
     def decode(self, payload: bytes) -> DecodedControl | None:
         lcp = self._c.decode_lcp(payload)
         if lcp is None:
@@ -233,6 +239,7 @@ class LinkController:
             "own_bursts_heard": 0,
             "control_undecodable": 0,
             "control_other_dst": 0,
+            "control_unsupported": 0,
             "invalid_decisions": 0,
             "la_errors": 0,
             "reporter_errors": 0,
@@ -433,7 +440,15 @@ class LinkController:
             except Exception:
                 decoded = None
             if decoded is None:
-                self._counts["control_undecodable"] += 1
+                # An LCP of another version is ignored as the wire format says,
+                # but counted apart from bytes that are no LCP at all.
+                unsupported = getattr(self._codec, "unsupported_version", None)
+                if callable(unsupported) and self._guard(
+                    "la_errors", "unsupported_version", False, unsupported, bytes(payload)
+                ):
+                    self._counts["control_unsupported"] += 1
+                else:
+                    self._counts["control_undecodable"] += 1
                 return ControlVerdict.ACCEPT
             if decoded.src_node == self.node_id:
                 self._counts["own_bursts_heard"] += 1

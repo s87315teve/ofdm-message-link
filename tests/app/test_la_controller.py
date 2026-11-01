@@ -535,3 +535,15 @@ def test_idle_wait_is_capped_at_the_reporter_period():
     fake.due_at = 5.0
     ctl, *_ = _controller(reporter=fake)
     assert ctl.idle_wait_s(1.0) == pytest.approx(0.02)  # IDLE_POLL_S without period_s
+
+
+def test_an_lcp_of_another_version_counts_as_unsupported():
+    from ofdm_message_link.control import LcpHeader, encode_lcp, link_header
+
+    ctl, *_ = _controller(codec=None)
+    future = encode_lcp(LcpHeader(pdu_type=1, src_node=2, dst_node=1, version=2))
+    assert ctl.on_control(future, CONTEXT) is ControlVerdict.ACCEPT
+    assert ctl.on_control(b"not an lcp at all", CONTEXT) is ControlVerdict.ACCEPT
+    assert ctl.on_control(link_header(2, 1), CONTEXT) is ControlVerdict.ACCEPT
+    snap = ctl.snapshot()
+    assert (snap["control_unsupported"], snap["control_undecodable"]) == (1, 1)

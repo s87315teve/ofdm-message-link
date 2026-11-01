@@ -20,6 +20,8 @@ peer's link adaptation.  All fields are big-endian::
       30 last_mcs_index u8 (0xFF = none)   31 fb_flags u8
       32 reporter_id u8   33 n_entries u8 (<= 16)   34 tlv_length u16
       36 entries, 6 B each: seq_first u16 | mcs u8 | snr_qdb u8 | ok u8 | lost u8
+         (snr_qdb: 0.25 dB steps, 0-63.5 dB, saturating; 0xFF = none;
+          ok and lost saturate at 255)
       then tlv_length bytes of TLVs: type u8 | len u8 | value
 
     TLV types defined here (types below 0x80 are reserved for this codec):
