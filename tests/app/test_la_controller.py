@@ -264,8 +264,8 @@ def test_no_robust_copy_needed_when_data_goes_at_a_low_mcs():
 def test_idle_wait_follows_the_reporter():
     ctl, _, _, reporter, _, _, _ = _controller()
     assert ctl.idle_wait_s(1.0) is None
-    reporter.due_at = 1.25
-    assert ctl.idle_wait_s(1.0) == pytest.approx(0.25)
+    reporter.due_at = 1.01
+    assert ctl.idle_wait_s(1.0) == pytest.approx(0.01)
     assert ctl.idle_wait_s(2.0) == 0.0
 
 
@@ -521,3 +521,17 @@ def test_arf_ignores_reports_in_fixed_mode():
         clock.t += 0.02
         ctl.on_control(_peer_feedback(codec, seq, ok=20 * seq, lost=20 * seq), CONTEXT)
     assert la.decide(clock.t).mcs_index == 12
+
+
+def test_idle_wait_is_capped_at_the_reporter_period():
+    # Idle, the default reporter's next report is a keepalive 200 ms away;
+    # a DATA burst arriving meanwhile makes one due 20 ms after the last.
+    reporter = DefaultReporter(ReporterContext(1, 2))
+    ctl, clock, _, _, _, _, _ = _controller(reporter=reporter)
+    reporter.build(1.0)
+    assert reporter.next_due_s(1.0) == pytest.approx(1.2)
+    assert ctl.idle_wait_s(1.0) == pytest.approx(reporter.period_s)
+    fake = FakeReporter()
+    fake.due_at = 5.0
+    ctl, *_ = _controller(reporter=fake)
+    assert ctl.idle_wait_s(1.0) == pytest.approx(0.02)  # IDLE_POLL_S without period_s

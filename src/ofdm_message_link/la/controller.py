@@ -86,6 +86,11 @@ ROBUST_FEEDBACK_S = 0.1
 """A report goes in a control-only burst at the control MCS if no burst at
 MCS <= ``ROBUST_MAX_MCS`` carried feedback for this long."""
 ROBUST_MAX_MCS = 9
+IDLE_POLL_S = 0.02
+"""Longest idle sleep of the transmit worker while a report may become due
+(the reporter's ``period_s`` when it has one): a DATA burst received while
+the worker sleeps makes a report due ``period_ms`` after the last one, and
+nothing on the receive side can wake the worker earlier."""
 PEER_LOSS_WINDOW_S = 10.0
 FEEDBACK_EVENT_MIN_S = 0.1
 
@@ -385,7 +390,14 @@ class LinkController:
         with self._lock:
             due_at = self._guard("reporter_errors", "next_due_s", None,
                                  self._reporter.next_due_s, now)
-        return None if due_at is None else max(0.0, float(due_at) - now)
+            period = getattr(self._reporter, "period_s", IDLE_POLL_S)
+        if due_at is None:
+            return None
+        if not isinstance(period, int | float) or not period > 0:
+            period = IDLE_POLL_S
+        # Wake at least once per reporter period: data that arrives meanwhile
+        # can make a report due sooner than next_due_s said.
+        return min(max(0.0, float(due_at) - now), float(period))
 
     def on_sent(self, burst: Any, now: float) -> None:
         sequences = tuple(getattr(burst, "sequences", ()) or ())
