@@ -8,13 +8,20 @@ and decode backlog: set if any chunk in the window had them), and up to
 
 When a report is due:
 
-* a new DATA burst arrived since the last report and ``period_ms`` passed, or
+* a new DATA burst arrived, or a PSDU failed its FCS, since the last report
+  and ``period_ms`` passed, or
 * ``keepalive_ms`` passed (also with no data, so the peer can tell a silent
   link from a dead one).
 
 Preambles of control-only bursts update the SNR statistics but never make a
 report due; otherwise two idle nodes would answer each other's feedback
-bursts forever.
+bursts forever.  A failed PSDU does: when the peer's SNR falls below what its
+MCS needs, its bursts arrive with a valid header and a failed FCS and none
+of them yields a DATA burst, so without this the peer would hear of the drop
+(the low preamble SNR) only at the next keepalive, 200 ms of lost bursts
+later.  The failure counter is ``RxHealth.fcs_fail_total``; its first value
+is only a baseline.  Each failure makes one report due, so two idle nodes
+answer each other only for as long as their feedback bursts keep failing.
 
 Every report carries a ``session_id`` drawn at random when the reporter is
 built, so the peer's link adaptation recognises a restart of this node at
@@ -92,6 +99,7 @@ class DefaultReporter:
         self._last_data_seq: int | None = None
         self._last_mcs: int | None = None
         self._health: RxHealth | None = None
+        self._fcs_fail_total: int | None = None  # baseline for "a PSDU failed"
         # Per-chunk flags, ORed over the report window.
         self._clipping_seen = False
         self._decode_backlog = False
@@ -126,6 +134,10 @@ class DefaultReporter:
     def on_rx_health(self, now_s: float, health: RxHealth) -> None:
         self._seen(now_s)
         self._health = health
+        fcs_fail_total = int(health.fcs_fail_total)
+        if self._fcs_fail_total is not None and fcs_fail_total != self._fcs_fail_total:
+            self._new_data = True  # a burst we could not decode: report it like data
+        self._fcs_fail_total = fcs_fail_total
         self._clipping_seen = self._clipping_seen or bool(health.clipping_seen)
         self._decode_backlog = self._decode_backlog or bool(health.decode_backlog)
 

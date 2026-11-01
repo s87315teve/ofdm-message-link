@@ -7,6 +7,19 @@ row that carry a fresh SNR -- a keepalive without preambles neither counts
 nor resets the run -- and ``min_dwell_s`` since the last change; going down
 is immediate).
 
+The SNR filter (time constant ``snr_tau_s``) restarts from the report when
+``snr_drop_reports`` fresh reports in a row lie more than ``snr_drop_db``
+below it: a fast attack on a step down, such as a TX gain step or a
+blockage.  The plain filter needs 0.25 s to bring a 13 dB drop under the
+next rungs' thresholds, and at hundreds of subframes per second the bursts
+sent meanwhile at the old MCS were most of a step's loss (about 190
+subframes in the M3 runs, 2.3 of the 3.3-3.6 % measured over the 30 s at
+-20 dB).  Requiring two reports keeps a single outlier from doing it (the
+window mean scatters by about 1.2 dB, with a long low tail), and so does a
+report whose window straddles the step.  Replayed through this rule, the
+M3 reports restart the filter once in about 9 node-minutes away from the
+gain steps.
+
 Outer loop (OLLA): per DATA subframe, the offset moves by ``+step_up_db``
 for one the peer received and ``-step_down_db`` for one it lost, so it stops
 drifting when ``step_up * ok = step_down * lost``: the loss settles at
@@ -88,6 +101,8 @@ class OllaLinkAdaptation:
         offset_max_db: float = 3.0,
         initial_offset_db: float = 0.0,
         snr_tau_s: float = 0.10,
+        snr_drop_db: float | None = 6.0,
+        snr_drop_reports: int = 2,
         hysteresis_up_db: float = 1.0,
         hysteresis_down_db: float = 0.0,
         up_hold_reports: int = 2,
@@ -105,6 +120,10 @@ class OllaLinkAdaptation:
             raise ValueError("offset_min_db must not exceed offset_max_db")
         if stale_step_s <= 0:
             raise ValueError("stale_step_s must be positive")
+        if snr_drop_db is not None and not snr_drop_db > 0:
+            raise ValueError("snr_drop_db must be positive (or None to disable)")
+        if int(snr_drop_reports) < 1:
+            raise ValueError("snr_drop_reports must be at least 1")
         if thresholds is not None:
             self._thresholds: Mapping[int, float] = load_thresholds(thresholds)
             self._ladder: tuple[McsTableEntry, ...] = build_ladder(self._thresholds)
@@ -125,6 +144,8 @@ class OllaLinkAdaptation:
         self.offset_min_db = float(offset_min_db)
         self.offset_max_db = float(offset_max_db)
         self.snr_tau_s = float(snr_tau_s)
+        self.snr_drop_db = None if snr_drop_db is None else float(snr_drop_db)
+        self.snr_drop_reports = int(snr_drop_reports)
         self.hysteresis_up_db = float(hysteresis_up_db)
         self.hysteresis_down_db = float(hysteresis_down_db)
         self.up_hold_reports = int(up_hold_reports)
@@ -142,6 +163,7 @@ class OllaLinkAdaptation:
         self._snr_f: float | None = None
         self._snr_t: float | None = None
         self._snr_eff: float | None = None
+        self._snr_low_run = 0  # fresh reports in a row more than snr_drop_db below SNR_f
         self._up_cand: int | None = None
         self._up_count = 0
         # Duplicates, peer restarts (session id, feedback gap, counters going
@@ -171,6 +193,7 @@ class OllaLinkAdaptation:
             "changes": 0,
             "subframes_ok": 0,
             "subframes_lost": 0,
+            "snr_drops": 0,
         }
 
     # -- helpers --------------------------------------------------------
@@ -238,11 +261,26 @@ class OllaLinkAdaptation:
         fresh_snr = report.preambles > 0 and report.snr_mean_db is not None
 
         if fresh_snr:
-            if self._snr_f is None or self._snr_t is None or self.snr_tau_s <= 0:
-                self._snr_f = float(report.snr_mean_db)
+            snr = float(report.snr_mean_db)
+            low = (
+                self._snr_f is not None
+                and self.snr_drop_db is not None
+                and snr < self._snr_f - self.snr_drop_db
+            )
+            self._snr_low_run = self._snr_low_run + 1 if low else 0
+            if (
+                self._snr_f is None
+                or self._snr_t is None
+                or self.snr_tau_s <= 0
+                or self._snr_low_run >= self.snr_drop_reports
+            ):
+                self._snr_f = snr
+                if self._snr_low_run:
+                    self._counts["snr_drops"] += 1
+                self._snr_low_run = 0
             else:
                 weight = 1.0 - math.exp(-max(t - self._snr_t, 0.0) / self.snr_tau_s)
-                self._snr_f += weight * (float(report.snr_mean_db) - self._snr_f)
+                self._snr_f += weight * (snr - self._snr_f)
             self._snr_t = t
 
         self._outer_update(delta)
