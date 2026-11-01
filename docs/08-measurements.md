@@ -436,10 +436,26 @@ TX gain。
   （`experiments/tx_v5/results/rx_rate/summary.txt`）
 - **修正 2：TX 最小 burst 間隔。** `mac.aggregation.min_burst_interval_ms` 預設 4 ms（最多每秒 250 個 burst；`--min-burst-interval-ms`）。理由：Pluto 推送 0.413 ms + 0.194 µs/sample，加上 RX 每個 burst 的成本。
   代價是負載高時延遲多一點（見下）。
+  **事後修正（`f3f84fc`）：** 最初從前一個 burst 結束才算 4 ms，每個長 burst 後多 4 ms 空中閒置（MCS 8：8 ms burst + 4 ms，airtime 約 0.67，`node_app` 的 M2 發現）；
+  現在改成從 start 算（修完的重量見下）。
 - Aggregation 開與關（900 B，第一輪）：−5 dB MCS 14 開 7.128、關 1.971 Mbit/s（3.6 倍）；−15 dB MCS 12 開 4.738、關 2.268（2.1 倍）。關掉時被 RX 每個 burst 的成本限制（約每秒 280–300 個 burst）。修正之後沒有重跑。
 - 延遲（收發同機，p50／p99，含 TX 排隊）：第一輪最好的點 MCS 12–14 為 55／121 到 65／151 ms；低 rate 的 MCS 8、9 貼著 TX 容量，p50 約 440–470 ms。修正之後 67／90 到 192／250 ms，900 B 的 MCS 14（192／250）與 MCS 12（161／281）比修正前高，因為在容量邊緣排隊與 4 ms 的最小間隔。Baseline 的延遲沒有重量。
 - 送資料期間的 RX overflow：兩輪每個最好的點都是 0；第一輪的 64QAM 在約 210–230/s 以上會 overflow，修正之後所有 run（含失敗的）都是 0。
 - 即時的 legacy TX（improve-rx）→ 新 RX（30 秒×2）：MCS 0、−15 dB、200/s 遺失 0.050%／0.000%；MCS 4、−5 dB、300/s 0.078%／0.011%；0 overflow；與 baseline RX 在附近速率的結果在雜訊內相同。
+
+**間隔改成 start 到 start 之後的重量**（`experiments/tx_v5/results/v5_goodput_mcs8_recheck/`，`f3f84fc`，900 B、TX −15 dB、每次 30 秒、遺失 < 0.1% 而且 0 RX overflow；
+所有 run 送資料期間 RX overflow 都是 0）：
+
+| 點 | 間隔之前（第一輪） | 之後（4 ms，start 到 start） |
+|---|---|---|
+| MCS 8 | 243/s，1.748 Mbit/s | **252.8/s，1.820 Mbit/s**（259.7/s 在 0.33% 失敗） |
+| MCS 8，interval 0 | （243/s） | 218.7/s，1.575 Mbit/s（225.5/s 在 1.0% 失敗） |
+| MCS 10 | 486/s，3.496 Mbit/s | 283.1/s，2.038 Mbit/s（291.6/s 在 0.103% 失敗，邊緣） |
+
+- MCS 8 沒有退步：252.8/s 比第一輪高，比 interval 0 的 218.7/s 高（間隔讓 MCS 8 多聚合、少 burst）。
+- MCS 10 的搜尋在 283/s 以邊緣的 0.103% 停下；直接跑 486/s 的 4 次中 3 次通過（3.50 Mbit/s；interval 0 兩次 0.000%，4 ms 一次 0.021%），
+  第一次（4 ms）的 3.573% 是離群值，反過來順序重跑沒有重現。這一段 Wi-Fi 造成的 run-to-run 變化比間隔的影響大，283/s 是搜尋的雜訊停點。
+- 高 rate 的點不受間隔影響（RX 修正之後，TX −5 dB，interval 0 對 4 ms）：300 B MCS 14 2568/s 都是 0%、6.163 Mbit/s；900 B MCS 17 1291/s 遺失 0.031% 對 0.010%、都是 9.29 Mbit/s。預設維持 4 ms。
 
 ### 這次沒有量到的
 
@@ -449,6 +465,7 @@ TX gain。
   同樣的問題由上面的實機量測回答。S2（SIG header：v5 SIG FER 1% 在 0.95 dB AWGN／1.27 dB multipath，legacy 加 ML list 3.0／3.38 dB）與 S5（scrambler）有模擬結果。
   見 [`experiments/tx_v5/`](../experiments/tx_v5/README.md#49-模擬)。
 - 每點只錄一次、單一擺放位置；邊緣的點有約 2% 的 run-to-run 漂移。
+- 間隔改成 start 到 start 之後只重量 MCS 8、MCS 10 與 MCS 8 interval 0；MCS 10 在 interval 0 的搜尋沒有量；MCS 10 的直接重跑只有 4 次，Wi-Fi 造成的 run-to-run 變化比間隔的影響大。
 - 修正之後的 goodput 只重跑 5 個點，每點一次搜尋；300 B MCS 12 −15 dB 與 aggregation 關沒有重跑；MCS 16（5.589）低於 MCS 17（9.295）沒有重查。
 
 ## 8.9 沒有實測過的東西

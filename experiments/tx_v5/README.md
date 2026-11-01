@@ -325,6 +325,11 @@ Legacy burst 不會再送，256／256 只留在舊的 tree。
    所以把 burst 率上限定在每秒 250 個。**延遲的取捨：** 閒置之後的第一個 burst 不多等，滿的 burst 不會被留；
    但負載高時一個 datagram 可能多等到 4 ms，容量邊緣的排隊延遲也變高（上面延遲一段）。
 
+   **事後修正（commit `f3f84fc`）：間隔改成 start 到 start。** 上面最初的實作從前一個 burst「結束」（交給 radio）才開始算 4 ms，
+   所以每個長 burst 後面多 4 ms 的空中閒置：MCS 8 一個 8 ms 的 burst 加 4 ms 空檔，airtime 約 0.67。這是 `node_app` 的 M2 量到的
+   （`experiments/duplex_fdd/`）。現在從前一個 burst 的「開始」算：長 burst 本來就比 4 ms 長，不再被留住；
+   短 burst 的每秒 250 個上限不變。修完之後的重量見 4.8「間隔改成 start 到 start 之後的重量」。
+
 修正之後（`results/v5_goodput_after_fix/`，tx-v5 @ `8bb3674`，同樣的搜尋規則，每點一次搜尋）：
 
 | 點 | goodput 修正前 → 後（Mbit/s） | 速率（/s） | 每個 burst 的 subframe | p50／p99 後（ms） | overflow |
@@ -352,6 +357,7 @@ Legacy burst 不會再送，256／256 只留在舊的 tree。
 | Acquisition 門檻維持 0.20／0.25 | 雜訊最高 0.084／0.067；降低門檻 1% 點移動不到 1.25 dB；cross-family 沒有查（a 節） |
 | `llr_noise_source` 維持 `max` | 三個選項結果相同：一個 burst 只有一個 noise variance，max-log Turbo 對共同倍率不敏感 |
 | TX 最小 burst 間隔 4 ms | 300 B 在沒有它時 burst 率停在 222–300/s，RX overflow；有它 0.534 → 6.164 Mbit/s（上面一節） |
+| 間隔從 start 到 start 算（`f3f84fc`，修正最初「從結束算」的 bug） | 從結束算會在每個長 burst 後多 4 ms 閒置（MCS 8：8 ms burst + 4 ms，airtime 約 0.67，`node_app` M2 發現）；修完重量：MCS 8 252.8/s 1.820 Mbit/s（interval 0 為 218.7/s 1.575），高 rate 的點不受影響；預設仍是 4 ms（4.8） |
 | Airtime 上限 8 ms | 80 000 samples 是 50 ppm 下 RX 能修的漂移；8 ms 讓 10 MS/s 以下都安全（e 節） |
 
 ## 3. 怎麼量的
@@ -581,6 +587,36 @@ v5，900 B，aggregation 開，**第一輪（修正前）**（實測，`results/
 | 送資料期間的 RX overflow | 兩輪每個最好的點都是 0。第一輪 64QAM 在約 210–230/s 以上會 overflow（搜尋在 282/s 以上看到）；修正之後所有 run 都是 0 |
 | 即時 legacy TX（improve-rx tree）→ 新 RX（H7，30 秒×2） | MCS 0、−15 dB、200/s：遺失 0.050%、0.000%；MCS 4、−5 dB、300/s：0.078%、0.011%；0 overflow；全部走 legacy decoder（與 baseline RX 在附近速率的 0.019–0.078%、0–0.010% 相同） |
 
+#### 間隔改成 start 到 start 之後的重量（實測）
+
+`results/v5_goodput_mcs8_recheck/`（`NOTES.md`、`recheck.json`），tx-v5 @ `f3f84fc`，900 B、TX −15 dB、RX gain 15 dB、`goodput_search.py`
+（每次 30 秒，通過 = 遺失 < 0.1% 而且送資料期間 RX overflow = 0）。所有 run 的送資料期間 RX overflow 都是 0；每次開始時 1 分鐘 load 0.75–3.72（< 4）。
+
+| 點 | 間隔之前（第一輪，沒有間隔） | 之後（4 ms，start 到 start） | 備註 |
+|---|---|---|---|
+| MCS 8 | 243/s，1.748 Mbit/s | **252.8/s，1.820 Mbit/s**（259.7/s 在 0.33% 失敗） | 到上限時約 2.0 個 subframe/burst；沒有退步 |
+| MCS 8，interval 0 | （243/s） | 218.7/s，1.575 Mbit/s（225.5/s 在 1.0% 失敗；246/s 在 0.11%） | 比預設 4 ms 差：間隔讓 MCS 8 多聚合、少 burst |
+| MCS 10 | 486/s，3.496 Mbit/s | 283.1/s，2.038 Mbit/s（291.6/s 在 0.103% 失敗，邊緣） | 搜尋停得太早，見下面的直接重跑 |
+
+MCS 8 的 252.8/s 與上面預測的放滿上限 254/s（1.83 Mbit/s）只差 0.5%。
+
+MCS 10 的搜尋停在 283/s，失敗的那一點只有 0.103%（門檻 0.1%）。所以另外直接跑第一輪的速率 486/s（30 秒，900 B，TX −15 dB，`live_run.sh`，`TX_EXTRA_ARGS="--min-burst-interval-ms N"`）：
+
+| run（順序） | 間隔 | 遺失 | Goodput | subframe／PSDU | PSDU FCS 失敗 |
+|---|---|---|---|---|---|
+| `direct_mcs10_486/int4`（第 1） | 4 ms | 3.573% | 3.374 Mbit/s | 3.58 | 193 |
+| `direct_mcs10_486/int0`（第 2） | 0 | 0.000% | 3.499 Mbit/s | 3.72 | 0 |
+| `direct_mcs10_486/rep_int0`（第 3） | 0 | 0.000% | 3.499 Mbit/s | 3.83 | 0 |
+| `direct_mcs10_486/rep_int4`（第 4） | 4 ms | 0.021% | 3.499 Mbit/s | 3.84 | 1 |
+
+四次裡 3 次通過（3.50 Mbit/s）；第 1 次的 3.6% 是離群值，反過來順序重跑沒有重現。遺失全是空中的（FCS 失敗），0 RX overflow。
+每個 PSDU 3.6 個 subframe 時 burst 約 7.7 ms，比間隔長，間隔根本沒有留住它們。這一段（Wi-Fi）的 run-to-run 變化比任何間隔的影響都大。
+結論：MCS 10、−15 dB 仍通過 486/s（3.50 Mbit/s），283/s 是搜尋的雜訊停點，不是退步。沒有量：MCS 10 在 interval 0 的搜尋（時間預算）。
+
+高 rate 的點，interval 0 對 4 ms，TX −5 dB（`direct_int0_check/`）：300 B MCS 14 在 2568/s 都是 0% 遺失、6.163 Mbit/s，
+每個 PSDU 15.0 對 15.4 個 subframe；900 B MCS 17 在 1291/s 遺失 0.031% 對 0.010%，兩者都是 9.29 Mbit/s。
+RX 修正之後這些點不再需要間隔，但間隔沒有害處，而且 MCS 8 有它走得更遠（252.8/s 對 218.7/s）。**預設維持 4 ms。**
+
 預測的上限（**沒有量**）：只算 Pluto 的推送時間（H0 的模型），不算 Python 的 TX worker 與 RX 的 CPU。
 Baseline MCS 4 用同一個模型算出每秒 408 個，實測在約 335 個飽和，所以實際值會比下表低。
 Aggregation 依預設上限（16 個、8192 B、8 ms）把 900-byte datagram 放滿一個 burst：
@@ -629,6 +665,7 @@ MCS 13 以上被 8192-byte 的上限限制在 8 個。這些數字由 `MessageTr
 | `results/v5/captures/` | 每份錄音的 metadata（load、overflow、late send） |
 | `results/v5_goodput/` | v5 即時 goodput，第一輪（`NOTES.md`、`goodput_v5.json`、`h7/`） |
 | `results/v5_goodput_after_fix/` | 兩個修正之後的即時 goodput（`NOTES.md`、`goodput_after_fix.json`） |
+| `results/v5_goodput_mcs8_recheck/` | 間隔改成 start 到 start 之後的低 MCS 重量（`NOTES.md`、`recheck.json`） |
 | `results/rx_rate/` | RX 的 CPU 與 acquisition bench（`summary.txt`） |
 | `results/sim/README.md`、`s2_header.json`、`s5_scrambler.json` | 模擬（S2、S5） |
 
@@ -646,4 +683,7 @@ MCS 13 以上被 8192-byte 的上限限制在 8 個。這些數字由 `MessageTr
   message 裡，腳本與輸出沒有進 repo。S2、S5 有結果檔；S1、S3、S4、S7、S8 沒有執行，見 4.9。
 - RX 的 payload LLR 每個 burst 只用一個 noise variance；雜訊隨 carrier 變化的環境沒有測。
 - 即時 goodput 每點一次搜尋（遺失 0.1% 在邊緣只有 3–30 個 datagram，通過與否有雜訊）；第一輪與修正之後是不同的 commit，修正之後只重跑 5 個點（沒有 aggregation 關、沒有 300 B MCS 12）；MCS 16 < MCS 17 沒有重查。
+- 間隔改成 start 到 start 之後只重量低 MCS 的三個點（MCS 8、MCS 10、MCS 8 interval 0；4.8），高 rate 的點只比對 interval 0 與 4 ms 各一次。
+  MCS 10 的搜尋在 283/s 以 0.103% 的邊緣遺失停下，直接跑 486/s 的 4 次中 3 次通過、1 次 3.6% 離群值沒有重現：Wi-Fi 造成的 run-to-run 變化比間隔的影響還大，
+  所以 4 ms 與 0 的差別在這個雜訊內只能說「沒有退步」，MCS 10 在 interval 0 的搜尋沒有量。
 - RX 的 CPU 目標（500 個短 burst/s RTF 1.5）沒有達到，只有 1.21–1.23；S1、S3、S4、S7、S8 的模擬沒有跑（4.9）。
