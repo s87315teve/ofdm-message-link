@@ -47,15 +47,23 @@ class ArfLinkAdaptation:
         # Ignores repeated reports and re-baselines the cumulative counters
         # when the peer restarts.
         self.feedback = FeedbackTracker()
+        self.frozen = False  # fixed mode: the reports describe the operator's MCS
         self.pending_reason = "init"
 
     def on_sent(self, burst: SentBurst) -> None:
         pass
 
+    def on_mode(self, mode: str) -> None:
+        """Optional hook: ignore reports while the operator fixes the MCS."""
+
+        self.frozen = mode == "fixed"
+        self.good_run = self.bad_run = 0
+        self.probing = False
+
     def on_feedback(self, report: FeedbackReport) -> None:
         delta = self.feedback.update(report)
-        if delta is None or delta.rebaselined is not None:
-            return  # a repeated report, or a (new) baseline of the counters
+        if delta is None or delta.rebaselined is not None or self.frozen:
+            return  # a repeated report, a (new) baseline, or fixed mode
         ok, lost = delta.ok, delta.lost
         if ok + lost == 0:
             return

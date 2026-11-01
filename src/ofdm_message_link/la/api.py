@@ -80,6 +80,10 @@ margin_db=1.5``.  Rules:
 * ``snapshot`` returns JSON-able values only; the GUI and ``--la-log`` show it.
 * Calls never overlap (the controller holds one lock), so no locking is needed.
   Times are ``time.monotonic()`` seconds.
+* Optional: a method ``on_mode(mode)`` is called with ``"fixed"`` when the
+  operator fixes the MCS and ``"auto"`` when the algorithm gets it back.
+  Feedback keeps flowing in fixed mode, but it describes the operator's
+  MCS; the built-ins freeze their learning (OLLA's offset, ARF's runs).
 * ``ofdm_message_link.la.examples.ArfLinkAdaptation`` is a complete small
   example; ``ofdm_message_link.la.olla.OllaLinkAdaptation`` is the default.
 

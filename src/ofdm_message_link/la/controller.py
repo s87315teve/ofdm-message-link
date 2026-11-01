@@ -235,6 +235,8 @@ class LinkController:
             "event_errors": 0,
         }
         self._last_error: str | None = None
+        if self._mode == "fixed":
+            self._tell_mode()
 
     # -- helpers ------------------------------------------------------------
 
@@ -512,7 +514,19 @@ class LinkController:
                 self._mode = "fixed"
                 self._fixed_entry = entry
                 events.append(("mode", {"t": now, "mode": "fixed", "mcs_index": entry.index}))
+            self._tell_mode()
         self._emit(events)
+
+    def _tell_mode(self) -> None:
+        """Pass the mode to an algorithm that wants it (optional ``on_mode``).
+
+        In fixed mode the feedback describes the operator's MCS, not the
+        algorithm's; the built-in algorithms freeze their learning then.
+        """
+
+        on_mode = getattr(self._la, "on_mode", None)
+        if callable(on_mode):
+            self._guard("la_errors", "on_mode", None, on_mode, self._mode)
 
     def set_la_mode(self, mode: str) -> None:
         """``"auto"`` hands the MCS to the LA; ``"fixed"`` freezes the current MCS."""

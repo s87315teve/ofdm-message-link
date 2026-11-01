@@ -484,3 +484,40 @@ def test_the_controller_is_stale_when_the_algorithm_finds_the_link_dead():
     snap = ctl.snapshot()
     assert snap["feedback_age_s"] < 0.05 and snap["reason"] == "stale"
     assert snap["stale"] is True
+
+
+def test_fixed_mode_freezes_the_outer_loop():
+    la = OllaLinkAdaptation(context(initial=13))
+    ctl, clock, _, _, codec, _, _ = _controller(la=la)
+    ok = lost = 0
+    for seq in range(1, 30):  # auto, 18 dB, no loss
+        clock.t += 0.02
+        ok += 40
+        ctl.on_control(_peer_feedback(codec, seq, snr=18.0, ok=ok, lost=lost), CONTEXT)
+        ctl.entry_for_next_burst(clock.t)
+    settled_mcs, settled_offset = ctl.snapshot()["mcs_index"], la.offset_db
+    ctl.set_fixed(mcs_entry(17))  # the operator tries MCS 17: half the subframes lost
+    for seq in range(30, 130):
+        clock.t += 0.02
+        ok += 20
+        lost += 20
+        ctl.on_control(_peer_feedback(codec, seq, snr=18.0, ok=ok, lost=lost), CONTEXT)
+        assert ctl.entry_for_next_burst(clock.t) == mcs_entry(17)
+    assert la.offset_db == settled_offset and la.snapshot()["frozen"] is True
+    ctl.set_la_mode("auto")
+    clock.t += 0.02
+    ok += 40
+    ctl.on_control(_peer_feedback(codec, 130, snr=18.0, ok=ok, lost=lost), CONTEXT)
+    assert ctl.entry_for_next_burst(clock.t).index == settled_mcs
+    assert la.offset_db >= settled_offset and la.snapshot()["frozen"] is False
+
+
+def test_arf_ignores_reports_in_fixed_mode():
+    from ofdm_message_link.la.examples import ArfLinkAdaptation
+
+    la = ArfLinkAdaptation(context(initial=12), down_after=2)
+    ctl, clock, _, _, codec, _, _ = _controller(la=la, mode="fixed")
+    for seq in range(1, 10):
+        clock.t += 0.02
+        ctl.on_control(_peer_feedback(codec, seq, ok=20 * seq, lost=20 * seq), CONTEXT)
+    assert la.decide(clock.t).mcs_index == 12

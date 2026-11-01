@@ -7,6 +7,13 @@ row that carry a fresh SNR -- a keepalive without preambles neither counts
 nor resets the run -- and ``min_dwell_s`` since the last change; going down
 is immediate).
 
+Fixed mode (``on_mode("fixed")``, from the controller): the outer loop is
+frozen and no up step is prepared, because the reports then describe the
+operator's MCS; the counter baselines and the SNR filter keep following
+the reports, so learning resumes cleanly with the same offset when the
+mode returns to ``"auto"``.  (Freezing was chosen over resetting the
+offset: what was learned before the operator stepped in stays valid.)
+
 Stale: with no accepted report for ``stale_after_s``, or when reports keep
 arriving but none has heard a burst sent more than ``stale_after_s`` ago
 (no preambles and no DATA subframes: the forward link is dead), the MCS
@@ -152,6 +159,7 @@ class OllaLinkAdaptation:
         # First burst sent since the last report that showed the forward link
         # alive (preambles, or DATA subframes counted); see decide().
         self._unanswered_since_t: float | None = None
+        self._frozen = False  # fixed mode: no outer-loop update, no up candidate
         self._last_change_t: float | None = None
         self._reason = "init"
         self._now: float | None = None
@@ -197,6 +205,13 @@ class OllaLinkAdaptation:
 
     # -- LinkAdaptation ---------------------------------------------------
 
+    def on_mode(self, mode: str) -> None:
+        """``"fixed"`` freezes the outer loop and the up run; ``"auto"`` resumes."""
+
+        self._frozen = mode == "fixed"
+        self._up_count = 0
+        self._up_cand = None
+
     def on_sent(self, burst: SentBurst) -> None:
         if self._unanswered_since_t is None:
             self._unanswered_since_t = burst.t_s
@@ -240,8 +255,8 @@ class OllaLinkAdaptation:
             if self._threshold(position) + self.hysteresis_up_db <= self._snr_eff:
                 cand = position
                 break
-        self._up_cand = cand
-        if cand is None:
+        self._up_cand = None if self._frozen else cand
+        if cand is None or self._frozen:
             self._up_count = 0
         elif fresh_snr:
             self._up_count += 1
@@ -252,7 +267,7 @@ class OllaLinkAdaptation:
         d_ok, d_lost = delta.ok, delta.lost
         self._counts["subframes_ok"] += d_ok
         self._counts["subframes_lost"] += d_lost
-        if d_ok + d_lost == 0 or not self.outer_loop:
+        if d_ok + d_lost == 0 or not self.outer_loop or self._frozen:
             return
         if self.skip_outer_on_overflow and delta.overflow_changed:
             self._counts["overflow_skips"] += 1
@@ -323,6 +338,7 @@ class OllaLinkAdaptation:
             "algorithm": "olla",
             "mcs_index": self.mcs_index,
             "reason": self._reason,
+            "frozen": self._frozen,
             "snr_f_db": rounded(self._snr_f),
             "offset_db": rounded(self._offset),
             "snr_eff_db": rounded(self._snr_eff),
