@@ -19,7 +19,8 @@ M3_RATE_AB=555      # 4 Mb/s at 900 B
 M3_RATE_BA=139      # 1 Mb/s at 900 B (feedback piggybacks)
 M3_B_GAIN=-5
 M3_OLLA_REPEATS=2
-M3_FIXED_MCS=(8 10 12 14)
+# On the ladder of configs/la/thresholds_pluto_v5.yaml (8 9 10 12 13 15 16 17); 14 is dominated by 15.
+M3_FIXED_MCS=(8 10 12 15)
 LA_SPEC=olla
 SIZE=900
 # ---------------------------------
