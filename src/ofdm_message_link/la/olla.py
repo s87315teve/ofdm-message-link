@@ -3,7 +3,14 @@
 Inner loop: the filtered peer SNR plus an offset picks the highest ladder
 rung whose threshold it clears, with hysteresis (going up needs the new
 rung's threshold + ``hysteresis_up_db`` for ``up_hold_reports`` reports in a
-row and ``min_dwell_s`` since the last change; going down is immediate).
+row that carry a fresh SNR -- a keepalive without preambles neither counts
+nor resets the run -- and ``min_dwell_s`` since the last change; going down
+is immediate).
+
+Stale: with no accepted report for ``stale_after_s``, or when reports keep
+arriving but none has heard a burst sent more than ``stale_after_s`` ago
+(no preambles and no DATA subframes: the forward link is dead), the MCS
+steps down one rung per ``stale_step_s``, not below ``fallback_mcs``.
 
 Outer loop (OLLA): per DATA subframe, the offset moves by ``+step_up_db``
 for one the peer received and ``-step_down_db`` for one it lost, so it stops
@@ -142,6 +149,9 @@ class OllaLinkAdaptation:
         self._started_t: float | None = None
         self._last_feedback_t: float | None = None
         self._next_stale_t: float | None = None
+        # First burst sent since the last report that showed the forward link
+        # alive (preambles, or DATA subframes counted); see decide().
+        self._unanswered_since_t: float | None = None
         self._last_change_t: float | None = None
         self._reason = "init"
         self._now: float | None = None
@@ -188,7 +198,8 @@ class OllaLinkAdaptation:
     # -- LinkAdaptation ---------------------------------------------------
 
     def on_sent(self, burst: SentBurst) -> None:
-        pass
+        if self._unanswered_since_t is None:
+            self._unanswered_since_t = burst.t_s
 
     def on_feedback(self, report: FeedbackReport) -> None:
         t = report.received_t_s
@@ -202,9 +213,16 @@ class OllaLinkAdaptation:
         if delta.rebaselined not in (None, "first"):
             self._counts["peer_rebaselines"] += 1
         self._last_feedback_t = t
-        self._next_stale_t = None
+        alive = report.preambles > 0 or (
+            delta.rebaselined is None and delta.ok + delta.lost > 0
+        )
+        if alive:
+            self._unanswered_since_t = None
+            self._next_stale_t = None
+        # A keepalive that carries no new SNR must not count toward an up step.
+        fresh_snr = report.preambles > 0 and report.snr_mean_db is not None
 
-        if report.preambles > 0 and report.snr_mean_db is not None:
+        if fresh_snr:
             if self._snr_f is None or self._snr_t is None or self.snr_tau_s <= 0:
                 self._snr_f = float(report.snr_mean_db)
             else:
@@ -223,7 +241,10 @@ class OllaLinkAdaptation:
                 cand = position
                 break
         self._up_cand = cand
-        self._up_count = self._up_count + 1 if cand is not None else 0
+        if cand is None:
+            self._up_count = 0
+        elif fresh_snr:
+            self._up_count += 1
 
     def _outer_update(self, delta: FeedbackDelta) -> None:
         if delta.rebaselined is not None:
@@ -253,11 +274,22 @@ class OllaLinkAdaptation:
             self._last_change_t = now_s
             reason = "init"
         reference = self._last_feedback_t if self._last_feedback_t is not None else self._started_t
+        stale_since = None
         if now_s - reference > self.stale_after_s:
-            # One rung down per stale_step_s without feedback, not below the floor.
+            stale_since = reference + self.stale_after_s  # no feedback
+        dead = self._unanswered_since_t
+        if dead is not None and now_s - dead > self.stale_after_s:
+            # Feedback arrives but has heard none of our bursts: the forward
+            # link is dead, which no SNR or loss count in the reports shows.
+            since = dead + self.stale_after_s
+            stale_since = since if stale_since is None else min(stale_since, since)
+        if stale_since is None:
+            self._next_stale_t = None
+        if stale_since is not None:
+            # One rung down per stale_step_s, not below the floor.
             reason = "stale"
             if self._next_stale_t is None:
-                self._next_stale_t = reference + self.stale_after_s
+                self._next_stale_t = stale_since
             while self._next_stale_t <= now_s:
                 self._next_stale_t += self.stale_step_s
                 if self._cur > self._floor:

@@ -207,6 +207,7 @@ class LinkController:
         self._last_feedback_t: float | None = None
         self._last_robust_t: float | None = None
         self._stale = False
+        self._la_stale = False  # the algorithm's last decision said "stale"
         self._peer_counts: deque[tuple[float, int, int]] = deque()
         stale_after = getattr(la, "stale_after_s", STALE_AFTER_S)
         self._stale_after_s = (
@@ -272,7 +273,9 @@ class LinkController:
 
     def _check_stale(self, now: float) -> None:
         stale = (
-            self._last_feedback_t is None or now - self._last_feedback_t > self._stale_after_s
+            self._last_feedback_t is None
+            or now - self._last_feedback_t > self._stale_after_s
+            or (self._mode == "auto" and self._la_stale)  # e.g. a dead forward link
         )
         if stale and not self._stale and self._last_feedback_t is not None:
             self._counts["feedback_stale"] += 1
@@ -309,7 +312,6 @@ class LinkController:
     def entry_for_next_burst(self, now: float) -> McsTableEntry:
         events: list[tuple[str, dict[str, Any]]] = []
         with self._lock:
-            self._check_stale(now)
             if self._mode == "fixed":
                 decision = Decision(self._fixed_entry.index, reason="fixed")
                 entry = self._fixed_entry
@@ -324,6 +326,8 @@ class LinkController:
                     entry = self._entry if self._entry is not None else self._control_entry
                     decision = Decision(entry.index, reason="error")
             self._decision = decision
+            self._la_stale = self._mode == "auto" and decision.reason == "stale"
+            self._check_stale(now)
             self._change_to(entry, now, decision, events)
         self._emit(events)
         return entry

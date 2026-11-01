@@ -469,3 +469,18 @@ def test_algorithm_reporter_log_and_event_failures_never_escape():
     assert snap["log_errors"] >= 1 and snap["event_errors"] >= 1
     assert snap["last_error"]
     assert snap["algorithm"] == {}
+
+
+def test_the_controller_is_stale_when_the_algorithm_finds_the_link_dead():
+    from ofdm_message_link.la.api import SentBurst
+
+    la = OllaLinkAdaptation(context(initial=13))
+    ctl, clock, _, _, codec, _, _ = _controller(la=la)
+    for step in range(0, 40):
+        clock.t = step * 0.02
+        la.on_sent(SentBurst(clock.t, None, 8, 13, 0.002, False, None))
+        ctl.on_control(_peer_feedback(codec, step + 1, preambles=0, snr=None), CONTEXT)
+        ctl.entry_for_next_burst(clock.t)
+    snap = ctl.snapshot()
+    assert snap["feedback_age_s"] < 0.05 and snap["reason"] == "stale"
+    assert snap["stale"] is True

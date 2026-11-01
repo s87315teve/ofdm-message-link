@@ -422,3 +422,52 @@ def test_one_lost_window_moves_the_offset_by_the_report_cap_at_once():
         before = la.offset_db
         _feed(la, 11, 0.22, ok=10 * subframes, lost=subframes)
         assert before - la.offset_db == pytest.approx(la.max_report_down_db, rel=0.05)
+
+
+# -- keepalives, dead forward link (review risks) ---------------------------------
+
+
+def test_keepalives_without_a_fresh_snr_do_not_count_toward_an_up_step():
+    la = OllaLinkAdaptation(context(initial=8), outer_loop=False)
+    _feed(la, 1, 0.0, snr=20.0)
+    la.decide(0.0)
+    _feed(la, 2, 0.02, snr=None, preambles=0)
+    _feed(la, 3, 0.22, snr=None, preambles=0)
+    assert la.decide(0.3).mcs_index == 8  # one fresh report is not two
+    _feed(la, 4, 0.32, snr=20.0)  # the second fresh one: the run went on
+    assert la.decide(0.42).reason == "up"
+
+
+def _sent(t):
+    from ofdm_message_link.la.api import SentBurst
+
+    return SentBurst(t_s=t, first_sequence=None, subframes=8, mcs_index=13, airtime_s=0.002,
+                     control_only=False, tx_gain_db=None)
+
+
+def test_a_dead_forward_link_steps_down_although_feedback_arrives():
+    la = OllaLinkAdaptation(context(initial=13))
+    la.decide(0.0)
+    _feed(la, 1, 0.0, snr=20.0)
+    reasons = []
+    for step in range(1, 61):  # 1.2 s: we send, the peer hears nothing
+        t = step * 0.02
+        la.on_sent(_sent(t))
+        _feed(la, step + 1, t, snr=None, preambles=0)
+        reasons.append(la.decide(t).reason)
+    assert "stale" in reasons and reasons.index("stale") <= 27  # after ~0.5 s
+    assert la.mcs_index < 13
+    t = 1.24
+    _feed(la, 62, t, snr=20.0, preambles=3, ok=40)  # the peer hears us again
+    assert la.decide(t).reason != "stale"
+
+
+def test_an_idle_link_with_empty_keepalives_is_not_dead():
+    la = OllaLinkAdaptation(context(initial=13))
+    la.decide(0.0)
+    _feed(la, 1, 0.0, snr=20.0)
+    for step in range(1, 11):  # 2 s of keepalives, nothing sent
+        t = step * 0.2
+        _feed(la, step + 1, t, snr=None, preambles=0)
+        assert la.decide(t).reason != "stale"
+    assert la.mcs_index == 13
