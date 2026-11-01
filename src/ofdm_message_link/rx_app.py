@@ -52,9 +52,13 @@ CLIPPING_LEVEL = 1900.0 / 2048.0
 class ReceiveObserver(Protocol):
     """Sees what each received chunk produced; called on the rx-worker thread.
 
-    ``snrs`` is the preamble SNR of every burst acquired in the chunk, decoded
-    or not; ``bursts`` the reports of the DATA bursts accepted.  Keep it cheap:
-    it runs between two chunks of a live radio.
+    ``snrs`` is the preamble SNR of every peer burst accepted in the chunk:
+    the receiver's ``drain_peer_snr_db``, which leaves out the node's own
+    leakage (bursts the control handler or the own seed range dropped), so
+    it never reaches the report to the peer.  A receiver without that method
+    gives every preamble acquired.  ``bursts`` are the reports of the DATA
+    bursts accepted.  Keep it cheap: it runs between two chunks of a live
+    radio.
     """
 
     def on_receive(
@@ -196,6 +200,9 @@ class ReceiveWorker:
 
     def _notify_observer(self, source, chunk, snrs: tuple[float, ...]) -> None:
         assert self._observer is not None
+        drain_peer = getattr(self._receiver, "drain_peer_snr_db", None)
+        if drain_peer is not None:
+            snrs = drain_peer()
         values = np.asarray(chunk)
         # Per chunk, like decode_backlog; the reporter ORs it over a window.
         self._clipping_seen = bool(values.size) and (

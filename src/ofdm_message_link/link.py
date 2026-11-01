@@ -825,6 +825,7 @@ class MessageReceiver:
         self._control_handler = control_handler
         self._clock = clock
         self._burst_reports: deque[BurstReport] = deque(maxlen=BURST_REPORT_HISTORY)
+        self._peer_snrs: deque[float] = deque(maxlen=BURST_REPORT_HISTORY)
         # One worker keeps the original inline decoder untouched.  More move
         # each burst's payload decode, and its quality measurement, to worker
         # processes while acquisition and headers stay on this owner.
@@ -887,6 +888,20 @@ class MessageReceiver:
         """
 
         return self._decoder.drain_link_snr_db()
+
+    def drain_peer_snr_db(self) -> tuple[float, ...]:
+        """Preamble SNR, in dB, of every burst accepted since the last call.
+
+        Like :meth:`drain_link_snr_db` but only for bursts whose header
+        decoded and that were not dropped as the node's own (by the control
+        handler or the own seed range): what a node may report to its peer.
+        A preamble whose header failed cannot be attributed and is left out.
+        Bounded like :meth:`drain_burst_reports`.
+        """
+
+        drained = tuple(self._peer_snrs)
+        self._peer_snrs.clear()
+        return drained
 
     def decoder_snapshot(self):
         """Return bounded acquisition/header/payload counters for observers."""
@@ -987,8 +1002,10 @@ class MessageReceiver:
             if verdict is ControlVerdict.DROP_BURST:
                 self._stats = replace(self._stats, dropped_bursts=self._stats.dropped_bursts + 1)
                 return []
+            self._note_peer_snr(context)
             self._observe(context, frame.sequence, is_ours=False, subframes=1)
             return []
+        self._note_peer_snr(context)
         missing_before = self._tracker.missing
         delivered, is_ours = self._accept_frame(frame, context)
         self._observe(context, frame.sequence, is_ours=is_ours, subframes=1)
@@ -1061,6 +1078,7 @@ class MessageReceiver:
             delivered.extend(messages)
         if first_sequence is None:
             first_sequence = first_control
+        self._note_peer_snr(context)
         self._stats = replace(
             self._stats,
             psdus_received=self._stats.psdus_received + 1,
@@ -1126,6 +1144,11 @@ class MessageReceiver:
                 fcs_ok=fcs_ok,
             )
         )
+
+    def _note_peer_snr(self, context: _BurstContext) -> None:
+        snr = self._snr_at(context.burst_start)
+        if snr is not None:
+            self._peer_snrs.append(snr)
 
     def _bounded_lost(self, lost: int) -> int:
         limit = self._tracker.max_gap
