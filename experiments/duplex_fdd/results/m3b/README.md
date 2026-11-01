@@ -39,7 +39,7 @@ Step −20 → −5 dB at 60 s:
 |---|---:|---:|---:|---:|
 | M3 OLLA run 1 / run 2 / B→A idle | 0 / 0 / 0 (all three) | 0.01–0.02 % | 0.24–0.27 s | 3.33–3.36 Mb/s |
 | M3b OLLA | 2 / 2 / 2 | 0.00 % | 0.29 s | 3.34 Mb/s |
-| M3b OLLA, B→A idle | 0 / 0 / 2 | 0.01 % | 0.25 s | 3.35 Mb/s |
+| M3b OLLA, B→A idle | 0 / 0 / 2 | 0.01 % | 0.25 s | 3.36 Mb/s |
 
 Whole run (A→B, `udp_load`, 4 Mb/s offered): M3 3.19–3.23 Mb/s; M3b 3.23 and 3.27 Mb/s; p50
 latency 61–72 ms in both. B→A (139/s): M3b 0.99 Mb/s at 1.09 % loss, as in M3. RX overflows 0–1
