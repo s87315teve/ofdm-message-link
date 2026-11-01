@@ -106,6 +106,12 @@ class DutyCappedSink:
         self._next_allowed = -1e18
         self.waits = 0
         self.waited_s = 0.0
+        # What the cap sees: burst airtime handed down, and wall time spent inside the
+        # wrapped send (a Pluto push blocks while its kernel buffers are full).
+        self.sends = 0
+        self.airtime_s = 0.0
+        self.inner_send_s = 0.0
+        self.started_t: float | None = None
 
     def __getattr__(self, name: str):
         return getattr(self._sink, name)
@@ -117,8 +123,14 @@ class DutyCappedSink:
             self.waits += 1
             self.waited_s += start - now
             self._sleep(start - now)
+        if self.started_t is None:
+            self.started_t = self._clock()
+        entered = self._clock()
         accepted = self._sink.send(samples)
+        self.inner_send_s += self._clock() - entered
         if accepted:
+            self.sends += 1
+            self.airtime_s += len(samples) / self._rate
             self._next_allowed = start + len(samples) / self._rate / self._cap
         return accepted
 
@@ -128,6 +140,12 @@ class DutyCappedSink:
             "tx_duty_cap": self._cap,
             "duty_cap_waits": self.waits,
             "duty_cap_waited_s": round(self.waited_s, 3),
+            "duty_cap_sends": self.sends,
+            "duty_cap_airtime_s": round(self.airtime_s, 3),
+            "duty_cap_inner_send_s": round(self.inner_send_s, 3),
+            "duty_cap_span_s": None
+            if self.started_t is None
+            else round(self._clock() - self.started_t, 3),
         }
 
 
@@ -428,8 +446,18 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
     )
     egress = EgressForwarder(*spec.egress)
     rx_worker = ReceiveWorker(receiver, sink, sink, egress=egress, observer=controller)
+    submit_failures = {"count": 0, "last_report": 0.0}
+
+    def submit_counted(source: str, payload: bytes) -> bool:
+        """The ingress path: a full send queue drops the datagram, and that is counted."""
+
+        accepted = tx_worker.submit(source, payload)
+        if not accepted:
+            submit_failures["count"] += 1
+        return accepted
+
     ingress = IngressListener(
-        spec.ingress_host, spec.ingress_port, tx_worker.submit, reuse_address=False
+        spec.ingress_host, spec.ingress_port, submit_counted, reuse_address=False
     )
     ingress_error = None
     try:
@@ -440,7 +468,6 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
     worker = NodeWorker(tx_worker, rx_worker, controller=controller,
                         ingress_error=ingress_error, failed=sink.failed.emit)
     worker.start()
-    submit_failures = {"count": 0, "last_report": 0.0}
 
     def apply_gain(direction: str, gain_db: float) -> float:
         readback = worker.set_gain(direction, gain_db)

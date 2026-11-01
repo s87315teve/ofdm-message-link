@@ -93,6 +93,7 @@ def test_defaults_resolve_from_the_fdd_profile():
     assert (setup.udp_listen_port, setup.udp_peer_port) == (52224, 52214)
     assert setup.seed_range == (64, 127) and setup.control_entry.index == 8
     assert args.tx_gain == -89.75 and args.decode_workers == 3
+    assert args.link_adaptation == "olla"  # the two-loop LA is the default
     assert not setup.warnings
 
 
