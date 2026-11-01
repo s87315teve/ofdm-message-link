@@ -7,18 +7,6 @@ row that carry a fresh SNR -- a keepalive without preambles neither counts
 nor resets the run -- and ``min_dwell_s`` since the last change; going down
 is immediate).
 
-Fixed mode (``on_mode("fixed")``, from the controller): the outer loop is
-frozen and no up step is prepared, because the reports then describe the
-operator's MCS; the counter baselines and the SNR filter keep following
-the reports, so learning resumes cleanly with the same offset when the
-mode returns to ``"auto"``.  (Freezing was chosen over resetting the
-offset: what was learned before the operator stepped in stays valid.)
-
-Stale: with no accepted report for ``stale_after_s``, or when reports keep
-arriving but none has heard a burst sent more than ``stale_after_s`` ago
-(no preambles and no DATA subframes: the forward link is dead), the MCS
-steps down one rung per ``stale_step_s``, not below ``fallback_mcs``.
-
 Outer loop (OLLA): per DATA subframe, the offset moves by ``+step_up_db``
 for one the peer received and ``-step_down_db`` for one it lost, so it stops
 drifting when ``step_up * ok = step_down * lost``: the loss settles at
@@ -44,6 +32,18 @@ the equilibrium to about 4 % at 16 subframes per report and 9 % at 40.)
 A hard clamp of ``-2 * max_report_down_db`` / ``+max_report_up_db`` per
 report remains for outliers, such as a report that carries the losses of
 an outage; it does not bind for reports of typical size.
+
+Fixed mode (``on_mode("fixed")``, from the controller): the outer loop is
+frozen and no up step is prepared, because the reports then describe the
+operator's MCS; the counter baselines and the SNR filter keep following
+the reports, so learning resumes cleanly with the same offset when the
+mode returns to ``"auto"``.  (Freezing was chosen over resetting the
+offset: what was learned before the operator stepped in stays valid.)
+
+Stale: with no accepted report for ``stale_after_s``, or when reports keep
+arriving but none has heard a burst sent more than ``stale_after_s`` ago
+(no preambles and no DATA subframes: the forward link is dead), the MCS
+steps down one rung per ``stale_step_s``, not below ``fallback_mcs``.
 
 The ladder offers discrete rates, so the realised loss reaches the target
 only where the SNR sits near a threshold.  Elsewhere the best rung loses
