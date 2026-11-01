@@ -43,7 +43,7 @@ DEFAULT_RX_GAIN_DB = 15.0
 MIN_TX_GAIN_DB = -89.75
 MAX_TX_GAIN_DB = 0.0
 DEFAULT_DECODE_WORKERS = 3
-DEFAULT_LINK_ADAPTATION = "fixed"
+DEFAULT_LINK_ADAPTATION = "olla"
 DEFAULT_REPORTER = "default"
 ISM_BAND_HZ = (2_400_000_000.0, 2_483_500_000.0)
 # Scrambler seeds per node: a free PHY-level direction id (design section 3.1).
@@ -222,8 +222,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     la = parser.add_argument_group("link adaptation")
     la.add_argument("--link-adaptation", default=DEFAULT_LINK_ADAPTATION, metavar="SPEC",
-                    help=("fixed, olla, arf, package.module:Class or path/file.py:Class "
-                          f"(default: {DEFAULT_LINK_ADAPTATION}, at --mcs-index)"))
+                    help=("olla (two-loop, the default), fixed (stays at --mcs-index), arf, "
+                          "package.module:Class or path/file.py:Class "
+                          f"(default: {DEFAULT_LINK_ADAPTATION}, starting at --mcs-index)"))
     la.add_argument("--link-adaptation-arg", action="append", default=[], metavar="K=V",
                     help="keyword argument for the LA class, repeatable")
     la.add_argument("--feedback-reporter", default=DEFAULT_REPORTER, metavar="SPEC",

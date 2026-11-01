@@ -402,10 +402,10 @@ process 默默分流。
 | `--duration S` | Ready 後 S 秒停止（headless） |
 | `--gain-profile "T:DB,..."` | 依 ready 後的秒數排程 TX gain，例如 `0:-5,30:-20,60:-5` |
 | `--control-port P` | localhost UDP JSON control socket，預設依 node；0 = 關閉 |
-| `--link-adaptation SPEC` | `fixed`（預設，固定在 `--mcs-index`）、`olla`、`arf`、`pkg.mod:Class`、`file.py:Class` |
+| `--link-adaptation SPEC` | `olla`（預設，兩個 loop，從 `--mcs-index` 開始）、`fixed`（固定在 `--mcs-index`）、`arf`、`pkg.mod:Class`、`file.py:Class` |
 | `--link-adaptation-arg K=V` | LA class 的參數，可重複 |
 | `--feedback-reporter SPEC` / `--feedback-reporter-arg K=V` | RX 端量測與回報模組，預設 `default` |
-| `--mcs-index N` | 固定或起始的 MCS，預設 8 |
+| `--mcs-index N` | 起始的 MCS（`fixed` 時是固定的 MCS），預設 8 |
 | `--control-mcs-index N` | Control-only burst 的 MCS，預設 profile 的值（8） |
 | `--decode-workers N` | 預設 3（兩個 node 在同一台 PC 時的 CPU 預算） |
 | `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`；control socket 的 `mark` 也寫入 |

@@ -236,8 +236,8 @@ Wire format 見 [7.8 節](07-reference.md#78-雙向-link-的-control-與-feedbac
 
 | `SPEC` | 意義 |
 |---|---|
-| `fixed`（`node_app` 預設） | 固定在 `--mcs-index`；GUI 與 control socket 的 `set_mcs` 可以改 |
-| `olla` | 內建：LTE 式的 inner／outer loop，追 1 % 的 subframe loss |
+| `olla`（`node_app` 預設） | 內建：LTE 式的 inner／outer loop，追 1 % 的 subframe loss |
+| `fixed` | 固定在 `--mcs-index`；GUI 與 control socket 的 `set_mcs` 可以改 |
 | `arf` | 內建範例：Auto Rate Fallback（`la/examples.py`） |
 | `package.module:Class` | 可以 import 的 module 裡的 class |
 | `path/to/file.py:Class` | 一個檔案裡的 class，不需要安裝 |
