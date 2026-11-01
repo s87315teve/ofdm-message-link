@@ -20,7 +20,13 @@ peer's link adaptation.  All fields are big-endian::
       30 last_mcs_index u8 (0xFF = none)   31 fb_flags u8
       32 reporter_id u8   33 n_entries u8 (<= 16)   34 tlv_length u16
       36 entries, 6 B each: seq_first u16 | mcs u8 | snr_qdb u8 | ok u8 | lost u8
+         (snr_qdb: 0.25 dB steps, 0-63.5 dB, saturating; 0xFF = none;
+          ok and lost saturate at 255)
       then tlv_length bytes of TLVs: type u8 | len u8 | value
+
+    TLV types defined here (types below 0x80 are reserved for this codec):
+      0x10 SESSION_ID, len 4: u32 drawn at random when the reporter starts,
+           so the peer recognises a restart (``FeedbackReport.session_id``)
 
 The receiver of an LCP must never fail on it: :func:`decode_lcp` and
 :func:`decode_feedback` return None for anything they cannot read, and a
@@ -59,6 +65,8 @@ FEEDBACK_FIXED_BYTES = 36
 FEEDBACK_ENTRY_BYTES = 6
 # Custom reporters use TLV types 0x80-0xFF; lower types are reserved.
 CUSTOM_TLV_FIRST = 0x80
+TLV_SESSION_ID = 0x10
+_SESSION = struct.Struct(">I")
 
 _HEADER = struct.Struct(">HBBBBBB")
 _FEEDBACK = struct.Struct(">HHHHhhhIIHHHHBBBBH")
@@ -258,12 +266,19 @@ def encode_feedback(report: FeedbackReport) -> bytes:
 
     Values are quantised and saturated to their fields; only the most recent
     :data:`~ofdm_message_link.la.api.MAX_REPORT_ENTRIES` bursts are kept.
-    ``fb_flags`` bit 0 is derived from ``last_data_seq``.  Raises ValueError
-    if the TLVs do not fit the 255-byte body.
+    ``fb_flags`` bit 0 is derived from ``last_data_seq``; ``session_id``,
+    if set, travels as the first TLV (:data:`TLV_SESSION_ID`).  Raises
+    ValueError if the TLVs do not fit the 255-byte body.
     """
 
     bursts = tuple(report.bursts)[-MAX_REPORT_ENTRIES:]
-    tlvs = _encode_tlvs(report.extras)
+    extras = tuple(report.extras)
+    if report.session_id is not None:
+        session = _SESSION.pack(int(report.session_id) & 0xFFFFFFFF)
+        extras = ((TLV_SESSION_ID, session),) + tuple(
+            item for item in extras if item[0] != TLV_SESSION_ID
+        )
+    tlvs = _encode_tlvs(extras)
     flags = int(report.flags) & 0xFF & ~FLAG_LAST_SEQ_VALID
     if report.last_data_seq is not None:
         flags |= FLAG_LAST_SEQ_VALID
@@ -312,8 +327,9 @@ def decode_feedback(body: bytes, *, version: int = LCP_VERSION) -> FeedbackRepor
     """Parse a FEEDBACK body, or return None if it is truncated.  Never raises.
 
     ``BurstReport.t_s`` and ``fcs_ok`` are not on the wire: entries come back
-    with ``t_s = 0.0`` and ``fcs_ok = None``.  Every TLV is returned in
-    ``extras``; this codec defines no TLV types, so none is interpreted.
+    with ``t_s = 0.0`` and ``fcs_ok = None``.  A 4-byte
+    :data:`TLV_SESSION_ID` becomes ``session_id``; every other TLV is
+    returned in ``extras``, in order.
     """
 
     try:
@@ -358,6 +374,13 @@ def decode_feedback(body: bytes, *, version: int = LCP_VERSION) -> FeedbackRepor
                 subframes_lost=lost,
             )
         )
+    extras = []
+    session_id = None
+    for kind, value in _decode_tlvs(raw[entries_end : entries_end + tlv_length]):
+        if kind == TLV_SESSION_ID and len(value) == _SESSION.size and session_id is None:
+            session_id = _SESSION.unpack(value)[0]
+        else:
+            extras.append((kind, value))
     return FeedbackReport(
         version=version,
         reporter_id=reporter_id,
@@ -377,7 +400,8 @@ def decode_feedback(body: bytes, *, version: int = LCP_VERSION) -> FeedbackRepor
         last_mcs_index=None if last_mcs == _U8_NONE else last_mcs,
         flags=fb_flags,
         bursts=tuple(bursts),
-        extras=_decode_tlvs(raw[entries_end : entries_end + tlv_length]),
+        extras=tuple(extras),
+        session_id=session_id,
     )
 
 
@@ -403,6 +427,7 @@ __all__ = [
     "PDU_FEEDBACK",
     "PDU_LINK_HEADER",
     "PDU_STATUS",
+    "TLV_SESSION_ID",
     "Lcp",
     "LcpHeader",
     "PduType",

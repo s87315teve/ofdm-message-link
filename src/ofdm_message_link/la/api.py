@@ -30,7 +30,10 @@ once per data burst for a :class:`Decision`.
 Counters in a :class:`FeedbackReport` (``data_ok_total``, ``data_lost_total``,
 ...) are cumulative and wrap at 2**32, so a lost report loses no information:
 difference two reports with :func:`counter_delta`.  ``report_seq`` wraps at
-2**16; ignore a report for which :func:`is_newer_seq` is False.
+2**16.  When the peer restarts, both start again from 0, so "ignore a report
+whose ``report_seq`` is not newer" alone would ignore the restarted peer for
+up to 32767 reports.  :class:`FeedbackTracker` does the bookkeeping right
+(duplicates, restarts, gaps) and returns the counter increases; use it.
 
 Writing your own algorithm
 --------------------------
@@ -38,7 +41,7 @@ A class with the four :class:`LinkAdaptation` methods and a constructor
 ``Class(context, **kwargs)`` is enough; no base class is needed::
 
     # my_la.py
-    from ofdm_message_link.la.api import Decision, LaContext, counter_delta, is_newer_seq
+    from ofdm_message_link.la.api import Decision, FeedbackTracker, LaContext
 
     class Threshold:
         '''Use the highest rung whose threshold the reported SNR clears.'''
@@ -48,15 +51,14 @@ A class with the four :class:`LinkAdaptation` methods and a constructor
             self.thresholds = context.thresholds_db       # MCS index -> dB
             self.margin_db = float(margin_db)
             self.mcs = context.initial_mcs_index
-            self.last_seq = None
+            self.feedback = FeedbackTracker()             # duplicates, peer restarts
 
         def on_sent(self, burst):                         # SentBurst, may be ignored
             pass
 
         def on_feedback(self, report):
-            if self.last_seq is not None and not is_newer_seq(report.report_seq, self.last_seq):
+            if self.feedback.update(report) is None:      # an old or repeated report
                 return
-            self.last_seq = report.report_seq
             if report.snr_mean_db is None:
                 return
             fits = [e.index for e in self.ladder
@@ -78,6 +80,10 @@ margin_db=1.5``.  Rules:
 * ``snapshot`` returns JSON-able values only; the GUI and ``--la-log`` show it.
 * Calls never overlap (the controller holds one lock), so no locking is needed.
   Times are ``time.monotonic()`` seconds.
+* Optional: a method ``on_mode(mode)`` is called with ``"fixed"`` when the
+  operator fixes the MCS and ``"auto"`` when the algorithm gets it back.
+  Feedback keeps flowing in fixed mode, but it describes the operator's
+  MCS; the built-ins freeze their learning (OLLA's offset, ARF's runs).
 * ``ofdm_message_link.la.examples.ArfLinkAdaptation`` is a complete small
   example; ``ofdm_message_link.la.olla.OllaLinkAdaptation`` is the default.
 
@@ -137,6 +143,10 @@ class FeedbackReport:
     2**16 for the others).  ``window_s`` is the measurement window the SNR
     statistics cover, ``age_s`` the time from the window end to encoding.
     ``received_t_s`` is set locally by the node that received the report.
+    ``session_id`` (a TLV on the wire) is drawn at random each time the
+    peer's reporter starts, so a peer restart is recognised at once even
+    though ``report_seq`` and the counters start again from 0; None if the
+    peer's reporter does not send one.
     """
 
     version: int
@@ -159,6 +169,7 @@ class FeedbackReport:
     bursts: tuple[BurstReport, ...] = ()
     extras: tuple[tuple[int, bytes], ...] = ()
     received_t_s: float | None = None
+    session_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,6 +295,109 @@ def counter_delta(current: int, previous: int, *, bits: int = 32) -> int:
     return (current - previous) % (1 << bits)
 
 
+SEQ_REORDER_WINDOW = 64
+"""A report at most this many ``report_seq`` values behind the last accepted
+one is a late or repeated copy; further behind, with counters that went
+backwards, it is a restarted peer."""
+
+_COUNTER_BACKWARDS = 1 << 31  # a larger u32 "increase" is a decrease
+
+
+@dataclass(frozen=True, slots=True)
+class FeedbackDelta:
+    """What one accepted report adds to the previous one.
+
+    ``rebaselined`` is None for an ordinary report.  Otherwise the report only
+    set a new baseline for the cumulative counters (``ok`` and ``lost`` are 0)
+    and the value says why: ``"first"`` report, the peer's ``"session"``
+    changed (it restarted), a ``"gap"`` longer than ``rebaseline_after_s``
+    since the last accepted report, or the counters went ``"backwards"``.
+    """
+
+    ok: int = 0
+    lost: int = 0
+    overflow_changed: bool = False
+    rebaselined: str | None = None
+
+
+class FeedbackTracker:
+    """Accept or ignore each feedback report and difference its counters.
+
+    A report is ignored (``update`` returns None) only when it is a late or
+    repeated copy of one already accepted: its ``report_seq`` is not newer and
+    lies within :data:`SEQ_REORDER_WINDOW` behind, from the same session.  A
+    restarted peer is recognised, and its first report becomes the new
+    baseline, by any of:
+
+    * a different ``session_id`` (the default reporter sends one);
+    * a report arriving more than ``rebaseline_after_s`` after the last
+      accepted one (a restart takes longer than that, and counters that piled
+      up while no feedback arrived say nothing about the current MCS);
+    * ``data_ok_total`` or ``data_lost_total`` going backwards.
+
+    ``rebaseline_after_s=None`` disables the gap rule.  Times come from
+    ``report.received_t_s``, else from ``now_s``.
+    """
+
+    def __init__(self, *, rebaseline_after_s: float | None = 0.5) -> None:
+        self.rebaseline_after_s = rebaseline_after_s
+        self.last_accepted_t: float | None = None
+        self.ignored = 0
+        self.rebaselines = 0
+        self._seq: int | None = None
+        self._session: int | None = None
+        self._ok = 0
+        self._lost = 0
+        self._overflow = 0
+
+    @property
+    def started(self) -> bool:
+        """True once a report has been accepted."""
+
+        return self._seq is not None
+
+    def update(self, report: FeedbackReport, now_s: float | None = None) -> FeedbackDelta | None:
+        t = report.received_t_s if report.received_t_s is not None else now_s
+        d_ok = counter_delta(report.data_ok_total, self._ok)
+        d_lost = counter_delta(report.data_lost_total, self._lost)
+        backwards = d_ok >= _COUNTER_BACKWARDS or d_lost >= _COUNTER_BACKWARDS
+        reason: str | None = None
+        if self._seq is None:
+            reason = "first"
+        elif report.session_id != self._session:
+            reason = "session"
+        elif (
+            self.rebaseline_after_s is not None
+            and t is not None
+            and self.last_accepted_t is not None
+            and t - self.last_accepted_t > self.rebaseline_after_s
+        ):
+            reason = "gap"
+        elif not is_newer_seq(report.report_seq, self._seq):
+            behind = (self._seq - report.report_seq) % (1 << 16)
+            if not (backwards and behind > SEQ_REORDER_WINDOW):
+                self.ignored += 1
+                return None
+            reason = "backwards"
+        elif backwards:
+            reason = "backwards"
+        overflow_changed = (
+            reason is None
+            and counter_delta(report.rx_overflow_total, self._overflow, bits=16) != 0
+        )
+        self._seq = report.report_seq
+        self._session = report.session_id
+        self._ok, self._lost = report.data_ok_total, report.data_lost_total
+        self._overflow = report.rx_overflow_total
+        if t is not None:
+            self.last_accepted_t = t
+        if reason is not None:
+            if reason != "first":
+                self.rebaselines += 1
+            return FeedbackDelta(rebaselined=reason)
+        return FeedbackDelta(ok=d_ok, lost=d_lost, overflow_changed=overflow_changed)
+
+
 __all__ = [
     "DEFAULT_REPORTER_ID",
     "FEEDBACK_VERSION",
@@ -293,8 +407,11 @@ __all__ = [
     "MAX_REPORT_ENTRIES",
     "BurstReport",
     "Decision",
+    "SEQ_REORDER_WINDOW",
+    "FeedbackDelta",
     "FeedbackReport",
     "FeedbackReporter",
+    "FeedbackTracker",
     "LaContext",
     "LinkAdaptation",
     "ReporterContext",

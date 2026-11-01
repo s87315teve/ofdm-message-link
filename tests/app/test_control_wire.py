@@ -262,3 +262,25 @@ def test_encoding_rejects_what_the_wire_cannot_carry():
 def test_module_exports_the_documented_names():
     for name in control.__all__:
         assert hasattr(control, name)
+
+
+def test_session_id_travels_as_a_tlv_and_custom_tlvs_are_kept():
+    report = _report(session_id=0xDEADBEEF, extras=((0x80, b"abc"),))
+    body = encode_feedback(report)
+    assert len(body) == len(encode_feedback(_report(extras=((0x80, b"abc"),)))) + 6
+    decoded = decode_feedback(body)
+    assert decoded.session_id == 0xDEADBEEF
+    assert decoded.extras == ((0x80, b"abc"),)
+    assert decode_feedback(encode_feedback(_report())).session_id is None
+    # The fixed v1 layout is unchanged: a reader that knows no TLVs still parses it.
+    assert body[:control.FEEDBACK_FIXED_BYTES - 2] == encode_feedback(
+        _report(extras=((0x80, b"abc"),))
+    )[:control.FEEDBACK_FIXED_BYTES - 2]
+
+
+def test_a_session_tlv_of_the_wrong_length_stays_an_extra():
+    body = bytearray(encode_feedback(_report()))
+    tlv = bytes((control.TLV_SESSION_ID, 2, 1, 2))
+    struct.pack_into(">H", body, 34, len(tlv))
+    decoded = decode_feedback(bytes(body) + tlv)
+    assert decoded.session_id is None and decoded.extras == ((control.TLV_SESSION_ID, b"\x01\x02"),)

@@ -4,12 +4,19 @@ One YAML file (``configs/la/thresholds_pluto_v5.yaml``) holds the preamble
 SNR each MCS needs for < 1 % loss.  The GUI lights read it through
 ``dashboard.SNR_THRESHOLD_DB``; the link adaptation builds its ladder from
 it with :func:`build_ladder`.
+
+The repository file is the only source.  In a source checkout (or an
+editable install) it is read where it lies; a built wheel or a regular
+install has no ``configs/`` directory, so ``setup.py`` copies the file into
+the package (``ofdm_message_link/la/``) at build time and
+:func:`default_thresholds_path` falls back to that copy.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping
+from importlib import resources
 from pathlib import Path
 
 import yaml
@@ -22,8 +29,37 @@ from ofdm_link.phy.mcs_table import (
     v5_entries,
 )
 
+THRESHOLDS_FILE = "thresholds_pluto_v5.yaml"
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_THRESHOLDS_PATH = REPO_ROOT / "configs" / "la" / "thresholds_pluto_v5.yaml"
+REPO_THRESHOLDS_PATH = REPO_ROOT / "configs" / "la" / THRESHOLDS_FILE
+
+
+def _packaged_thresholds_path() -> Path | None:
+    try:
+        candidate = resources.files(__package__) / THRESHOLDS_FILE
+    except (ModuleNotFoundError, TypeError):  # pragma: no cover - not a real package
+        return None
+    return Path(str(candidate)) if candidate.is_file() else None
+
+
+def default_thresholds_path(
+    repo_path: Path = REPO_THRESHOLDS_PATH, packaged_path: Path | None = None
+) -> Path:
+    """The repository's thresholds file, else the copy shipped in the package.
+
+    If neither exists the repository path is returned, so the error names
+    the file to restore.
+    """
+
+    if Path(repo_path).is_file():
+        return Path(repo_path)
+    packaged = _packaged_thresholds_path() if packaged_path is None else Path(packaged_path)
+    if packaged is not None and packaged.is_file():
+        return packaged
+    return Path(repo_path)
+
+
+DEFAULT_THRESHOLDS_PATH = default_thresholds_path()
 _TABLE_KEY = "snr_threshold_db"
 _KNOWN_INDICES = frozenset(entry.index for entry in ALL_MCS_ENTRIES)
 
@@ -118,6 +154,8 @@ def rung_at_or_below(ladder: tuple[McsTableEntry, ...], mcs_index: int) -> McsTa
 
 __all__ = [
     "DEFAULT_THRESHOLDS_PATH",
+    "REPO_THRESHOLDS_PATH",
+    "default_thresholds_path",
     "ThresholdsError",
     "build_ladder",
     "load_thresholds",

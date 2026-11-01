@@ -3,16 +3,47 @@
 Inner loop: the filtered peer SNR plus an offset picks the highest ladder
 rung whose threshold it clears, with hysteresis (going up needs the new
 rung's threshold + ``hysteresis_up_db`` for ``up_hold_reports`` reports in a
-row and ``min_dwell_s`` since the last change; going down is immediate).
+row that carry a fresh SNR -- a keepalive without preambles neither counts
+nor resets the run -- and ``min_dwell_s`` since the last change; going down
+is immediate).
 
-Outer loop (OLLA): the offset moves by ``+step_up_db`` per DATA subframe the
-peer received and ``-step_down_db`` per subframe it lost.  The offset stops
-drifting when ``step_up * ok = step_down * lost``, so the loss settles at
+Outer loop (OLLA): per DATA subframe, the offset moves by ``+step_up_db``
+for one the peer received and ``-step_down_db`` for one it lost, so it stops
+drifting when ``step_up * ok = step_down * lost``: the loss settles at
 ``step_up / (step_up + step_down)``, which the default
 ``step_up = step_down * t / (1 - t)`` makes the target ``t`` (1 %: there is
-no HARQ to recover losses, unlike LTE's 10 %).  A per-report clamp bounds
-the reaction to one report, because the subframes of one aggregate fail
-together.
+no HARQ to recover losses, unlike LTE's 10 %).
+
+The subframes of one aggregate fail together, so a report can lose dozens
+at once.  To bound the reaction to one report without biasing that
+equilibrium, a report's whole update is scaled by a gain that depends on
+the report size only, never on its outcome::
+
+    gain = min(1, n_cap / n_avg),   n_cap = max_report_down_db / step_down_db
+
+where ``n_avg`` is a running mean of the subframes per report.  A report of
+typical size whose every subframe was lost moves the offset by
+``-max_report_down_db`` at once (2 dB), and a lossless one by
+``+max_report_down_db * t / (1 - t)``; small reports (``n_avg <= n_cap``)
+get the plain per-subframe steps.  Scaling good and bad reports alike keeps
+the drift zero exactly at loss ``t``, also when whole windows are lost
+together.  (The earlier per-report clamp cut only the lossy reports and moved
+the equilibrium to about 4 % at 16 subframes per report and 9 % at 40.)
+A hard clamp of ``-2 * max_report_down_db`` / ``+max_report_up_db`` per
+report remains for outliers, such as a report that carries the losses of
+an outage; it does not bind for reports of typical size.
+
+Fixed mode (``on_mode("fixed")``, from the controller): the outer loop is
+frozen and no up step is prepared, because the reports then describe the
+operator's MCS; the counter baselines and the SNR filter keep following
+the reports, so learning resumes cleanly with the same offset when the
+mode returns to ``"auto"``.  (Freezing was chosen over resetting the
+offset: what was learned before the operator stepped in stays valid.)
+
+Stale: with no accepted report for ``stale_after_s``, or when reports keep
+arriving but none has heard a burst sent more than ``stale_after_s`` ago
+(no preambles and no DATA subframes: the forward link is dead), the MCS
+steps down one rung per ``stale_step_s``, not below ``fallback_mcs``.
 
 The ladder offers discrete rates, so the realised loss reaches the target
 only where the SNR sits near a threshold.  Elsewhere the best rung loses
@@ -29,15 +60,16 @@ from ofdm_link.phy.mcs_table import McsTableEntry
 
 from .api import (
     Decision,
+    FeedbackDelta,
     FeedbackReport,
+    FeedbackTracker,
     LaContext,
     SentBurst,
-    counter_delta,
-    is_newer_seq,
 )
 from .thresholds import build_ladder, load_thresholds, rung_at_or_below
 
-_COUNTER_RESET = 1 << 31  # a larger u32 "increase" means the peer restarted
+_N_AVG_WEIGHT = 0.1  # running mean of the report size: about the last 10 reports
+_OUTLIER_FACTOR = 2.0  # hard per-report clamp, in units of max_report_down_db
 
 
 class OllaLinkAdaptation:
@@ -112,19 +144,29 @@ class OllaLinkAdaptation:
         self._snr_eff: float | None = None
         self._up_cand: int | None = None
         self._up_count = 0
-        self._last_seq: int | None = None
-        self._base_ok: int | None = None
-        self._base_lost: int | None = None
-        self._base_overflow: int | None = None
+        # Duplicates, peer restarts (session id, feedback gap, counters going
+        # backwards) and the counter differences.
+        self._feedback = FeedbackTracker(rebaseline_after_s=self.stale_after_s)
+        self._n_avg: float | None = None  # running mean of DATA subframes per report
+        self._n_cap = (
+            self.max_report_down_db / self.step_down_db
+            if self.step_down_db > 0 and self.max_report_down_db > 0
+            else math.inf
+        )
         self._started_t: float | None = None
         self._last_feedback_t: float | None = None
         self._next_stale_t: float | None = None
+        # First burst sent since the last report that showed the forward link
+        # alive (preambles, or DATA subframes counted); see decide().
+        self._unanswered_since_t: float | None = None
+        self._frozen = False  # fixed mode: no outer-loop update, no up candidate
         self._last_change_t: float | None = None
         self._reason = "init"
         self._now: float | None = None
         self._counts = {
             "reports": 0,
             "ignored_reports": 0,
+            "peer_rebaselines": 0,
             "overflow_skips": 0,
             "changes": 0,
             "subframes_ok": 0,
@@ -163,22 +205,39 @@ class OllaLinkAdaptation:
 
     # -- LinkAdaptation ---------------------------------------------------
 
+    def on_mode(self, mode: str) -> None:
+        """``"fixed"`` freezes the outer loop and the up run; ``"auto"`` resumes."""
+
+        self._frozen = mode == "fixed"
+        self._up_count = 0
+        self._up_cand = None
+
     def on_sent(self, burst: SentBurst) -> None:
-        pass
+        if self._unanswered_since_t is None:
+            self._unanswered_since_t = burst.t_s
 
     def on_feedback(self, report: FeedbackReport) -> None:
-        if self._last_seq is not None and not is_newer_seq(report.report_seq, self._last_seq):
-            self._counts["ignored_reports"] += 1
-            return
-        self._last_seq = report.report_seq
-        self._counts["reports"] += 1
         t = report.received_t_s
         if t is None:
             t = self._now if self._now is not None else time.monotonic()
+        delta = self._feedback.update(report, t)
+        if delta is None:
+            self._counts["ignored_reports"] += 1
+            return
+        self._counts["reports"] += 1
+        if delta.rebaselined not in (None, "first"):
+            self._counts["peer_rebaselines"] += 1
         self._last_feedback_t = t
-        self._next_stale_t = None
+        alive = report.preambles > 0 or (
+            delta.rebaselined is None and delta.ok + delta.lost > 0
+        )
+        if alive:
+            self._unanswered_since_t = None
+            self._next_stale_t = None
+        # A keepalive that carries no new SNR must not count toward an up step.
+        fresh_snr = report.preambles > 0 and report.snr_mean_db is not None
 
-        if report.preambles > 0 and report.snr_mean_db is not None:
+        if fresh_snr:
             if self._snr_f is None or self._snr_t is None or self.snr_tau_s <= 0:
                 self._snr_f = float(report.snr_mean_db)
             else:
@@ -186,7 +245,7 @@ class OllaLinkAdaptation:
                 self._snr_f += weight * (float(report.snr_mean_db) - self._snr_f)
             self._snr_t = t
 
-        self._outer_update(report)
+        self._outer_update(delta)
 
         if self._snr_f is None:
             return
@@ -196,33 +255,31 @@ class OllaLinkAdaptation:
             if self._threshold(position) + self.hysteresis_up_db <= self._snr_eff:
                 cand = position
                 break
-        self._up_cand = cand
-        self._up_count = self._up_count + 1 if cand is not None else 0
+        self._up_cand = None if self._frozen else cand
+        if cand is None or self._frozen:
+            self._up_count = 0
+        elif fresh_snr:
+            self._up_count += 1
 
-    def _outer_update(self, report: FeedbackReport) -> None:
-        overflow_changed = (
-            self._base_overflow is not None
-            and counter_delta(report.rx_overflow_total, self._base_overflow, bits=16) != 0
-        )
-        self._base_overflow = report.rx_overflow_total
-        if self._base_ok is None or self._base_lost is None:
-            self._base_ok, self._base_lost = report.data_ok_total, report.data_lost_total
-            return
-        d_ok = counter_delta(report.data_ok_total, self._base_ok)
-        d_lost = counter_delta(report.data_lost_total, self._base_lost)
-        self._base_ok, self._base_lost = report.data_ok_total, report.data_lost_total
-        if d_ok >= _COUNTER_RESET or d_lost >= _COUNTER_RESET:
-            return  # the peer's counters restarted: this report is the new baseline
+    def _outer_update(self, delta: FeedbackDelta) -> None:
+        if delta.rebaselined is not None:
+            return  # first report, or the peer restarted: only a new baseline
+        d_ok, d_lost = delta.ok, delta.lost
         self._counts["subframes_ok"] += d_ok
         self._counts["subframes_lost"] += d_lost
-        if d_ok + d_lost == 0 or not self.outer_loop:
+        if d_ok + d_lost == 0 or not self.outer_loop or self._frozen:
             return
-        if self.skip_outer_on_overflow and overflow_changed:
+        if self.skip_outer_on_overflow and delta.overflow_changed:
             self._counts["overflow_skips"] += 1
             return
-        delta = self.step_up_db * d_ok - self.step_down_db * d_lost
-        delta = min(max(delta, -self.max_report_down_db), self.max_report_up_db)
-        self._offset = min(max(self._offset + delta, self.offset_min_db), self.offset_max_db)
+        n = d_ok + d_lost
+        self._n_avg = n if self._n_avg is None else self._n_avg + _N_AVG_WEIGHT * (
+            n - self._n_avg
+        )
+        gain = min(1.0, self._n_cap / self._n_avg)
+        step = gain * (self.step_up_db * d_ok - self.step_down_db * d_lost)
+        step = min(max(step, -_OUTLIER_FACTOR * self.max_report_down_db), self.max_report_up_db)
+        self._offset = min(max(self._offset + step, self.offset_min_db), self.offset_max_db)
 
     def decide(self, now_s: float) -> Decision:
         self._now = now_s
@@ -232,11 +289,22 @@ class OllaLinkAdaptation:
             self._last_change_t = now_s
             reason = "init"
         reference = self._last_feedback_t if self._last_feedback_t is not None else self._started_t
+        stale_since = None
         if now_s - reference > self.stale_after_s:
-            # One rung down per stale_step_s without feedback, not below the floor.
+            stale_since = reference + self.stale_after_s  # no feedback
+        dead = self._unanswered_since_t
+        if dead is not None and now_s - dead > self.stale_after_s:
+            # Feedback arrives but has heard none of our bursts: the forward
+            # link is dead, which no SNR or loss count in the reports shows.
+            since = dead + self.stale_after_s
+            stale_since = since if stale_since is None else min(stale_since, since)
+        if stale_since is None:
+            self._next_stale_t = None
+        if stale_since is not None:
+            # One rung down per stale_step_s, not below the floor.
             reason = "stale"
             if self._next_stale_t is None:
-                self._next_stale_t = reference + self.stale_after_s
+                self._next_stale_t = stale_since
             while self._next_stale_t <= now_s:
                 self._next_stale_t += self.stale_step_s
                 if self._cur > self._floor:
@@ -270,10 +338,12 @@ class OllaLinkAdaptation:
             "algorithm": "olla",
             "mcs_index": self.mcs_index,
             "reason": self._reason,
+            "frozen": self._frozen,
             "snr_f_db": rounded(self._snr_f),
             "offset_db": rounded(self._offset),
             "snr_eff_db": rounded(self._snr_eff),
             "up_count": self._up_count,
+            "subframes_per_report": rounded(self._n_avg),
             "ladder": [entry.index for entry in self._ladder],
             **self._counts,
         }

@@ -81,3 +81,16 @@ def test_loads_through_the_loader_both_ways():
     assert isinstance(by_name, LinkAdaptation) and by_name.up_after == 5
     assert by_path.down_after == 4
     assert by_name.snapshot()["algorithm"] == "arf"
+
+
+def test_arf_follows_a_restarted_peer():
+    la = ArfLinkAdaptation(context(initial=13), up_after=10, down_after=2)
+    for seq in range(1, 5001):
+        la.on_feedback(report(seq, seq * 0.02, ok=seq * 40))
+    top = la.decide(100.0).mcs_index
+    t = 100.0
+    for seq in range(0, 20):  # restart: seq and counters from 0, heavy loss
+        t += 0.02
+        la.on_feedback(report(seq, t, ok=seq * 40, lost=seq * 10))
+    assert la.decide(t).mcs_index < top
+    assert la.feedback.rebaselines == 1

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
-from la_fakes import LADDER, report
+from la_fakes import LADDER, context, report
 
 from ofdm_link.phy.mcs_table import mcs_entry
 from ofdm_message_link.la.api import BurstReport, Decision, ReporterContext, RxHealth
@@ -16,6 +16,7 @@ from ofdm_message_link.la.controller import (
     DecodedControl,
     LinkController,
 )
+from ofdm_message_link.la.olla import OllaLinkAdaptation
 from ofdm_message_link.la.reporter import DefaultReporter
 
 HEALTH = RxHealth(0, 0, 0, clipping_seen=False, decode_backlog=False)
@@ -263,8 +264,8 @@ def test_no_robust_copy_needed_when_data_goes_at_a_low_mcs():
 def test_idle_wait_follows_the_reporter():
     ctl, _, _, reporter, _, _, _ = _controller()
     assert ctl.idle_wait_s(1.0) is None
-    reporter.due_at = 1.25
-    assert ctl.idle_wait_s(1.0) == pytest.approx(0.25)
+    reporter.due_at = 1.01
+    assert ctl.idle_wait_s(1.0) == pytest.approx(0.01)
     assert ctl.idle_wait_s(2.0) == 0.0
 
 
@@ -371,3 +372,178 @@ def test_default_codec_round_trip_when_the_link_layer_is_present():
     assert (received.data_ok_total, received.data_lost_total) == (40, 1)
     assert received.snr_mean_db == pytest.approx(16.0, abs=0.01)
     assert np.isclose(received.received_t_s, 0.0)
+
+
+# -- peer restart and stale agreement (review finding 1) ------------------------
+
+
+def test_an_ignored_report_does_not_refresh_the_feedback_age():
+    ctl, clock, _, _, codec, _, _ = _controller()
+    clock.t = 1.0
+    ctl.on_control(_peer_feedback(codec, 10, ok=400), CONTEXT)
+    clock.t = 1.4
+    ctl.on_control(_peer_feedback(codec, 9, ok=360), CONTEXT)  # a late copy
+    clock.t = 1.6
+    snap = ctl.snapshot()
+    assert snap["feedback_ignored"] == 1
+    assert snap["feedback_age_s"] == pytest.approx(0.6) and snap["stale"] is True
+
+
+def test_controller_uses_the_algorithms_stale_after():
+    la = OllaLinkAdaptation(context(), stale_after_s=2.0)
+    ctl, clock, _, _, codec, _, _ = _controller(la=la)
+    clock.t = 1.0
+    ctl.on_control(_peer_feedback(codec, 1), CONTEXT)
+    clock.t = 2.5
+    assert ctl.snapshot()["stale"] is False
+    clock.t = 3.1
+    assert ctl.snapshot()["stale"] is True
+
+
+def test_peer_loss_follows_a_restarted_peer():
+    ctl, clock, _, _, codec, _, _ = _controller()
+    clock.t = 1.0
+    ctl.on_control(_peer_feedback(codec, 5000, ok=200_000, session_id=1), CONTEXT)
+    for seq in range(0, 5):
+        clock.t += 0.02
+        ctl.on_control(
+            _peer_feedback(codec, seq, ok=30 * seq, lost=10 * seq, session_id=2), CONTEXT
+        )
+    snap = ctl.snapshot()
+    assert snap["peer_rebaselines"] == 1 and snap["feedback_ignored"] == 0
+    assert snap["peer_loss_10s"] == pytest.approx(0.25)
+
+
+# -- plug-in failures stay inside the controller (review finding 4) -------------
+
+
+class _BrokenLa(FakeLa):
+    def on_feedback(self, report):
+        raise ZeroDivisionError("on_feedback bug")
+
+    def decide(self, now_s):
+        raise RuntimeError("decide bug")
+
+    def on_sent(self, burst):
+        raise RuntimeError("on_sent bug")
+
+    def snapshot(self):
+        raise RuntimeError("snapshot bug")
+
+
+class _BrokenReporter(FakeReporter):
+    def on_preambles(self, now_s, snr_db, *, control_only):
+        raise RuntimeError("reporter bug")
+
+    def build(self, now_s):
+        raise RuntimeError("build bug")
+
+
+class _BrokenLog:
+    def write(self, line):
+        raise OSError("disk full")
+
+    def flush(self):
+        pass
+
+
+def test_algorithm_reporter_log_and_event_failures_never_escape():
+    def bad_event(kind, record):
+        raise RuntimeError("gui gone")
+
+    reporter = _BrokenReporter()
+    ctl, clock, _, _, codec, _, _ = _controller(
+        la=_BrokenLa(), reporter=reporter, la_log=_BrokenLog(), on_event=bad_event
+    )
+    clock.t = 1.0
+    assert ctl.on_control(_peer_feedback(codec, 1), CONTEXT) is ControlVerdict.ACCEPT
+    assert ctl.entry_for_next_burst(1.0) == mcs_entry(8)  # no MCS yet: the control entry
+    ctl.on_sent(_Burst(sequences=(0,), datagrams=(b"x",), sample_count=100, mcs_index=8), 1.0)
+    reporter.is_due = True
+    plan = ctl.control_plan(1.0, idle=False)
+    assert len(plan.payloads) == 1 and not plan.standalone  # a LINK_HEADER instead
+    assert ctl.control_plan(1.0, idle=True).payloads == ()
+    ctl.on_receive(1.0, snrs=(15.0,), bursts=(), health=HEALTH)
+    snap = ctl.snapshot()
+    assert snap["la_errors"] >= 4 and snap["reporter_errors"] == 3
+    assert snap["log_errors"] >= 1 and snap["event_errors"] >= 1
+    assert snap["last_error"]
+    assert snap["algorithm"] == {}
+
+
+def test_the_controller_is_stale_when_the_algorithm_finds_the_link_dead():
+    from ofdm_message_link.la.api import SentBurst
+
+    la = OllaLinkAdaptation(context(initial=13))
+    ctl, clock, _, _, codec, _, _ = _controller(la=la)
+    for step in range(0, 40):
+        clock.t = step * 0.02
+        la.on_sent(SentBurst(clock.t, None, 8, 13, 0.002, False, None))
+        ctl.on_control(_peer_feedback(codec, step + 1, preambles=0, snr=None), CONTEXT)
+        ctl.entry_for_next_burst(clock.t)
+    snap = ctl.snapshot()
+    assert snap["feedback_age_s"] < 0.05 and snap["reason"] == "stale"
+    assert snap["stale"] is True
+
+
+def test_fixed_mode_freezes_the_outer_loop():
+    la = OllaLinkAdaptation(context(initial=13))
+    ctl, clock, _, _, codec, _, _ = _controller(la=la)
+    ok = lost = 0
+    for seq in range(1, 30):  # auto, 18 dB, no loss
+        clock.t += 0.02
+        ok += 40
+        ctl.on_control(_peer_feedback(codec, seq, snr=18.0, ok=ok, lost=lost), CONTEXT)
+        ctl.entry_for_next_burst(clock.t)
+    settled_mcs, settled_offset = ctl.snapshot()["mcs_index"], la.offset_db
+    ctl.set_fixed(mcs_entry(17))  # the operator tries MCS 17: half the subframes lost
+    for seq in range(30, 130):
+        clock.t += 0.02
+        ok += 20
+        lost += 20
+        ctl.on_control(_peer_feedback(codec, seq, snr=18.0, ok=ok, lost=lost), CONTEXT)
+        assert ctl.entry_for_next_burst(clock.t) == mcs_entry(17)
+    assert la.offset_db == settled_offset and la.snapshot()["frozen"] is True
+    ctl.set_la_mode("auto")
+    clock.t += 0.02
+    ok += 40
+    ctl.on_control(_peer_feedback(codec, 130, snr=18.0, ok=ok, lost=lost), CONTEXT)
+    assert ctl.entry_for_next_burst(clock.t).index == settled_mcs
+    assert la.offset_db >= settled_offset and la.snapshot()["frozen"] is False
+
+
+def test_arf_ignores_reports_in_fixed_mode():
+    from ofdm_message_link.la.examples import ArfLinkAdaptation
+
+    la = ArfLinkAdaptation(context(initial=12), down_after=2)
+    ctl, clock, _, _, codec, _, _ = _controller(la=la, mode="fixed")
+    for seq in range(1, 10):
+        clock.t += 0.02
+        ctl.on_control(_peer_feedback(codec, seq, ok=20 * seq, lost=20 * seq), CONTEXT)
+    assert la.decide(clock.t).mcs_index == 12
+
+
+def test_idle_wait_is_capped_at_the_reporter_period():
+    # Idle, the default reporter's next report is a keepalive 200 ms away;
+    # a DATA burst arriving meanwhile makes one due 20 ms after the last.
+    reporter = DefaultReporter(ReporterContext(1, 2))
+    ctl, clock, _, _, _, _, _ = _controller(reporter=reporter)
+    reporter.build(1.0)
+    assert reporter.next_due_s(1.0) == pytest.approx(1.2)
+    assert ctl.idle_wait_s(1.0) == pytest.approx(reporter.period_s)
+    fake = FakeReporter()
+    fake.due_at = 5.0
+    ctl, *_ = _controller(reporter=fake)
+    assert ctl.idle_wait_s(1.0) == pytest.approx(0.02)  # IDLE_POLL_S without period_s
+
+
+def test_an_lcp_of_another_version_counts_as_unsupported():
+    from ofdm_message_link.control import LcpHeader, encode_lcp, link_header
+
+    ctl, *_ = _controller(codec=None)
+    future = encode_lcp(LcpHeader(pdu_type=1, src_node=2, dst_node=1, version=2))
+    assert ctl.on_control(future, CONTEXT) is ControlVerdict.ACCEPT
+    assert ctl.on_control(b"not an lcp at all", CONTEXT) is ControlVerdict.ACCEPT
+    assert ctl.on_control(link_header(2, 1), CONTEXT) is ControlVerdict.ACCEPT
+    snap = ctl.snapshot()
+    assert (snap["control_unsupported"], snap["control_undecodable"]) == (1, 1)

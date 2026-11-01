@@ -2,7 +2,8 @@
 
 What it measures: the SNR of every peer preamble in the window (mean,
 10th percentile and last, in dB), cumulative counts of DATA subframes the
-peer's bursts delivered and lost, the receiver's health counters, and up to
+peer's bursts delivered and lost, the receiver's health counters (clipping
+and decode backlog: set if any chunk in the window had them), and up to
 ``max_entries`` of the most recent DATA bursts as compact entries.
 
 When a report is due:
@@ -14,11 +15,16 @@ When a report is due:
 Preambles of control-only bursts update the SNR statistics but never make a
 report due; otherwise two idle nodes would answer each other's feedback
 bursts forever.
+
+Every report carries a ``session_id`` drawn at random when the reporter is
+built, so the peer's link adaptation recognises a restart of this node at
+once instead of ignoring the restarted ``report_seq`` as old.
 """
 
 from __future__ import annotations
 
 import math
+import secrets
 from collections import deque
 from collections.abc import Sequence
 
@@ -60,6 +66,7 @@ class DefaultReporter:
         period_ms: float = 20.0,
         keepalive_ms: float = 200.0,
         max_entries: int = 8,
+        session_id: int | None = None,
     ) -> None:
         if period_ms <= 0 or keepalive_ms <= 0:
             raise ValueError("period_ms and keepalive_ms must be positive")
@@ -76,12 +83,18 @@ class DefaultReporter:
         self._last_report_t: float | None = None
         self._first_seen_t: float | None = None
         self._new_data = False
+        self.session_id = (
+            secrets.randbits(32) if session_id is None else int(session_id) & 0xFFFFFFFF
+        )
         self._seq = 0
         self._data_ok = 0
         self._data_lost = 0
         self._last_data_seq: int | None = None
         self._last_mcs: int | None = None
         self._health: RxHealth | None = None
+        # Per-chunk flags, ORed over the report window.
+        self._clipping_seen = False
+        self._decode_backlog = False
 
     def _seen(self, now_s: float) -> None:
         if self._first_seen_t is None:
@@ -113,6 +126,8 @@ class DefaultReporter:
     def on_rx_health(self, now_s: float, health: RxHealth) -> None:
         self._seen(now_s)
         self._health = health
+        self._clipping_seen = self._clipping_seen or bool(health.clipping_seen)
+        self._decode_backlog = self._decode_backlog or bool(health.decode_backlog)
 
     def next_due_s(self, now_s: float) -> float | None:
         reference = self._last_report_t
@@ -138,9 +153,9 @@ class DefaultReporter:
         flags = 0
         if self._last_data_seq is not None:
             flags |= FLAG_LAST_SEQ_VALID
-        if health is not None and health.clipping_seen:
+        if self._clipping_seen:
             flags |= FLAG_CLIPPING_SEEN
-        if health is not None and health.decode_backlog:
+        if self._decode_backlog:
             flags |= FLAG_DECODE_BACKLOG
         entries = tuple(self._entries)[-self.max_entries :] if self.max_entries else ()
         report = FeedbackReport(
@@ -162,6 +177,7 @@ class DefaultReporter:
             last_mcs_index=self._last_mcs,
             flags=flags,
             bursts=entries,
+            session_id=self.session_id,
         )
         self._seq = (self._seq + 1) % _U16
         self._last_report_t = now_s
@@ -171,6 +187,8 @@ class DefaultReporter:
         self._snr_last = None
         self._entries.clear()
         self._new_data = False
+        self._clipping_seen = False
+        self._decode_backlog = False
         return report
 
 

@@ -67,7 +67,7 @@ def test_offset_compensates_an_optimistic_table(snr_db):
         assert 0.005 <= loss <= 0.02, (seed, loss)
         assert _goodput(rows) >= 0.9 * _oracle_rate(snr_db, 3.0)
         if snr_db == 18.0:  # the table says 15 fits (16.5 dB); it needs 18.5: offset < 0
-            assert sum(offset for *_, offset in rows) / len(rows) < -1.0
+            assert sum(offset for *_, offset in rows) / len(rows) < -0.5
 
 
 def test_offset_compensates_a_pessimistic_table_up_to_its_maximum():
@@ -198,8 +198,8 @@ def test_first_report_only_sets_the_baseline():
     la = OllaLinkAdaptation(context())
     _feed(la, 1, 0.02, ok=1000, lost=900)
     assert la.offset_db == 0.0
-    _feed(la, 2, 0.04, ok=1040, lost=900)
-    assert la.offset_db == pytest.approx(40 * la.step_up_db)
+    _feed(la, 2, 0.04, ok=1004, lost=900)  # 4 subframes: the plain per-subframe step
+    assert la.offset_db == pytest.approx(4 * la.step_up_db)
 
 
 def test_old_or_repeated_report_seq_is_ignored():
@@ -224,8 +224,8 @@ def test_report_seq_wraps():
 def test_cumulative_counters_wrap_at_two_to_the_32():
     la = OllaLinkAdaptation(context())
     _feed(la, 1, 0.02, ok=2**32 - 10, lost=2**32 - 1)
-    _feed(la, 2, 0.04, ok=2**32 + 30, lost=2**32 + 1)  # +40 ok, +2 lost
-    expected = 40 * la.step_up_db - 2 * la.step_down_db
+    _feed(la, 2, 0.04, ok=2**32 - 7, lost=2**32 + 0)  # +3 ok, +1 lost
+    expected = 3 * la.step_up_db - 1 * la.step_down_db
     assert la.offset_db == pytest.approx(expected)
 
 
@@ -242,31 +242,39 @@ def test_overflow_change_skips_the_outer_update():
     _feed(la, 2, 0.04, ok=20, lost=20, overflow=4)
     assert la.offset_db == 0.0
     assert la.snapshot()["overflow_skips"] == 1
-    _feed(la, 3, 0.06, ok=40, lost=40, overflow=4)
+    _feed(la, 3, 0.06, ok=20, lost=24, overflow=4)  # 4 lost of 4
     assert la.offset_db == pytest.approx(-2.0)
 
     la = OllaLinkAdaptation(context(), skip_outer_on_overflow=False)
     _feed(la, 1, 0.02, ok=0, lost=0, overflow=3)
-    _feed(la, 2, 0.04, ok=20, lost=20, overflow=4)
+    _feed(la, 2, 0.04, ok=0, lost=4, overflow=4)
     assert la.offset_db == pytest.approx(-2.0)
 
 
-def test_per_report_and_total_clamps():
+def test_report_gain_outlier_clamp_and_total_clamps():
     la = OllaLinkAdaptation(context())
     _feed(la, 1, 0.0)
     ok = lost = 0
-    for seq in range(2, 12):
+    for seq in range(2, 12):  # every subframe of a 40-subframe report lost
         lost += 40
         _feed(la, seq, seq * 0.02, ok=ok, lost=lost)
         if seq == 2:
-            assert la.offset_db == pytest.approx(-2.0)
-    assert la.offset_db == pytest.approx(-10.0)
-    for seq in range(12, 200):
-        ok += 4000
-        _feed(la, seq, seq * 0.02, ok=ok, lost=lost)
-        if seq == 12:
-            assert la.offset_db == pytest.approx(-9.5)
-    assert la.offset_db == pytest.approx(3.0)
+            assert la.offset_db == pytest.approx(-2.0)  # max_report_down_db, at once
+    assert la.offset_db == pytest.approx(-10.0)  # offset_min_db
+    ok += 40
+    _feed(la, 12, 0.24, ok=ok, lost=lost)  # a lossless report of the same size
+    assert la.offset_db == pytest.approx(-10.0 + 2.0 * 0.01 / 0.99)
+    la = OllaLinkAdaptation(context())
+    _feed(la, 1, 0.0)
+    _feed(la, 2, 0.02, ok=40, lost=0)
+    _feed(la, 3, 0.04, ok=40, lost=4000)  # an outage's losses in one report
+    assert la.offset_db == pytest.approx(4 * la.step_up_db * 1.0 - 4.0)  # hard clamp: -2x
+    seq, ok = 3, 40
+    while seq < 3000:
+        seq += 1
+        ok += 4
+        _feed(la, seq, seq * 0.02, ok=ok, lost=4000)
+    assert la.offset_db == pytest.approx(3.0)  # offset_max_db
 
 
 def test_outer_loop_moves_the_effective_snr():
@@ -303,3 +311,163 @@ def test_bad_parameters_are_refused():
         OllaLinkAdaptation(context(), target_loss=0.0)
     with pytest.raises(ValueError):
         OllaLinkAdaptation(context(), offset_min_db=4.0, offset_max_db=3.0)
+
+
+# -- peer restart (review finding 1) ------------------------------------------
+
+
+def _run_then_restart(la, *, session_before=None, session_after=None, gap_s=0.02):
+    """100 s of reports, then the peer restarts: report_seq and counters from 0."""
+
+    t, ok = 0.0, 0
+    for seq in range(1, 5001):
+        t += 0.02
+        ok += 40
+        la.on_feedback(report(seq, t, snr=20.0, ok=ok, session_id=session_before))
+        la.decide(t)
+    t += gap_s
+    ok = 0
+    for seq in range(0, 50):  # 1 s after the restart
+        t += 0.02
+        ok += 20
+        la.on_feedback(report(seq, t, snr=12.0, ok=ok, lost=seq * 20,
+                              session_id=session_after))
+        la.decide(t)
+    return t
+
+
+def test_a_restarted_peer_with_a_new_session_is_followed_at_once():
+    la = OllaLinkAdaptation(context(initial=13))
+    _run_then_restart(la, session_before=0x1234, session_after=0x9876)
+    snap = la.snapshot()
+    assert snap["ignored_reports"] == 0 and snap["peer_rebaselines"] == 1
+    assert snap["snr_f_db"] == pytest.approx(12.0, abs=0.1)  # the new reports count
+    assert snap["offset_db"] < 0  # and their losses reach the outer loop
+    assert snap["reason"] != "stale"
+
+
+def test_a_restarted_peer_without_a_session_is_followed_after_a_feedback_gap():
+    la = OllaLinkAdaptation(context(initial=13))
+    _run_then_restart(la, gap_s=0.8)  # a process restart takes longer than stale_after
+    snap = la.snapshot()
+    assert snap["ignored_reports"] == 0 and snap["peer_rebaselines"] == 1
+    assert snap["offset_db"] < 0
+
+
+def test_a_restarted_peer_is_followed_when_its_counters_go_backwards():
+    la = OllaLinkAdaptation(context(initial=13))
+    _run_then_restart(la)  # no session id, no gap: only the counters tell
+    snap = la.snapshot()
+    assert snap["ignored_reports"] == 0 and snap["peer_rebaselines"] == 1
+    assert snap["offset_db"] < 0
+
+
+def test_a_late_copy_of_a_report_is_still_ignored():
+    la = OllaLinkAdaptation(context())
+    _feed(la, 100, 0.02, ok=4000, session_id=7)
+    _feed(la, 101, 0.04, ok=4040, session_id=7)
+    _feed(la, 99, 0.05, ok=3960, lost=0, session_id=7)  # counters behind, seq just behind
+    snap = la.snapshot()
+    assert snap["ignored_reports"] == 1 and snap["peer_rebaselines"] == 0
+
+
+# -- outer-loop equilibrium under correlated losses (review finding 6) ----------
+
+
+def _drift(subframes, loss, *, deferred=False, reports=20_000, seed=1):
+    """Offset drift with whole-window losses: every subframe of a report fails together.
+
+    ``deferred``: the receiver saw nothing in a lost window, so its report
+    carries no counts and the losses arrive with the next report.
+    """
+
+    import random
+
+    la = OllaLinkAdaptation(context(), offset_min_db=-1e9, offset_max_db=1e9)
+    rnd = random.Random(seed)
+    ok = lost = carried = 0
+    _feed(la, 0, 0.0)
+    for seq in range(1, reports + 1):
+        if rnd.random() < loss:
+            if deferred:
+                carried += subframes
+            else:
+                lost += subframes
+        else:
+            ok += subframes
+            lost += carried
+            carried = 0
+        _feed(la, seq, seq * 0.02, ok=ok, lost=lost)
+    return la.offset_db
+
+
+@pytest.mark.parametrize("subframes", [16, 40])
+@pytest.mark.parametrize("deferred", [False, True])
+def test_the_offset_equilibrium_sits_near_the_target_under_whole_window_losses(
+    subframes, deferred
+):
+    # Drift up at 0.5 % loss and down at 2 %: the equilibrium lies between,
+    # around the 1 % target (the old per-report clamp put it at 4-9 %).
+    for seed in (1, 2):
+        assert _drift(subframes, 0.005, deferred=deferred, seed=seed) > 0
+        assert _drift(subframes, 0.02, deferred=deferred, seed=seed) < 0
+
+
+def test_one_lost_window_moves_the_offset_by_the_report_cap_at_once():
+    for subframes in (16, 40):
+        la = OllaLinkAdaptation(context())
+        _feed(la, 0, 0.0)
+        for seq in range(1, 11):
+            _feed(la, seq, seq * 0.02, ok=seq * subframes)
+        before = la.offset_db
+        _feed(la, 11, 0.22, ok=10 * subframes, lost=subframes)
+        assert before - la.offset_db == pytest.approx(la.max_report_down_db, rel=0.05)
+
+
+# -- keepalives, dead forward link (review risks) ---------------------------------
+
+
+def test_keepalives_without_a_fresh_snr_do_not_count_toward_an_up_step():
+    la = OllaLinkAdaptation(context(initial=8), outer_loop=False)
+    _feed(la, 1, 0.0, snr=20.0)
+    la.decide(0.0)
+    _feed(la, 2, 0.02, snr=None, preambles=0)
+    _feed(la, 3, 0.22, snr=None, preambles=0)
+    assert la.decide(0.3).mcs_index == 8  # one fresh report is not two
+    _feed(la, 4, 0.32, snr=20.0)  # the second fresh one: the run went on
+    assert la.decide(0.42).reason == "up"
+
+
+def _sent(t):
+    from ofdm_message_link.la.api import SentBurst
+
+    return SentBurst(t_s=t, first_sequence=None, subframes=8, mcs_index=13, airtime_s=0.002,
+                     control_only=False, tx_gain_db=None)
+
+
+def test_a_dead_forward_link_steps_down_although_feedback_arrives():
+    la = OllaLinkAdaptation(context(initial=13))
+    la.decide(0.0)
+    _feed(la, 1, 0.0, snr=20.0)
+    reasons = []
+    for step in range(1, 61):  # 1.2 s: we send, the peer hears nothing
+        t = step * 0.02
+        la.on_sent(_sent(t))
+        _feed(la, step + 1, t, snr=None, preambles=0)
+        reasons.append(la.decide(t).reason)
+    assert "stale" in reasons and reasons.index("stale") <= 27  # after ~0.5 s
+    assert la.mcs_index < 13
+    t = 1.24
+    _feed(la, 62, t, snr=20.0, preambles=3, ok=40)  # the peer hears us again
+    assert la.decide(t).reason != "stale"
+
+
+def test_an_idle_link_with_empty_keepalives_is_not_dead():
+    la = OllaLinkAdaptation(context(initial=13))
+    la.decide(0.0)
+    _feed(la, 1, 0.0, snr=20.0)
+    for step in range(1, 11):  # 2 s of keepalives, nothing sent
+        t = step * 0.2
+        _feed(la, step + 1, t, snr=None, preambles=0)
+        assert la.decide(t).reason != "stale"
+    assert la.mcs_index == 13

@@ -225,3 +225,46 @@ def test_decode_backlog_follows_the_pool(profile):
     chunks = [np.zeros(256, np.complex64)] * 4
     _run(worker, _Source(chunks), lambda: len(observer.calls) >= 4)
     assert [call[3].decode_backlog for call in observer.calls] == [False, True, True, False]
+
+
+def test_own_leakage_never_reaches_the_snr_reported_to_the_peer(profile):
+    from la_fakes import LADDER, context
+
+    from ofdm_link.phy.mcs_table import mcs_entry
+    from ofdm_message_link.la.api import ReporterContext
+    from ofdm_message_link.la.controller import LinkController
+    from ofdm_message_link.la.olla import OllaLinkAdaptation
+    from ofdm_message_link.la.reporter import DefaultReporter
+
+    reporter = DefaultReporter(ReporterContext(1, 2))
+    controller = LinkController(
+        node_id=1, peer_id=2, la=OllaLinkAdaptation(context()), reporter=reporter,
+        ladder=LADDER, control_entry=mcs_entry(8),
+    )
+    own = MessageTransmitter(profile, seed_range=(1, 63))
+    peer = MessageTransmitter(profile, seed_range=(64, 127))
+    loud = own.encode_datagrams(own.fragment_message(b"own")[:1],
+                                control_payloads=[link_header(1, 2)])
+    weak = peer.encode_datagrams(peer.fragment_message(b"peer")[:1],
+                                 control_payloads=[link_header(2, 1)])
+    gap = np.zeros(3000, np.complex64)
+    stream = np.concatenate([gap, loud.samples, gap, weak.samples * np.float32(0.1), gap,
+                             np.zeros(3 * 8192, np.complex64)])
+    stream = (stream + 0.002 * np.random.default_rng(3).standard_normal(stream.size)).astype(
+        np.complex64
+    )
+    chunks = [stream[start : start + 8192] for start in range(0, stream.size, 8192)]
+    receiver = MessageReceiver(profile, control_handler=controller)
+    bridge = _Bridge()
+    worker = ReceiveWorker(receiver, bridge, observer=controller)
+    source = _Source(chunks)
+    _run(worker, source, lambda: len(bridge.message.values) >= 1 and not source._chunks)
+    time.sleep(0.05)
+
+    acquired = [snr for item in bridge.link_snr.values for snr in item]
+    assert len(acquired) == 2  # the window still shows every preamble
+    report = reporter.build(1.0)
+    assert receiver.stats.dropped_bursts == 1
+    assert report.preambles == 1  # the peer's burst only
+    assert report.snr_mean_db == pytest.approx(min(acquired), abs=0.01)
+    assert report.snr_mean_db < max(acquired) - 10.0

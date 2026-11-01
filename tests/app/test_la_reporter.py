@@ -137,3 +137,24 @@ def test_bad_parameters():
         DefaultReporter(CONTEXT, period_ms=0)
     with pytest.raises(ValueError):
         DefaultReporter(CONTEXT, max_entries=-1)
+
+
+def test_every_report_carries_the_session_id_of_this_reporter():
+    first = DefaultReporter(CONTEXT)
+    second = DefaultReporter(CONTEXT)
+    assert first.session_id != second.session_id  # 2**-32 chance of a false failure
+    assert first.build(0.0).session_id == first.build(0.2).session_id == first.session_id
+    assert DefaultReporter(CONTEXT, session_id=5).build(0.0).session_id == 5
+
+
+def test_clipping_and_backlog_are_ored_over_the_window_and_cleared():
+    reporter = DefaultReporter(CONTEXT)
+    flagged = RxHealth(0, 0, 0, clipping_seen=True, decode_backlog=True)
+    clean = RxHealth(0, 0, 0, clipping_seen=False, decode_backlog=False)
+    reporter.on_rx_health(0.0, flagged)
+    reporter.on_rx_health(0.013, clean)  # the last chunk was clean
+    flags = reporter.build(0.02).flags
+    assert flags & FLAG_CLIPPING_SEEN and flags & FLAG_DECODE_BACKLOG
+    reporter.on_rx_health(0.03, clean)
+    flags = reporter.build(0.04).flags
+    assert not flags & (FLAG_CLIPPING_SEEN | FLAG_DECODE_BACKLOG)

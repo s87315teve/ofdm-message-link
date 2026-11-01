@@ -56,6 +56,11 @@ from .radio_panel import RadioPanel
 from .transport import set_transport_gain
 
 _SEND_QUEUE_DEPTH = 256
+# After a failed iteration the worker waits this long before the next one,
+# so a persistent error cannot spin the thread; and it reports one message
+# per kind at most every _ERROR_REPORT_S (the rest are counted into it).
+_ERROR_BACKOFF_S = 0.05
+_ERROR_REPORT_S = 1.0
 _MODULATION_LABEL = {"QPSK": "QPSK", "QAM16": "16QAM", "QAM64": "64QAM"}
 
 
@@ -207,7 +212,10 @@ class TransmitWorker:
     A ``policy`` (:class:`BurstPolicy`, used by ``node_app``) picks the
     format of each data burst, puts its CONTROL payloads first in the burst,
     and wakes the idle worker for control-only bursts.  Without one the
-    worker behaves exactly as it always has.
+    worker behaves exactly as it always has.  A policy that raises never
+    stops the data: the burst goes at the transmitter's active entry with no
+    CONTROL payload, and the error is reported (rate-limited, counted in
+    ``policy_errors``).
     """
 
     def __init__(
@@ -234,6 +242,9 @@ class TransmitWorker:
         # Messages taken off the queue but not yet completely sent; written
         # only by the worker thread, read by the window.
         self._held_messages = 0
+        self.policy_errors = 0
+        self._policy_failed = False  # the idle worker backs off after a failure
+        self._error_reports: dict[str, tuple[float, int]] = {}
 
     @property
     def pending(self) -> int:
@@ -321,11 +332,39 @@ class TransmitWorker:
                 self._plot_buffers.set_samples(unsent.burst.samples)
                 self._report(unsent)
                 if self._policy is not None:
-                    self._policy.on_sent(unsent.burst, self._clock())
+                    self._policy_call("on_sent", None, self._policy.on_sent,
+                                      unsent.burst, self._clock())
             except Exception as error:  # surfaced in the window, never silent
-                self._bridge.failed.emit(f"{type(error).__name__}: {error}")
+                self._report_error("worker", f"{type(error).__name__}: {error}")
+                # Never spin on an error that repeats every iteration.
+                self._stop.wait(_ERROR_BACKOFF_S)
             unsent = None
             self._held_messages = sum(piece.is_last for piece in pending)
+
+    def _report_error(self, kind: str, text: str) -> None:
+        """Emit ``text`` at once, then at most once per second per ``kind``."""
+
+        now = self._clock()
+        last, suppressed = self._error_reports.get(kind, (None, 0))
+        if last is not None and now - last < _ERROR_REPORT_S:
+            self._error_reports[kind] = (last, suppressed + 1)
+            return
+        suffix = f" (+{suppressed} more)" if suppressed else ""
+        self._error_reports[kind] = (now, 0)
+        self._bridge.failed.emit(text + suffix)
+
+    def _policy_call(self, name: str, fallback, method, *args, **kwargs):
+        """Call one policy method; on an exception report it and return ``fallback``."""
+
+        try:
+            return method(*args, **kwargs)
+        except Exception as error:
+            self.policy_errors += 1
+            self._policy_failed = True
+            self._report_error(
+                f"policy.{name}", f"policy {name}: {type(error).__name__}: {error}"
+            )
+            return fallback
 
     def _admit(self, pending: deque[_Pending], item: _Submitted) -> None:
         """Fragment one submitted message onto the end of ``pending``."""
@@ -381,12 +420,25 @@ class TransmitWorker:
         if self._policy is None:
             entry = self._transmitter.active_mcs_entry
         else:
+            # A failing policy falls back to the active entry with no CONTROL
+            # payload, so the data keeps flowing.
             now = self._clock()
-            entry = self._policy.entry_for_next_burst(now)
-            plan = self._policy.control_plan(now, idle=False)
+            entry = self._policy_call(
+                "entry_for_next_burst", None, self._policy.entry_for_next_burst, now
+            )
+            if entry is None:
+                entry = self._transmitter.active_mcs_entry
+            plan = self._policy_call(
+                "control_plan", ControlPlan(), self._policy.control_plan, now, idle=False
+            )
             if plan.standalone and plan.payloads:
-                return self._encode_control(plan.payloads)
-            payloads = tuple(plan.payloads)
+                encoded = self._policy_call(
+                    "control_entry", None, self._encode_control, plan.payloads
+                )
+                if encoded is not None:
+                    return encoded
+            else:
+                payloads = tuple(plan.payloads)
         datagrams = [piece.datagram for piece in pending]
         take = self._transmitter.plan_burst(
             datagrams,
@@ -405,7 +457,10 @@ class TransmitWorker:
 
         if self._policy is None:
             return 0.1
-        wait = self._policy.idle_wait_s(self._clock())
+        if self._policy_failed:
+            self._policy_failed = False
+            return _ERROR_BACKOFF_S
+        wait = self._policy_call("idle_wait_s", None, self._policy.idle_wait_s, self._clock())
         # At least 1 ms, so a policy that stays due without a plan cannot spin.
         return 0.1 if wait is None else min(0.1, max(0.001, float(wait)))
 
@@ -415,11 +470,15 @@ class TransmitWorker:
         if self._policy is None:
             return None
         now = self._clock()
-        wait = self._policy.idle_wait_s(now)
+        wait = self._policy_call("idle_wait_s", None, self._policy.idle_wait_s, now)
         if wait is None or wait > 0.0:
             return None
-        plan = self._policy.control_plan(now, idle=True)
-        return self._encode_control(plan.payloads) if plan.payloads else None
+        plan = self._policy_call(
+            "control_plan", ControlPlan(), self._policy.control_plan, now, idle=True
+        )
+        if not plan.payloads:
+            return None
+        return self._policy_call("control_entry", None, self._encode_control, plan.payloads)
 
     def _encode_control(self, payloads: tuple[bytes, ...]) -> _Encoded:
         assert self._policy is not None
