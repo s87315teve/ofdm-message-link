@@ -617,7 +617,7 @@ def test_the_interval_runs_start_to_start_so_long_bursts_leave_no_idle_air(profi
         assert _wait_for(lambda: len(sink.returns) == 6)
     finally:
         worker.stop()
-    idle = [start - end for end, start in zip(sink.returns[:-1], sink.arrivals[1:])]
+    idle = [start - end for end, start in zip(sink.returns[:-1], sink.arrivals[1:], strict=True)]
     assert max(idle) < interval * 0.5, idle
 
 
