@@ -1,0 +1,182 @@
+[
+ {
+  "run": "m3_olla_run1",
+  "direction": "AB",
+  "steps": [
+   {
+    "t": 30.0,
+    "from_db": -5.0,
+    "to_db": -20.0,
+    "until_s": 60.0,
+    "lost_first_0p5s": 0,
+    "lost_first_1s": 0,
+    "lost_first_1p5s": 188,
+    "loss_after_1p5s": 0.010433745714711581,
+    "segment_loss": 0.03502579418951941,
+    "segment_lost": 258,
+    "time_to_target_mcs_s": 0.47,
+    "target": "MCS <= 10"
+   },
+   {
+    "t": 60.0,
+    "from_db": -20.0,
+    "to_db": -5.0,
+    "until_s": 90.0,
+    "lost_first_0p5s": 0,
+    "lost_first_1s": 0,
+    "lost_first_1p5s": 0,
+    "loss_after_1p5s": 0.0001246183562838806,
+    "segment_loss": 0.00012113136696747623,
+    "segment_lost": 2,
+    "time_to_target_mcs_s": 0.24,
+    "target": "MCS >= 15"
+   }
+  ],
+  "snr_drops": null,
+  "mcs_changes": 36
+ },
+ {
+  "run": "m3_olla_run2",
+  "direction": "AB",
+  "steps": [
+   {
+    "t": 30.0,
+    "from_db": -5.0,
+    "to_db": -20.0,
+    "until_s": 60.0,
+    "lost_first_0p5s": 0,
+    "lost_first_1s": 188,
+    "lost_first_1p5s": 188,
+    "loss_after_1p5s": 0.010461450272284322,
+    "segment_loss": 0.03489304812834225,
+    "segment_lost": 261,
+    "time_to_target_mcs_s": 0.48,
+    "target": "MCS <= 10"
+   },
+   {
+    "t": 60.0,
+    "from_db": -20.0,
+    "to_db": -5.0,
+    "until_s": 90.0,
+    "lost_first_0p5s": 0,
+    "lost_first_1s": 0,
+    "lost_first_1p5s": 0,
+    "loss_after_1p5s": 0.00018747656542932134,
+    "segment_loss": 0.0001812031891761295,
+    "segment_lost": 3,
+    "time_to_target_mcs_s": 0.26,
+    "target": "MCS >= 15"
+   }
+  ],
+  "snr_drops": null,
+  "mcs_changes": 44
+ },
+ {
+  "run": "m3_olla_ba_idle",
+  "direction": "AB",
+  "steps": [
+   {
+    "t": 30.0,
+    "from_db": -5.0,
+    "to_db": -20.0,
+    "until_s": 60.0,
+    "lost_first_0p5s": 0,
+    "lost_first_1s": 209,
+    "lost_first_1p5s": 209,
+    "loss_after_1p5s": 0.011695906432748537,
+    "segment_loss": 0.040482954545454544,
+    "segment_lost": 285,
+    "time_to_target_mcs_s": 0.52,
+    "target": "MCS <= 10"
+   },
+   {
+    "t": 60.0,
+    "from_db": -20.0,
+    "to_db": -5.0,
+    "until_s": 90.0,
+    "lost_first_0p5s": 0,
+    "lost_first_1s": 0,
+    "lost_first_1p5s": 0,
+    "loss_after_1p5s": 6.324710644488014e-05,
+    "segment_loss": 5.963740458015267e-05,
+    "segment_lost": 1,
+    "time_to_target_mcs_s": 0.27,
+    "target": "MCS >= 15"
+   }
+  ],
+  "snr_drops": null,
+  "mcs_changes": 37
+ },
+ {
+  "run": "m3b_olla_run1",
+  "direction": "AB",
+  "steps": [
+   {
+    "t": 30.0,
+    "from_db": -5.0,
+    "to_db": -20.0,
+    "until_s": 60.0,
+    "lost_first_0p5s": 108,
+    "lost_first_1s": 108,
+    "lost_first_1p5s": 108,
+    "loss_after_1p5s": 0.009954493742889647,
+    "segment_loss": 0.023963381798599893,
+    "segment_lost": 178,
+    "time_to_target_mcs_s": 0.22,
+    "target": "MCS <= 10"
+   },
+   {
+    "t": 60.0,
+    "from_db": -20.0,
+    "to_db": -5.0,
+    "until_s": 90.0,
+    "lost_first_0p5s": 2,
+    "lost_first_1s": 2,
+    "lost_first_1p5s": 2,
+    "loss_after_1p5s": 0.0,
+    "segment_loss": 0.0001199616122840691,
+    "segment_lost": 2,
+    "time_to_target_mcs_s": 0.29,
+    "target": "MCS >= 15"
+   }
+  ],
+  "snr_drops": 1,
+  "mcs_changes": 39
+ },
+ {
+  "run": "m3b_olla_ba_idle",
+  "direction": "AB",
+  "steps": [
+   {
+    "t": 30.0,
+    "from_db": -5.0,
+    "to_db": -20.0,
+    "until_s": 60.0,
+    "lost_first_0p5s": 91,
+    "lost_first_1s": 91,
+    "lost_first_1p5s": 91,
+    "loss_after_1p5s": 0.011602511602511602,
+    "segment_loss": 0.02266872746007213,
+    "segment_lost": 176,
+    "time_to_target_mcs_s": 0.16,
+    "target": "MCS <= 10"
+   },
+   {
+    "t": 60.0,
+    "from_db": -20.0,
+    "to_db": -5.0,
+    "until_s": 90.0,
+    "lost_first_0p5s": 0,
+    "lost_first_1s": 0,
+    "lost_first_1p5s": 2,
+    "loss_after_1p5s": 0.00012661433274246644,
+    "segment_loss": 0.00023833641184531966,
+    "segment_lost": 4,
+    "time_to_target_mcs_s": 0.25,
+    "target": "MCS >= 15"
+   }
+  ],
+  "snr_drops": 1,
+  "mcs_changes": 36
+ }
+]
