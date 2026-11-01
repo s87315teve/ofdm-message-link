@@ -94,6 +94,8 @@ RX 不知道下一個 burst 是 v5 還是舊格式，所以兩種都找。兩種
 | 擋掉另一種 | — | LTF 的兩個 symbol 都要像；舊格式的 training symbol 只像第一個 |
 | 之後 | 舊的 header 與 payload decoder | SIG decoder、v5 payload decoder |
 
+Radio 的 DC offset 或一個 CW tone 會在每個 lag-32 product 加上同一個固定的成分，讓 metric 整段都超過門檻。RX 用 window 兩側的平均估出這個穩定的成分，先減掉再比門檻（兩種格式都是）。
+
 兩種 candidate 落得太近時，留下比自己門檻高最多的那一個。`phy.rx.legacy_acquisition: false` 或
 `v5_acquisition: false` 可以關掉其中一種。兩種都開時，舊格式的 candidate 仍與 `improve-rx` 逐 bit 相同（有測試）。
 

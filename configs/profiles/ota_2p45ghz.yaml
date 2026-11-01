@@ -1,5 +1,5 @@
 # Default profile for a real radio (--transport uhd or --transport pluto):
-# 2.45 GHz, 5 MS/s, QPSK Turbo 1/3.
+# 2.45 GHz, 5 MS/s, QPSK (the transmitter starts at MCS 8, QPSK 1/3).
 #
 # 2.45 GHz sits in the 2.4 GHz ISM band, which a B210/2901, an N210 with a CBX
 # daughterboard and an ADALM-Pluto can all tune to.  That band is shared with
@@ -25,6 +25,8 @@ phy:
     decision_mode: turbo
     max_iterations: 8
   sync:
+    # Legacy (v1-v4, receive-only) preamble thresholds; the v5 ones are
+    # phy.rx in default.yaml.
     # Measured on two Plutos at 2.45 GHz (experiments/rx_improvement): below
     # about 4 dB the 0.40 / 0.40 pair rejected bursts the receiver can decode.
     # Signal-free air never reached 0.21 correlation, so 0.30 keeps a margin.

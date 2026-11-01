@@ -28,20 +28,22 @@ phy:
     code_rate: "1/3"
     decision_mode: turbo
     max_iterations: 8
-  # Wire-v5 transmit settings.  All three are experiment toggles kept
-  # settable until the hardware sweeps have confirmed the defaults.
+  # Wire-v5 transmit settings.  The Pluto sweeps (experiments/tx_v5) kept
+  # these defaults: 16 / 64 measured no different from 256 / 256, and the
+  # scrambler is required (an all-zero payload is lost without it).
   v5:
     # Zeros pushed before and after each v5 burst (0-256).  The STF absorbs
     # the radio's switch-on transient; the trailing zeros flush the TX
-    # filters.  Legacy bursts keep their 256 + 256.
+    # filters.  (Legacy v1-v4 transmitters used 256 + 256; this TX sends v5 only.)
     guard_pre_samples: 16
     guard_post_samples: 64
     # false sends scrambler seed 0 (identity).  Experiment only: the payload
     # bits then shape the constellation statistics, PAPR and TX power.
     scrambler: true
   # Receiver settings.  The receiver decodes v1-v4 and v5 bursts in one
-  # stream; every key here except the last two is an experiment toggle or a
-  # threshold to be set from signal-free air captures.
+  # stream; every key here except max_psdu_bytes, turbo_max_iterations and
+  # fft_backoff_samples is an experiment toggle or a threshold set from
+  # signal-free air captures.
   rx:
     # Switch either acquisition family off (CPU, cross-family A/B).
     legacy_acquisition: true
@@ -99,7 +101,8 @@ mac:
     # whose drift at 50 ppm the receiver's timing correction covers.
     max_burst_airtime_ms: 8.0
     # Burst-rate cap: hold a burst until this long after the previous one
-    # went to the radio and fill it meanwhile (0 disables).  Short datagrams
+    # started to go to the radio (start to start: a burst longer than this is
+    # followed at once) and fill it meanwhile (0 disables).  Short datagrams
     # otherwise go out one per burst at 230-300 bursts/s, which overflows the
     # receiver's per-burst cost and nears the Pluto's push limit (0.413 ms +
     # 0.194 us/sample).  Measured on two PlutoSDRs, 300 B at MCS 14: 0.53 Mb/s

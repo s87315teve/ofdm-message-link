@@ -5,7 +5,8 @@ LLR 全部飽和，以及 header 太脆弱。這個資料夾記錄 `improve-rx` 
 以及量測用的所有腳本與數據。
 
 **只改接收端，wire format 不變。** v1.0.0 的 TX 送出的 burst，新 RX 照樣收；新舊 RX 可以拿
-同一份錄音直接比。要改 TX 的想法另外寫在 [`tx-proposal.md`](tx-proposal.md)，沒有實作。
+同一份錄音直接比。要改 TX 的想法另外寫在 [`tx-proposal.md`](tx-proposal.md)，這個分支沒有實作；
+後來由 `tx-v5` 分支實作成 wire v5，見 [`../tx_v5/`](../tx_v5/README.md)。
 
 ## 1. 結論
 

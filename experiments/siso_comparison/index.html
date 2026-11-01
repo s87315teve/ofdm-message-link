@@ -218,6 +218,7 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   <p class="verdict"><strong>結論：</strong>SISO 的 PHY 其實沒有比你的強。在同樣的真實 SNR 下，它的 50% 成功點在 6.4 dB（AWGN）與 7.4 dB（multipath），你的 link 目前是 7.4 與 10.0 dB。差距來自你 RX 的兩個問題：Turbo decoder 拿到的 LLR 全部飽和，以及 header 只靠一個沒放大的 training symbol 做 channel estimate。兩個都只要改 RX。修掉之後，你的 link 在模擬中降到 3.5 與 5.5 dB，比 SISO 好 2–3 dB。另外兩邊顯示的 SNR 定義不同：你的 meter 比真實 SNR 低 3–5 dB，SISO 的幾乎等於真實值，所以拿畫面上的數字直接比會誤判。</p>
   <div class="callout">
     <p><b>後續（2026-11-01，<code>improve-rx</code> 分支）：</b>這份報告指出的兩個 RX 問題都修了，而且只改接收端、wire format 不變。另外也做了第 07 節的 noise variance、channel 平滑、header 強化與 SNR meter，並降低 acquisition 門檻。兩台 Pluto 在 2.45 GHz 實測，同一份錄音用新舊 RX 各解一次：遺失率低於 1% 所需的 TX gain，MCS 0 從 −10 dB 降到 −20 dB、MCS 4 從 −7.5 dB 降到 −12.5 dB。即時跑真的 app，MCS 0 在 TX −20 dB 從 76–77% 遺失變成 0.8–1.3%。做法與數據見 <code>experiments/rx_improvement/</code> 與 <code>docs/08-measurements.md</code> 8.7。</p>
+    <p><b>後續（2026-11-01，<code>tx-v5</code> 分支）：</b>improve-rx 之後，MCS 0 在最低 SNR 主要是 preamble 沒抓到，只改 RX 已經不夠，所以 tx-v5 改了發送端（wire v5）：802.11a 的 L-STF 與兩個 L-LTF symbol、K=7 convolutional code 加 interleaver 的 SIG header、802.11 scrambler、LTE rate matching 的 MCS 8–17（含 64QAM），以及 A-MPDU aggregation。TX 只送 v5；RX 同時收 v5 與舊的 v1–v4。兩台 Pluto 實測，和同一天量的 improve-rx 比：遺失率低於 1% 所需的 TX gain，MCS 8（QPSK 1/3）是 −25 dB，比 improve-rx 的 MCS 0（−18.75 dB）低 6.25 dB；900-byte datagram 的 goodput 在 TX −5 dB 是 9.295 Mbit/s（MCS 17）、−15 dB 是 5.063 Mbit/s（MCS 12）。做法與數據見 <a href="../tx_v5/README.md"><code>experiments/tx_v5/README.md</code></a>。</p>
     <p>報告本身保留當時的分析與數字；下面只在處理鏈與建議清單加上修改後的狀態。</p>
   </div>
   <div class="facts" id="facts"></div>
@@ -390,6 +391,32 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
         <span class="chip k">Turbo max-log-MAP ×8</span><span class="arrow">→</span>
         <span class="chip">CRC → reassembly</span>
       </div>
+      <div class="lane-label">TX · tx-v5 之後（wire v5：aggregation.py, phy/ampdu.py, burst_v5.py, header_v5.py）</div>
+      <div class="chain-row">
+        <span class="chip">datagram（28 B）＋ fragment</span><span class="arrow">→</span>
+        <span class="chip k">A-MPDU：≤ 16 subframes、8192 B、8 ms，burst 間隔 ≥ 4 ms</span><span class="arrow">→</span>
+        <span class="chip">PSDU ＋ FCS（CRC-32）</span><span class="arrow">→</span>
+        <span class="chip k">Turbo r1/3 ＋ LTE rate matching：r 1/3–3/4（MCS 8–17）</span><span class="arrow">→</span>
+        <span class="chip k">scrambler x⁷+x⁴+1</span><span class="arrow">→</span>
+        <span class="chip">QPSK / 16QAM / 64QAM</span><span class="arrow">→</span>
+        <span class="chip">IFFT 64 ＋ 4 pilots，CP 16</span><span class="arrow">→</span>
+        <span class="chip k">SIG：conv K=7 r1/2、BPSK、interleaver、CRC-16</span><span class="arrow">→</span>
+        <span class="chip k">L-STF ＋ 2 × L-LTF</span><span class="arrow">→</span>
+        <span class="chip">guard 16／64，peak 0.7（PAPR 約 9.5–10 dB）</span>
+      </div>
+      <div class="lane-label">RX · tx-v5 之後（phy/sync.py, sync_v5.py, channel.py, burst_v5.py, ampdu.py）</div>
+      <div class="chain-row">
+        <span class="chip k">lag-32 acquisition：v5 STF 與舊 preamble 共用一次掃描</span><span class="arrow">→</span>
+        <span class="chip k">LTF：fine timing、CFO、in-band SNR</span><span class="arrow">→</span>
+        <span class="chip k">2 個 LTF 平均 → 20-tap 平滑</span><span class="arrow">→</span>
+        <span class="chip k">SIG：Viterbi ＋ CRC-16</span><span class="arrow">→</span>
+        <span class="chip">pilot EQ，FFT 提早 3 sample，timing 斜率沿時間追蹤</span><span class="arrow">→</span>
+        <span class="chip">descramble</span><span class="arrow">→</span>
+        <span class="chip k">LLR：SIG 與 LTF 量到的 noise</span><span class="arrow">→</span>
+        <span class="chip k">rate dematch ＋ Turbo ×8</span><span class="arrow">→</span>
+        <span class="chip k">A-MPDU：每個 subframe 各自 CRC-32</span><span class="arrow">→</span>
+        <span class="chip">reassembly</span>
+      </div>
     </div>
   </div>
 </section>
@@ -538,10 +565,10 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   <div class="recs">
     <div class="rec"><div class="body"><h3>把真實的 noise variance 傳給 soft demapper</h3><p>在 RX 端估 σ²：用 preamble 兩個相同半段的差（<code>r[n] − r[n+32]</code> 的功率 ÷ 2）、guard tone 或 null subcarrier 的能量，或 pilot 殘差。估好後傳給 <code>StreamingBurstDecoder(input_noise_variance=…)</code>，或改成每個 burst 自己估。只改 RX，不動 wire format。</p><p><b>狀態：</b>已完成。最後的做法不是只用 preamble 量熱雜訊：解出來的 header symbols 是已知的，用它們的誤差當 noise，連 channel 估計誤差與硬體缺陷都算進去。只用熱雜訊時 LLR 太有自信，在實機上反而多掉約 1%。</p></div><div class="gainv">MCS 0 +2.2–2.7 dB<br>MCS 4 +4.8 dB</div></div>
     <div class="rec"><div class="body"><h3>平滑 channel estimate</h3><p>把 52 個 LS 值擬合成 CP 長度內的時域 channel（DFT-based／LS fit），或把 3 個 header symbol 解出來後當作已知 symbol 再估一次。SISO 的做法是加強 pilot，但那要改 wire format，也會吃掉功率。</p><p><b>狀態：</b>已完成：52 個 LS 值投影到 20 個 tap。殘差太大時退回原本的 LS。</p></div><div class="gainv">再 +1.7 dB</div></div>
-    <div class="rec"><div class="body"><h3>Header 改用真的 FEC</h3><p>把 96 bit 用 K=7 r1/3 convolutional（你已經有 native Viterbi）或短 Turbo 編碼取代 3 次重複，並以 |H|² 加權 soft combining。重複碼幾乎沒有 coding gain，這一步可以讓 header 比 payload 更耐 noise，而不是反過來。</p><p><b>狀態：</b>用只改 RX 的方式做到了：CRC 失敗時，從約 8 200 個合法的 header 中以 maximum likelihood 選最接近的。實測中 header 不再是遺失的原因。真的 FEC 或頻率分集要改 wire format，寫在 <code>experiments/rx_improvement/tx-proposal.md</code>。</p></div><div class="gainv">header +3 dB 以上（估計）</div></div>
+    <div class="rec"><div class="body"><h3>Header 改用真的 FEC</h3><p>把 96 bit 用 K=7 r1/3 convolutional（你已經有 native Viterbi）或短 Turbo 編碼取代 3 次重複，並以 |H|² 加權 soft combining。重複碼幾乎沒有 coding gain，這一步可以讓 header 比 payload 更耐 noise，而不是反過來。</p><p><b>狀態：</b>用只改 RX 的方式做到了：CRC 失敗時，從約 8 200 個合法的 header 中以 maximum likelihood 選最接近的。實測中 header 不再是遺失的原因。真的 FEC 或頻率分集要改 wire format，寫在 <code>experiments/rx_improvement/tx-proposal.md</code>。</p><p><b>tx-v5：</b>改成真的 FEC。SIG 照 802.11a 的 SIGNAL field：K=7 r1/2 convolutional code（native Viterbi）、BPSK、CRC-16，再用 144-bit interleaver 把相鄰的 coded bit 分到相隔 9 個 data carrier、跨三個 symbol，這就是提案的「分散到不同頻率」。CRC 失敗就丟棄，不再用 ML 清單。實測在 MCS 8 的邊緣，SIG 失敗佔遺失不到 3%。見 <a href="../tx_v5/README.md">tx-v5 報告</a> 2b。</p></div><div class="gainv">header +3 dB 以上（估計）</div></div>
     <div class="rec"><div class="body"><h3>讓 SNR meter 可以和別人比</h3><p>另外顯示 pre-equalization SNR，例如照 SISO 用 preamble 兩半的正規化 correlation ρ 算 ρ/(1−ρ)。現在的 EVM-SNR 比真實低 3–5 dB，又只在解碼成功時才更新，衰落時看起來還是很好。</p><p><b>狀態：</b>已完成：畫面上的 SNR 改由 preamble 在 data carrier 的頻帶內估計，沒解出來的 burst 也算。Pluto 的 guard band 雜訊比 data carrier 高約 10 dB，所以只看頻帶內。</p></div><div class="gainv">診斷</div></div>
-    <div class="rec"><div class="body"><h3>較長的 preamble 或兩段 training</h3><p>Schmidl–Cox 半段從 32 拉長到 64 或重複兩次，timing metric 的雜訊降 3 dB，可以把門檻從 0.40 調低。第二個 training symbol 也讓 channel estimate 平均兩次。代價是每個 burst 多 80–160 sample（不到 1%）。</p><p><b>狀態：</b>門檻已從 0.40 降到 0.25／0.30（空中雜訊最高 0.20）。現在 MCS 0 在最低 SNR 時主要是 preamble 沒抓到，加長 preamble 是下一步，要改 wire format，見 <code>tx-proposal.md</code>。</p></div><div class="gainv">acquisition +3 dB</div></div>
-    <div class="rec"><div class="body"><h3>補一個 r≈1/2 的 Turbo MCS</h3><p>用 LTE 的 rate matching（puncture parity）在 MCS 0 與 MCS 4 之間補 QPSK r1/2、r2/3，就能在 SISO 的操作點拿到接近的 bit/sample，同時保有 soft Turbo 的增益。<code>mcs_table.py</code> 已經預留了 index 空間。</p></div><div class="gainv">+50% throughput</div></div>
+    <div class="rec"><div class="body"><h3>較長的 preamble 或兩段 training</h3><p>Schmidl–Cox 半段從 32 拉長到 64 或重複兩次，timing metric 的雜訊降 3 dB，可以把門檻從 0.40 調低。第二個 training symbol 也讓 channel estimate 平均兩次。代價是每個 burst 多 80–160 sample（不到 1%）。</p><p><b>狀態：</b>門檻已從 0.40 降到 0.25／0.30（空中雜訊最高 0.20）。現在 MCS 0 在最低 SNR 時主要是 preamble 沒抓到，加長 preamble 是下一步，要改 wire format，見 <code>tx-proposal.md</code>。</p><p><b>tx-v5：</b>兩項都做了。Preamble 改成 802.11a 的 L-STF（160 sample，每 16 sample 重複一次，lag-32 metric 累加 128 個 product，是原本的 4 倍）加兩個 L-LTF symbol；channel estimate 用兩個 LTF symbol 平均，再做 20-tap 平滑。MCS 8 的邊緣不再是 preamble：遺失 1–20% 的區間約三分之二是 payload 解不出來。離線重解同一份錄音，LTF 平均與平滑各自值 1–1.5 dB。見 <a href="../tx_v5/README.md">tx-v5 報告</a> 2a 與 4.4。</p></div><div class="gainv">acquisition +3 dB</div></div>
+    <div class="rec"><div class="body"><h3>補一個 r≈1/2 的 Turbo MCS</h3><p>用 LTE 的 rate matching（puncture parity）在 MCS 0 與 MCS 4 之間補 QPSK r1/2、r2/3，就能在 SISO 的操作點拿到接近的 bit/sample，同時保有 soft Turbo 的增益。<code>mcs_table.py</code> 已經預留了 index 空間。</p><p><b>狀態：</b>tx-v5 做了：LTE rate matching（TS 36.212，RV0）讓 code rate 可以是 1/3、1/2、2/3、3/4，而且剛好填滿整數個 OFDM symbol。新的 MCS 8–17 包含 QPSK r1/2、r2/3 與 64QAM。見 <a href="../tx_v5/README.md">tx-v5 報告</a> 2d。</p></div><div class="gainv">+50% throughput</div></div>
     <div class="rec"><div class="body"><h3>降低 sample rate 換 SNR</h3><p>Pluto↔N210 這種 link budget 吃緊的組合，2.5 或 3.2 MS/s 的 profile 會直接多 2–3 dB。最便宜、立刻可以試。</p></div><div class="gainv">+1.9–3 dB</div></div>
   </div>
 </section>

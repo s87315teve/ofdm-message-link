@@ -235,8 +235,11 @@ Pluto 和 USRP 可以各在一端（每個 process 自己選 `--transport`）。
 
 ## 4.4 為什麼 burst 要做 peak normalization
 
-OFDM burst 離開 encoder 時 PAPR（peak-to-average power ratio）約 15 dB，peak 遠大於 1.0。
+OFDM burst 離開 encoder 時 PAPR（peak-to-average power ratio）約 9.5–10 dB（wire v5，scrambler 開；
+舊格式約 13–14 dB），peak 遠大於 1.0。
 Radio 的 DAC 會把超出範圍的部分 clip 掉，所以每個 burst 發射前都依**自己的 peak**縮放到
 `--peak-amplitude`（預設 0.7）。用 peak 而不是 power 來縮放，保證不論 payload 內容為何都不會 clipping。
+PAPR 越低，縮放後的平均功率越高：v5 在同一個 TX gain 下比舊格式多約 3 dB（QPSK）到 5 dB（16QAM）的平均發射功率
+（[實測紀錄 8.8](08-measurements.md#88-wire-v5pluto--pluto245-ghz)）。Scrambler 讓 PAPR 不受 payload 內容影響。
 
 下一篇：[新增一種 SDR](05-add-a-new-sdr.md)。遇到問題看[排錯清單](06-troubleshooting.md)。

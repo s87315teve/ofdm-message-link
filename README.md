@@ -82,7 +82,7 @@ python -m ofdm_message_link.tx_app
 
 | 發送端 | 接收端 |
 |---|---|
-| ![Transmitter window: top cards with an OK light and SIMULATED badge, the 60-second goodput curve and the Log tab listing sent messages](docs/images/ofdm-message-link-tx.png) | ![Receiver window: GOOD light at 12.5 dB SNR with 0.00 % loss, the 60-second goodput and SNR curve and the Signal tab with a four-cluster QPSK constellation](docs/images/ofdm-message-link-rx.png) |
+| ![Transmitter window: top cards with an OK light and SIMULATED badge, MCS 8 (QPSK 1/3) selected, the 60-second goodput curve and the Log tab listing sent messages](docs/images/ofdm-message-link-tx.png) | ![Receiver window: GOOD light at 15.4 dB SNR with 0.00 % loss on MCS 8, the 60-second goodput and SNR curve and the Signal tab with a four-cluster QPSK constellation](docs/images/ofdm-message-link-rx.png) |
 
 兩個視窗先不要關，下面兩步會繼續用。
 
@@ -162,7 +162,7 @@ ffplay 的視窗會出現 webcam 的畫面。沒有 webcam 的話，把 `-f v4l2
 | 5 | [新增一種 SDR](docs/05-add-a-new-sdr.md) | Sample transport 的介面，以及加一種新裝置要改哪幾個地方 |
 | 6 | [收不到東西？](docs/06-troubleshooting.md) | 照順序檢查的排錯清單 |
 | 7 | [參考資料](docs/07-reference.md) | 全部的命令列參數、MCS 表、設計上的技術細節 |
-| 8 | [實測紀錄](docs/08-measurements.md) | 實機 OTA 的量測結果，以及一份完整的 [throughput 實驗報告](experiments/ota_udp_throughput/README.md) |
+| 8 | [實測紀錄](docs/08-measurements.md) | 實機 OTA 的量測結果，以及完整的 [throughput 實驗報告](experiments/ota_udp_throughput/README.md)（舊格式）與 [wire v5 報告](experiments/tx_v5/README.md) |
 
 ## 專案結構
 

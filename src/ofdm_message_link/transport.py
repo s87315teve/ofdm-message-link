@@ -9,8 +9,9 @@ other transmit path in this project is.
 An ADALM-Pluto is a third transport with the same two interfaces; it lives in
 :mod:`.pluto` because it is driven through libiio rather than UHD.
 
-An OFDM burst leaves the encoder with roughly 15 dB of peak-to-average ratio
-and a peak well above 1.0.  A UHD sink clips anything outside the unit circle,
+An OFDM burst leaves the encoder with a peak-to-average ratio of about
+9.5-10 dB (wire v5, scrambled; the legacy bursts had about 13-14 dB) and a
+peak well above 1.0.  A UHD sink clips anything outside the unit circle,
 so every sink here scales each burst by its own peak to a configured
 amplitude.  Scaling by peak rather than by power is what keeps the clipping
 guarantee independent of the payload.

@@ -63,10 +63,11 @@
   /* ---------------- workflow ---------------- */
   // Block ids in the SVG diagram -> [module id, block index] in content.js.
   var SVG_BLOCKS = {
-    "ext-in": ["ext-in", 0], "tx-in": ["tx-app", 0], "tx-dgram": ["tx-link", 0], "tx-frame": ["tx-link", 1],
-    "tx-fec": ["tx-phy", 0], "tx-map": ["tx-phy", 1], "tx-ofdm": ["tx-phy", 2], "tx-burst": ["tx-phy", 3],
+    "ext-in": ["ext-in", 0], "tx-in": ["tx-app", 0], "tx-dgram": ["tx-link", 0], "tx-ampdu": ["tx-link", 2],
+    "tx-fec": ["tx-phy", 0], "tx-scr": ["tx-phy", 1], "tx-map": ["tx-phy", 2], "tx-ofdm": ["tx-phy", 3], "tx-burst": ["tx-phy", 4],
     "tx-peak": ["tx-tr", 0], "tx-sink": ["tx-tr", 1], "channel": ["channel", 0], "rx-src": ["rx-tr", 0],
-    "rx-acq": ["rx-phy", 0], "rx-header": ["rx-phy", 1], "rx-eq": ["rx-phy", 2], "rx-demap": ["rx-phy", 3], "rx-fec": ["rx-phy", 4],
+    "rx-acq": ["rx-phy", 0], "rx-header": ["rx-phy", 1], "rx-eq": ["rx-phy", 2], "rx-demap": ["rx-phy", 3],
+    "rx-descr": ["rx-phy", 4], "rx-fec": ["rx-phy", 5],
     "rx-frame": ["rx-link", 0], "rx-dgram": ["rx-link", 1], "rx-out": ["rx-app", 0], "ext-out": ["ext-out", 0],
     "mcs": ["mcs", 0], "gui-spectrum": ["spec", 0], "gui-const": ["const", 0], "gui-stats": ["stats", 0]
   };

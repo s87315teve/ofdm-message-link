@@ -47,8 +47,9 @@ class FecConfig:
 class SyncConfigSection:
     """Acquisition thresholds, kept settable because they are bench-measured.
 
-    ``detection_threshold`` gates the Schmidl--Cox repeated-half metric and
-    ``correlation_threshold`` gates the coherent preamble correlation.  Their
+    Legacy (v1-v4, receive-only) preamble: ``detection_threshold`` gates the
+    Schmidl--Cox repeated-half metric and ``correlation_threshold`` gates the
+    coherent preamble correlation.  The v5 thresholds are in ``phy.rx``.  Their
     values follow from measurements of this radio pair, not from theory, so
     they belong in configuration rather than in a source constant.
     """
@@ -63,8 +64,8 @@ class V5TxConfigSection:
 
     The guards are zeros around each pushed burst.  The STF absorbs the
     radio's leading transient, so 16 samples before suffice; 64 after flush
-    the TX filters.  Both stay settable until the hardware guard sweep (H2)
-    has confirmed them.  ``scrambler: false`` sends seed 0, which the SIG
+    the TX filters.  The Pluto guard sweep (H2, experiments/tx_v5) measured
+    no difference against 256 + 256.  ``scrambler: false`` sends seed 0, which the SIG
     signals, so receivers need no matching setting.
     """
 
@@ -78,8 +79,9 @@ class RxConfigSection:
     """Receive settings for the dual-family receiver (``phy.rx``).
 
     Everything except ``max_psdu_bytes`` and ``turbo_max_iterations`` is an
-    experiment toggle or a threshold to be set from measurements: the v5
-    thresholds are predictions until signal-free air has been scanned (H1).
+    experiment toggle or a threshold set from measurements: signal-free air
+    on two Plutos (H1, experiments/tx_v5) reached 0.084 STF and 0.067 pair
+    confidence against the 0.20 / 0.25 thresholds.
     """
 
     legacy_acquisition: bool = True
@@ -145,7 +147,8 @@ class AggregationConfigSection:
     receiver's timing correction covers at 50 ppm (4 samples), and
     validation refuses a cap beyond that at the configured sample rate.
     ``min_burst_interval_ms`` caps the burst rate (4 ms: at most 250/s) by
-    holding a burst back until that long after the previous one, filling it
+    holding a burst back until that long after the previous one started
+    (start to start), filling it
     meanwhile; it adds latency only when bursts are back to back.  0 disables.
     ``max_psdu_bytes`` may not exceed the receiver's ``phy.rx.max_psdu_bytes``.
     """
