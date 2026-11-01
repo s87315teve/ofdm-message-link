@@ -29,11 +29,12 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
 ### 預設頻率
 
 預設 profile 是 [`configs/profiles/ota_2p45ghz.yaml`](../configs/profiles/ota_2p45ghz.yaml)：
-**2.45 GHz**、5 MS/s、QPSK Turbo 1/3。
+**2.45 GHz**、5 MS/s、TX 預設 MCS 8（QPSK Turbo 1/3，wire v5）。
 
 - 2.45 GHz 在 2.4 GHz ISM 頻段內，B210／2901、N210（CBX daughterboard）與 ADALM-Pluto 都調得到。
 - 這個頻段和 Wi-Fi、Bluetooth 共用，所以用 antenna 時會有干擾，constellation 不會像 cable 那麼乾淨。
-- **這個預設值只有短時間的 OTA 實測**：Pluto 對 Pluto（[實測紀錄 8.5](08-measurements.md#85-adalm-pluto--adalm-pluto245-ghz預設-profile)）
+- **這個預設值只有短時間的 OTA 實測**：Pluto 對 Pluto（[實測紀錄 8.5](08-measurements.md#85-adalm-pluto--adalm-pluto245-ghz預設-profile)、
+  [8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz)、[8.8](08-measurements.md#88-wire-v5pluto--pluto245-ghz)）
   與 N210 發、Pluto 收（[8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)）。B210／2901
   沒有在這個頻率量過。其他實測用的是另外兩個選用的 profile（1.2 GHz 與 3.8 GHz）；
   那兩個頻段都不是 ISM 頻段，只有在你確定可以使用時才用。

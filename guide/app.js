@@ -176,11 +176,57 @@
     mcsSelect.appendChild(o);
   });
 
-  // Payload OFDM symbols for one fragment, from the run-length table in data.js.
+  function selectedMcs() {
+    var index = Number(mcsSelect.value);
+    return DATA.mcs.filter(function (m) { return m.index === index; })[0] || DATA.mcs[0];
+  }
+
+  // Payload OFDM symbols for one fragment alone, from the run-length table in data.js.
   function payloadSymbols(mcs, bytes) {
     var count = mcs.steps[0][1];
     for (var i = 0; i < mcs.steps.length && mcs.steps[i][0] <= bytes; i++) { count = mcs.steps[i][1]; }
     return count;
+  }
+
+  // Same formulas as build_data.py, which checks them against the encoder.
+  var FIXED_SAMPLES = DATA.stfSamples + DATA.ltfSamples + DATA.sigSamples;
+  var GUARD_SAMPLES = DATA.guardPreSamples + DATA.guardPostSamples;
+  function subframeBytes(bytes) { return DATA.delimiterBytes + DATA.frameOverheadBytes + DATA.datagramHeaderBytes + bytes; }
+  function psduBytes(fragments) {
+    var body = 0;
+    fragments.forEach(function (bytes, i) {
+      var sf = subframeBytes(bytes);
+      body += i < fragments.length - 1 ? Math.ceil(sf / 4) * 4 : sf;
+    });
+    return body + DATA.fcsBytes;
+  }
+  function symbolsFor(mcs, psdu) {
+    return Math.max(1, Math.ceil(8 * psdu * mcs.rateDen / (mcs.rateNum * DATA.dataCarriers * mcs.bitsPerSymbol)));
+  }
+  function burstSamples(mcs, fragments) {
+    return GUARD_SAMPLES + FIXED_SAMPLES + symbolsFor(mcs, psduBytes(fragments)) * (DATA.fftLen + DATA.cpLen);
+  }
+
+  // Same rule as aggregation.plan_aggregate: the longest FIFO prefix within the caps, at least one.
+  function planBursts(mcs, fragments, rate) {
+    var agg = DATA.aggregation, groups = [], i = 0;
+    while (i < fragments.length) {
+      var take = 1;
+      if (agg.enabled) {
+        for (var n = 2; n <= agg.maxSubframes && i + n <= fragments.length; n++) {
+          var part = fragments.slice(i, i + n);
+          var samples = burstSamples(mcs, part);
+          if (psduBytes(part) > agg.maxPsduBytes || samples / rate * 1e3 > agg.maxBurstAirtimeMs ||
+              samples > agg.maxBurstSamples) { break; }
+          take = n;
+        }
+      }
+      var group = [];
+      for (var k = 0; k < take; k++) { group.push(i + k); }
+      groups.push(group);
+      i += take;
+    }
+    return groups;
   }
 
   function seg(cls, flex, title, sub) {
@@ -189,7 +235,7 @@
 
   function renderLab() {
     var size = Number($("size").value);
-    var mcs = DATA.mcs[Number(mcsSelect.value)];
+    var mcs = selectedMcs();
     var rate = Number($("rate").value);
     var symLen = DATA.fftLen + DATA.cpLen;
     var max = DATA.maxFragmentBytes;
@@ -197,15 +243,15 @@
     var fragments = [];
     for (var left = size; left > 0; left -= max) { fragments.push(Math.min(left, max)); }
     if (state.frag >= fragments.length) { state.frag = 0; }
-    var symbols = fragments.map(function (bytes) { return payloadSymbols(mcs, bytes); });
-    var samples = symbols.map(function (n) { return (DATA.fixedSymbols + n) * symLen + 2 * DATA.guardSamples; });
+    var groups = planBursts(mcs, fragments, rate);
+    var samples = groups.map(function (g) { return burstSamples(mcs, g.map(function (i) { return fragments[i]; })); });
     var total = samples.reduce(function (a, b) { return a + b; }, 0);
     var airtimeMs = total / rate * 1e3;
 
     $("size-out").textContent = fmt(size) + " bytes";
     $("tiles").innerHTML = [
-      ["Bursts", fmt(fragments.length), ""],
-      ["Samples", fmt(total), ""],
+      ["Fragments", fmt(fragments.length), ""],
+      ["Bursts", fmt(groups.length), ""],
       ["Airtime", airtimeMs.toFixed(2), "ms"],
       ["發射期間的 rate", (size * 8 / (total / rate) / 1e6).toFixed(2), "Mbit/s"]
     ].map(function (t) {
@@ -220,47 +266,56 @@
     });
     $("frag-hint").textContent = fragments.length === 1
       ? "這則 message 放進一個 fragment。"
-      : "這 " + fragments.length + " 個 bursts 遺失任何一個時，RX 丟棄整則 message。";
+      : "TX 把這 " + fragments.length + " 個 fragments 放進 " + groups.length + " 個 bursts。任何一個 fragment 遺失時，RX 丟棄整則 message。";
 
+    var gi = 0;
+    groups.forEach(function (g, i) { if (g.indexOf(state.frag) >= 0) { gi = i; } });
+    var group = groups[gi];
+    var groupBytes = group.map(function (i) { return fragments[i]; });
     var bytes = fragments[state.frag];
     var dgram = bytes + DATA.datagramHeaderBytes;
     var frame = dgram + FRAME_HEADER_BYTES + CRC_BYTES;
-    var n = symbols[state.frag];
+    var psdu = psduBytes(groupBytes);
+    var n = symbolsFor(mcs, psdu);
     function layer(name, sub, bar) {
       return '<div class="layer"><div class="name">' + name + "<small>" + sub + '</small></div><div class="segbar">' + bar + "</div></div>";
     }
+    var others = group.length - 1;
     $("stack").innerHTML =
       layer("Fragment " + (state.frag + 1), bytes + " B", seg("s-p", "1", "application bytes")) +
       '<div class="down">↓ datagram.py 加上 reassembly 用的 header</div>' +
       layer("Datagram", dgram + " B", seg("s-h", "0 0 30%", "header", "28 B") + seg("s-p", "1", "fragment", bytes + " B")) +
       '<div class="down">↓ PHY frame codec 加上 sequence number 與 CRC</div>' +
-      layer("PHY frame", frame + " B = " + fmt(frame * 8) + " bits",
-        seg("s-h", "0 0 16%", "header", "7 B") + seg("s-p", "1", "datagram", dgram + " B") + seg("s-c", "0 0 16%", "CRC-32", "4 B")) +
-      '<div class="down">↓ ' + mcs.label.replace(/^MCS \d+ — /, "") + "</div>" +
-      layer("Payload", n + " OFDM symbols", seg("s-p", "1", n + " × 48 data subcarriers", "最後一個 OFDM symbol 可能含有 padding"));
+      layer("PHY frame", frame + " B", seg("s-h", "0 0 16%", "header", "7 B") + seg("s-p", "1", "datagram", dgram + " B") + seg("s-c", "0 0 16%", "CRC-32", "4 B")) +
+      '<div class="down">↓ Aggregation 加上 delimiter 與 FCS' + (others ? "。這個 burst 另外帶 " + others + " 個 frames" : "") + "</div>" +
+      layer("PSDU", psdu + " B = " + fmt(psdu * 8) + " bits",
+        seg("s-h", "0 0 14%", "delimiter", "4 B") + seg("s-p", "1", others ? group.length + " 個 frames" : "frame", others ? "" : frame + " B") + seg("s-c", "0 0 14%", "FCS", "4 B")) +
+      '<div class="down">↓ ' + mcs.label.replace(/^MCS \d+ — /, "") + "、rate matching、scrambler</div>" +
+      layer("Payload", n + " OFDM symbols", seg("s-p", "1", n + " × 48 data subcarriers", "Rate matching 剛好填滿這些 OFDM symbols，沒有 padding"));
 
     var parts = [
-      ["b-g", "Guard（zeros）", DATA.guardSamples],
-      ["b-pre", "Preamble：acquisition", symLen],
-      ["b-tr", "Training：channel estimation", symLen],
-      ["b-hd", "Header × 3：MCS 與 length", 3 * symLen],
+      ["b-g", "Guard（zeros）", DATA.guardPreSamples],
+      ["b-pre", "STF：acquisition", DATA.stfSamples],
+      ["b-tr", "LTF：channel estimation 與 SNR", DATA.ltfSamples],
+      ["b-hd", "SIG × 3：MCS、length、scrambler seed", DATA.sigSamples],
       ["b-pl", "Payload × " + n, n * symLen],
-      ["b-g", "Guard（zeros）", DATA.guardSamples]
+      ["b-g", "Guard（zeros）", DATA.guardPostSamples]
     ];
     $("burst").innerHTML = parts.map(function (p) {
       return '<div class="' + p[0] + '" style="flex:' + p[2] + ' 1 0" title="' + p[1] + ": " + p[2] + ' samples"></div>';
     }).join("");
-    $("burst-legend").innerHTML = parts.slice(0, 5).map(function (p) {
-      return '<li><i class="' + p[0] + '"></i>' + p[1] + '<span class="cnt">' + fmt(p[2]) + (p[0] === "b-g" ? " × 2" : "") + "</span></li>";
+    $("burst-legend").innerHTML = parts.slice(0, 5).map(function (p, i) {
+      var cnt = i === 0 ? fmt(DATA.guardPreSamples) + " + " + fmt(DATA.guardPostSamples) : fmt(p[2]);
+      return '<li><i class="' + p[0] + '"></i>' + p[1] + '<span class="cnt">' + cnt + "</span></li>";
     }).join("");
-    $("burst-total").innerHTML = "<b>Burst " + (state.frag + 1) + "：</b>" + fmt(samples[state.frag]) + " samples = " +
-      (samples[state.frag] / rate * 1e3).toFixed(2) + " ms（" + rate / 1e6 + " MS/s，包含 guard）";
+    $("burst-total").innerHTML = "<b>Burst " + (gi + 1) + "：</b>" + fmt(samples[gi]) + " samples = " +
+      (samples[gi] / rate * 1e3).toFixed(2) + " ms（" + rate / 1e6 + " MS/s，包含 guard）";
 
     $("mcs-table").innerHTML = '<thead><tr><th>MCS</th><th class="num">Payload symbols</th><th class="num">Airtime</th></tr></thead><tbody>' +
       DATA.mcs.map(function (m) {
         var count = payloadSymbols(m, bytes);
         return '<tr data-mcs="' + m.index + '"' + (m === mcs ? ' class="on"' : "") + "><td>" + m.label + '</td><td class="num">' + count +
-          '</td><td class="num">' + ((DATA.fixedSymbols + count) * symLen / rate * 1e3).toFixed(2) + " ms</td></tr>";
+          '</td><td class="num">' + ((FIXED_SAMPLES + count * symLen) / rate * 1e3).toFixed(2) + " ms</td></tr>";
       }).join("") + "</tbody>";
     $("mcs-table").querySelectorAll("[data-mcs]").forEach(function (row) {
       row.addEventListener("click", function () { mcsSelect.value = row.getAttribute("data-mcs"); renderLab(); });
@@ -272,7 +327,7 @@
 
   // Same rule order as dashboard.rx_light, for the case with zero loss.
   function renderLight() {
-    var mcs = DATA.mcs[Number(mcsSelect.value)];
+    var mcs = selectedMcs();
     var snr = Number($("snr").value);
     var thr = mcs.snrThresholdDb;
     $("snr-out").textContent = snr.toFixed(1) + " dB";
@@ -302,10 +357,9 @@
     if (!canvas.offsetParent) { return; }
     var ctx = canvas.getContext("2d");
     var css = getComputedStyle(document.documentElement);
-    var mcs = DATA.mcs[Number(mcsSelect.value)];
-    var qam = /16QAM/.test(mcs.label);
-    var levels = qam ? [-3, -1, 1, 3] : [-1, 1];
-    var norm = Math.sqrt(qam ? 10 : 2);  // unit average symbol energy
+    var mcs = selectedMcs();
+    var levels = { 2: [-1, 1], 4: [-3, -1, 1, 3], 6: [-7, -5, -3, -1, 1, 3, 5, 7] }[mcs.bitsPerSymbol];
+    var norm = Math.sqrt({ 2: 2, 4: 10, 6: 42 }[mcs.bitsPerSymbol]);  // unit average symbol energy
     var sigma = Math.sqrt(Math.pow(10, -Number($("snr").value) / 10) / 2);
     var w = canvas.width, scale = w / 3.4;
     function px(v) { return w / 2 + v * scale; }

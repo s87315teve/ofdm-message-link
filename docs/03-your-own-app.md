@@ -35,7 +35,8 @@ socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b"hi", ("127.0.0.1", 520
 ## 3.2 設計你的應用時要知道的三件事
 
 1. **一個 UDP datagram 是一則 message。** 大於單一 frame payload（預設 968 bytes）的 message 會自動
-   fragment 成多個 burst，並在接收端 reassemble。所以文字、JSON、二進位檔都走同一條路徑。
+   fragment 成多個 frame，並在接收端 reassemble。TX 忙的時候，排隊中的多個 frame 會放進同一個 burst
+   （aggregation），每個 frame 仍有自己的 sequence number 與 CRC。所以文字、JSON、二進位檔都走同一條路徑。
 2. **不完整的 message 會被丟棄並計數，不會截斷後交付。** 單向 link 沒有辦法去要回缺掉的 fragment。
    Message 越大、fragment 越多，任何一個 burst 掉了整則就沒了。對 loss 敏感的資料請盡量讓每則
    message 小於 968 bytes。
@@ -60,7 +61,7 @@ webcam → ffmpeg ─UDP :52001→ tx_app ─channel→ rx_app ─UDP :52012→ 
 python -m ofdm_message_link.rx_app --snr-db 20 --egress-port 52012
 
 # 終端機 2：發送端
-python -m ofdm_message_link.tx_app --mcs-index 4
+python -m ofdm_message_link.tx_app --mcs-index 10
 
 # 終端機 3：播放端
 ffplay -fflags nobuffer -flags low_delay -framedrop \
@@ -84,8 +85,8 @@ ffmpeg 剛啟動的半秒會一次送出一批 datagram，模擬 transport 來�
 
 ### 參數為什麼這樣設
 
-- **`pkt_size=752`**：一個 UDP datagram 走一個 PHY burst，所以必須小於單一 frame 可攜帶的
-  968 bytes。752 是 4 個 188-byte 的 MPEG-TS packet。
+- **`pkt_size=752`**：一個 UDP datagram 是一個 PHY frame，所以必須小於單一 frame 可攜帶的
+  968 bytes，否則會被切成兩個 fragment，掉任何一個整則就沒了。752 是 4 個 188-byte 的 MPEG-TS packet。
 - **固定 bitrate**（`-b:v`、`-maxrate`、`-minrate`、`nal-hrd=cbr`、`-muxrate`）：單向 link 沒有重傳，
   遺失一個 datagram 就是一塊破圖，所以要讓發送速率平穩、而且留足餘裕。
 - **`intra-refresh=1`**：把 I-frame 攤到每張 frame 上。否則每次 I-frame 會一次湧入幾十個 burst。
@@ -96,16 +97,21 @@ ffmpeg 剛啟動的半秒會一次送出一批 datagram，模擬 transport 來�
 
 ### 選 MCS 與 bitrate
 
-以下可以當作起點。SNR 門檻來自 Pluto 對 Pluto 的實測（[8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz)），
-datagram 上限與 bitrate 來自 B210 → NI USRP-2901 的實測（8.2），都是 5 MS/s：
+以下可以當作起點。SNR 門檻來自 Pluto 對 Pluto 的實測（[8.8](08-measurements.md#88-wire-v5pluto--pluto245-ghz)），
+都是 5 MS/s：
 
-| 接收端 `SNR (2 s)` | 設定 | 752-byte datagram 的上限 | 建議影片 bitrate |
-|---|---|---|---|
-| ≥ 15 dB | **MCS 4**（16QAM Turbo 1/3） | 2.41 Mbit/s（mux rate） | **1.3 Mbit/s**（mux 1.44，約 60%） |
-| 約 9–15 dB，或 MCS 4 出現 `bursts missing` | **MCS 0**（QPSK Turbo 1/3） | 1.38 Mbit/s | 0.75 Mbit/s（mux 0.83） |
+| 接收端 `SNR (2 s)` | 設定 | 建議影片 bitrate |
+|---|---|---|
+| ≥ 12 dB | **MCS 10**（QPSK 2/3，門檻 11 dB）或更快的 MCS | **1.3 Mbit/s**（mux 1.44） |
+| 約 8.5–12 dB | **MCS 8**（QPSK 1/3，門檻 7.5 dB） | 0.75 Mbit/s（mux 0.83） |
 
-SNR 低於 15 dB 請退回 `--mcs-index 0`（Link light 會提示 `try MCS 0`）。長時間請讓 bitrate 留在
-上限的 60% 左右。這裡的 SNR 是 `improve-rx` 之後的 preamble 估計值（定義見 [2.6](02-gui.md#26-統計數字的意義與限制)）。
+**v5 的影像 demo 還沒有實測過，這兩個 bitrate 是用 airtime 推出來的。** 一個 frame 一個 burst 時，
+MCS 8 的 burst 是 4.19 ms，和舊格式 MCS 0 的 4.16 ms 差不多；MCS 10 是 2.16 ms，和舊格式 MCS 4 的 2.13 ms
+差不多。舊格式的建議值是 MCS 0 配 0.75 Mbit/s、MCS 4 配 1.3 Mbit/s，依據是 B210 → NI USRP-2901 的上限量測（8.2）。
+Aggregation 只會讓同樣的 bitrate 佔用更少的 airtime。
+
+SNR 低於門檻時退回 `--mcs-index 8 --video-kbps 750`（Link light 會提示 `try MCS N`）。長時間請讓 bitrate
+留在上限的 60% 左右。這裡的 SNR 是 v5 由 LTF 估計的值（定義見 [2.6](02-gui.md#26-統計數字的意義與限制)）。
 
 ### 用真的 SDR：一鍵腳本
 
@@ -121,7 +127,7 @@ scripts/run_ota_video_demo.sh --enable-rf --layout none    # 不排列視窗
 # 要跳過視窗裡的選擇（--auto-start）才需要自己給 serial；gain 是 Pluto 的範圍：
 scripts/run_ota_video_demo.sh --enable-rf --transport pluto --auto-start \
     --tx-serial <TX_PLUTO_SERIAL> --rx-serial <RX_PLUTO_SERIAL> \
-    --tx-gain -5 --rx-gain 15 --mcs-index 0 --video-kbps 750
+    --tx-gain -5 --rx-gain 15 --mcs-index 8 --video-kbps 750
 ```
 
 腳本做的事：
@@ -141,8 +147,8 @@ scripts/run_ota_video_demo.sh --enable-rf --transport pluto --auto-start \
 | `--overlay PATH` | app 的預設 | 傳給兩個 app 的設定 profile，可重複 |
 | `--auto-start` | 關 | 不等你選，直接用 `--tx-serial`／`--rx-serial` 指定的裝置啟動 |
 | `--duration SEC` | 不限 | 影片開始後 SEC 秒自動停止 |
-| `--mcs-index N` | 4 | SNR 不夠時改 0。TX 視窗的 MCS 選單也能現場切換 |
-| `--video-kbps N` | 1300 | 影片 bitrate；MCS 0 請用 750 |
+| `--mcs-index N` | 8 | v5 的 MCS（8–17）。SNR 夠時可改 10 或 12。TX 視窗的 MCS 選單也能現場切換 |
+| `--video-kbps N` | 750 | 影片 bitrate；MCS 10 以上可用 1300 |
 | `--tx-serial` / `--rx-serial` | 無 | 視窗中預選的裝置 |
 | `--tx-gain` / `--rx-gain` | 裝置最低值 / 15 | 預選的 gain（dB），執行中仍可在視窗裡調整。Pluto 的 TX 是 −89.75 到 0，見 [Gain 的定義](04-ota-hardware.md#gain-的定義) |
 | `--camera DEV` | `/dev/video0` | 攝影機裝置 |
@@ -183,7 +189,7 @@ Demo 可以連續跑好幾個小時，所以每一種 log 都有上限，到了�
 |---|---|---|
 | ffplay 視窗全黑，TX `Goodput (2 s)` 為 0 | ffmpeg 被暫停（狀態 `T`）或沒啟動 | `ps -o stat -C ffmpeg`；加 `-nostdin` 重跑 |
 | 畫面偶爾破一小塊、約 2 秒內自己恢復，RX 燈號黃 `LOSS` | OTA 的零星掉包，遺失率低於 1% | 正常，不用處理；想更乾淨就調高 TX gain（Pluto 往 0 dB） |
-| 畫面持續破圖，RX 燈號紅 `LOSSY` | SNR 不夠或速率太高 | 先調高 TX gain；再看燈號原因後的 `try MCS N` 建議，改 `--mcs-index 0 --video-kbps 750` |
+| 畫面持續破圖，RX 燈號紅 `LOSSY` | SNR 不夠或速率太高 | 先調高 TX gain；再看燈號原因後的 `try MCS N` 建議，改 `--mcs-index 8 --video-kbps 750` |
 | TX `Queue` 一直增加、燈號黃 `BUSY` | 影片 bitrate 超過 link 容量 | 降低 `--video-kbps` |
 | 腳本說 `an earlier demo is still running` | 上一次的 process 沒清乾淨 | 見下方 |
 | 終端機停在 `Video starts once both radios are on` | 還有一個視窗沒按 Start radio，或啟動失敗 | 看該視窗 Radio panel 下方的紅字 |
@@ -203,7 +209,7 @@ GUI 主程式結束後，偶爾會留下 `multiprocessing.forkserver` 子 proces
 
 ## 3.4 寫你自己的 link adaptation 模組
 
-雙向的 `node_app`（[7.8 節](07-reference.md#78-node_app雙向-node-的命令列)）依 peer 回報的
+雙向的 `node_app`（[7.9 節](07-reference.md#79-node_app雙向-node-的命令列)）依 peer 回報的
 feedback 為每個 data burst 選 MCS。選 MCS 的演算法與 RX 端的量測方式都是可替換的模組：
 不必改 `node_app`，在命令列指定 class 即可。
 
@@ -222,7 +228,7 @@ FeedbackReporter.due() → build() ──FEEDBACK──▶  LinkAdaptation.decid
   （附在下一個 burst，或單獨的 control burst）   LinkAdaptation.on_sent(burst)（每個送出的 burst）
 ```
 
-Wire format 見 [7.7 節](07-reference.md#77-雙向-link-的-control-與-feedback-wire-format)。
+Wire format 見 [7.8 節](07-reference.md#78-雙向-link-的-control-與-feedback-wire-format)。
 所有 interface 與資料結構都在
 [`ofdm_message_link/la/api.py`](../src/ofdm_message_link/la/api.py)。
 
