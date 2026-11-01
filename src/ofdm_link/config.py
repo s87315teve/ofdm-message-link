@@ -204,6 +204,55 @@ class AccelerationConfig:
 
 
 @dataclass(frozen=True)
+class DuplexNodeConfig:
+    """One node of a bidirectional link: what it transmits on and listens to."""
+
+    node_id: int
+    tx_frequency: int
+    rx_frequency: int
+
+
+@dataclass(frozen=True)
+class LbtConfig:
+    """Listen-before-talk parameters, used only with ``duplex.mode: lbt``."""
+
+    ed_threshold_db: float = 6.0
+    slot_ms: float = 3.0
+    cw_min: int = 4
+    cw_max: int = 64
+    txop_bursts: int = 2
+    post_tx_blank_ms: float = 3.0
+    rx_chunk_samples: int = 8192
+
+
+@dataclass(frozen=True)
+class DuplexConfig:
+    """The optional ``duplex`` section that node_app reads; tx_app and rx_app ignore it.
+
+    ``fdd`` gives each node its own transmit frequency; ``lbt`` puts both on
+    one frequency and takes turns.
+    """
+
+    mode: str
+    control_mcs_index: int
+    nodes: tuple[DuplexNodeConfig, ...]
+    lbt: LbtConfig | None = None
+
+    def node(self, node_id: int) -> DuplexNodeConfig:
+        for entry in self.nodes:
+            if entry.node_id == node_id:
+                return entry
+        raise ConfigError(f"duplex.nodes has no node_id {node_id}")
+
+    def peer_of(self, node_id: int) -> DuplexNodeConfig:
+        self.node(node_id)
+        for entry in self.nodes:
+            if entry.node_id != node_id:
+                return entry
+        raise ConfigError(f"duplex.nodes has no peer for node_id {node_id}")
+
+
+@dataclass(frozen=True)
 class LinkConfig:
     schema_version: int
     node: NodeConfig
@@ -214,6 +263,7 @@ class LinkConfig:
     simulation: SimulationConfig
     gui: GuiConfig
     acceleration: AccelerationConfig
+    duplex: DuplexConfig | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a serializable copy suitable for logs and diagnostics."""
@@ -254,6 +304,7 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
             "acceleration",
         },
         "configuration",
+        optional={"duplex"},
     )
 
     schema_version = _integer(root, "schema_version", "configuration")
@@ -537,6 +588,7 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
     if radio.adapter == "uhd" and not 70_000_000 <= phy.center_frequency <= 6_000_000_000:
         raise ConfigError("phy.center_frequency must be within 70 MHz to 6 GHz for B210")
     _check_v5_link_limits(phy, mac.aggregation)
+    duplex = _duplex_section(root, phy) if "duplex" in root else None
 
     return LinkConfig(
         schema_version=schema_version,
@@ -548,7 +600,95 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         simulation=simulation,
         gui=gui,
         acceleration=acceleration,
+        duplex=duplex,
     )
+
+
+#: A node id travels in one LCP header byte; 0 and 255 are reserved.
+_DUPLEX_NODE_IDS = (1, 254)
+
+
+def _duplex_section(root: Mapping[str, Any], phy: PhyConfig) -> DuplexConfig:
+    """Validate ``duplex``: two nodes whose frequencies mirror each other.
+
+    FDD needs the two transmit frequencies at least one sample rate apart, and
+    each node's transmit frequency must be the other's receive frequency.  LBT
+    needs every node to transmit where it listens.
+    """
+
+    raw = _mapping(root.get("duplex"), "duplex")
+    _only_keys(raw, {"mode", "nodes"}, "duplex", optional={"control_mcs_index", "lbt"})
+    mode = _choice(raw, "mode", "duplex", {"fdd", "lbt"})
+    control = (
+        8 if "control_mcs_index" not in raw
+        else _bounded_int(raw, "control_mcs_index", "duplex", 8, 17)
+    )
+    nodes_raw = raw.get("nodes")
+    if not isinstance(nodes_raw, list) or len(nodes_raw) != 2:
+        raise ConfigError("duplex.nodes must list exactly two nodes")
+    nodes = []
+    for index, entry in enumerate(nodes_raw):
+        location = f"duplex.nodes[{index}]"
+        entry = _mapping(entry, location)
+        _only_keys(entry, {"node_id", "tx_frequency", "rx_frequency"}, location)
+        nodes.append(
+            DuplexNodeConfig(
+                node_id=_bounded_int(entry, "node_id", location, *_DUPLEX_NODE_IDS),
+                tx_frequency=_bounded_int(
+                    entry, "tx_frequency", location, 70_000_000, 6_000_000_000
+                ),
+                rx_frequency=_bounded_int(
+                    entry, "rx_frequency", location, 70_000_000, 6_000_000_000
+                ),
+            )
+        )
+    first, second = nodes
+    if first.node_id == second.node_id:
+        raise ConfigError("duplex.nodes must have different node_id values")
+    if first.tx_frequency != second.rx_frequency or first.rx_frequency != second.tx_frequency:
+        raise ConfigError(
+            "duplex.nodes: each node's tx_frequency must be the other node's rx_frequency"
+        )
+    if mode == "fdd" and abs(first.tx_frequency - first.rx_frequency) < phy.sample_rate:
+        raise ConfigError(
+            "duplex mode fdd needs tx_frequency and rx_frequency at least one sample "
+            f"rate ({phy.sample_rate} Hz) apart"
+        )
+    if mode == "lbt" and first.tx_frequency != first.rx_frequency:
+        raise ConfigError("duplex mode lbt needs tx_frequency equal to rx_frequency")
+    lbt = None
+    if "lbt" in raw:
+        if mode != "lbt":
+            raise ConfigError("duplex.lbt applies to mode lbt only")
+        lbt = _lbt_section(_mapping(raw.get("lbt"), "duplex.lbt"))
+    elif mode == "lbt":
+        lbt = LbtConfig()
+    return DuplexConfig(mode=mode, control_mcs_index=control, nodes=tuple(nodes), lbt=lbt)
+
+
+def _lbt_section(raw: Mapping[str, Any]) -> LbtConfig:
+    defaults = LbtConfig()
+    _only_keys(raw, set(), "duplex.lbt", optional=set(asdict(defaults)))
+    values: dict[str, Any] = {}
+    for key, low, high in (
+        ("ed_threshold_db", 0.0, 40.0),
+        ("slot_ms", 0.5, 50.0),
+        ("post_tx_blank_ms", 0.0, 50.0),
+    ):
+        if key in raw:
+            values[key] = _bounded_number(raw, key, "duplex.lbt", low, high)
+    for key, low, high in (
+        ("cw_min", 1, 1024),
+        ("cw_max", 1, 1024),
+        ("txop_bursts", 1, 16),
+        ("rx_chunk_samples", 1024, 65536),
+    ):
+        if key in raw:
+            values[key] = _bounded_int(raw, key, "duplex.lbt", low, high)
+    lbt = LbtConfig(**values)
+    if lbt.cw_max < lbt.cw_min:
+        raise ConfigError("duplex.lbt.cw_max must not be below cw_min")
+    return lbt
 
 
 def _read_yaml(path: str | Path) -> dict[str, Any]:

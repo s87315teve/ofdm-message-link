@@ -1,0 +1,46 @@
+# Bidirectional FDD link for node_app, wide spacing: two ADALM-Plutos, 5 MS/s.
+# Overlay after default.yaml, e.g.
+#   --overlay configs/profiles/duplex_fdd_2405_2475.yaml
+#
+# The fallback of duplex_fdd_2420_2460.yaml when 40 MHz spacing is not
+# enough.  Node 1 ("A") transmits on 2405 MHz and receives on 2475 MHz;
+# node 2 ("B") the reverse.  70 MHz apart, the signal edges are 2402.5 and
+# 2477.5 MHz, inside 2400-2483.5 MHz.  2405 MHz lies in Wi-Fi channel 1
+# (2401-2423); 2475 MHz is above channel 11 (2451-2473) but inside channel
+# 13 where that is allowed.  See experiments/duplex_fdd/results/si/README.md.
+#
+# Like every profile, this does not arm a transmitter: each RF run still
+# needs --enable-rf and its explicit acknowledgement.  Keep the TX gain at or
+# below 0 dB.
+phy:
+  sample_rate: 5000000
+  center_frequency: 2440000000
+  mcs: qpsk
+  fec:
+    scheme: turbo
+    code_rate: "1/3"
+    decision_mode: turbo
+    max_iterations: 8
+  sync:
+    detection_threshold: 0.25
+    correlation_threshold: 0.30
+
+mac:
+  duplex: fdd
+
+radio:
+  adapter: uhd
+  rf_enabled: false
+  bandwidth: 5000000
+  rx_gain: 15.0
+  tx_gain: 0.0
+  rx_antenna: TX/RX
+  tx_antenna: TX/RX
+  clock_source: internal
+
+duplex:
+  mode: fdd
+  control_mcs_index: 8
+  nodes:
+    - {node_id: 1, tx_frequency: 2405000000, rx_frequency: 2475000000}
+    - {node_id: 2, tx_frequency: 2475000000, rx_frequency: 2405000000}
