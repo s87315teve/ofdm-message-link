@@ -375,7 +375,10 @@ window.GUIDE_CONTENT = (function () {
         { text: "Terminal 1：先啟動 RX。RX 必須先開啟 sample port。", cmd: "python -m ofdm_message_link.rx_app --snr-db 15" },
         { text: "Terminal 2：啟動 TX。", cmd: "python -m ofdm_message_link.tx_app" },
         { text: "在 TX 的 input box 打字，然後按 Enter。RX window 顯示這則 message。" },
-        { text: "選用：用其他程式當來源與目的地。", cmd: "python -m ofdm_message_link.udp_recv\npython -m ofdm_message_link.udp_send \"Hello\"" }
+        { text: "選用：用其他程式當來源與目的地。", cmd: "python -m ofdm_message_link.udp_recv\npython -m ofdm_message_link.udp_send \"Hello\"" },
+        { text: "選用：雙向 link。<code>node_app</code> 在一個 process 裡同時發送與接收。每個 node 用一個 terminal。Node 1 與 node 2 經過 UDP 交換 samples。",
+          cmd: "python -m ofdm_message_link.node_app --node-id 1\npython -m ofdm_message_link.node_app --node-id 2" },
+        { text: "Node 1 從 UDP port 52211 收 bytes。Node 2 把這些 bytes 送到 UDP port 52222。反方向用 52221 與 52212。" }
       ]
     },
     uhd: {
@@ -395,7 +398,11 @@ window.GUIDE_CONTENT = (function () {
         { text: "安裝 ADI 的 udev rule。只需要做一次。然後重新插拔 Pluto。詳細步驟在 <code>docs/04-ota-hardware.md</code>。" },
         { text: "Terminal 1：先啟動 RX。", cmd: "python -m ofdm_message_link.rx_app \\\n    --transport pluto --serial RX_PLUTO_SERIAL --gain 15 --auto-start" },
         { text: "Terminal 2：啟動 TX，並帶上 RF acknowledgement。", cmd: "python -m ofdm_message_link.tx_app \\\n    --transport pluto --serial TX_PLUTO_SERIAL --gain -5 --auto-start \\\n    " + ACK },
-        { text: "Pluto 的 TX gain 是 attenuator：0 dB 是最大輸出。TX 與 RX 請各用一台 Pluto。" }
+        { text: "Pluto 的 TX gain 是 attenuator：0 dB 是最大輸出。TX 與 RX 請各用一台 Pluto。" },
+        { text: "選用：雙向 FDD link。每台 Pluto 執行一個 <code>node_app</code>。Node 1 在 2420 MHz 發送，在 2460 MHz 接收。Node 2 相反。",
+          cmd: "python -m ofdm_message_link.node_app --node-id 1 \\\n    --transport pluto --serial NODE1_PLUTO_SERIAL --tx-gain -10 --auto-start \\\n    " + ACK +
+            "\npython -m ofdm_message_link.node_app --node-id 2 \\\n    --transport pluto --serial NODE2_PLUTO_SERIAL --tx-gain -10 --auto-start \\\n    " + ACK },
+        { text: "一台 Pluto 只能開啟一次。所以一個 <code>node_app</code> 同時擁有這台 Pluto 的 TX 與 RX。<code>--headless</code> 不開 window，供腳本使用。" }
       ]
     }
   };
@@ -407,7 +414,12 @@ window.GUIDE_CONTENT = (function () {
     { q: "高速率時遺失很多 packet", cause: "RX gain 太高，signal 太強。", fix: "把 RX gain 降到大約 15 dB。" },
     { q: "Overflow 次數一直增加", cause: "USB bandwidth 或 CPU 不夠。", fix: "把兩台 radio 接到不同的 USB 3 controller。保持 <code>--engine process</code>。" },
     { q: "Probe 失敗：device 被佔用", cause: "另一個 process 已經開啟這台 radio。", fix: "確認 TX 與 RX 的 <code>--serial</code> 不同。停止舊的 process。" },
-    { q: "Pluto：device 清單是空的", cause: "電腦沒有在 USB 上找到 Pluto。", fix: "重新插拔 Pluto。Pluto 開機大約需要 20 秒。" }
+    { q: "Pluto：device 清單是空的", cause: "電腦沒有在 USB 上找到 Pluto。", fix: "重新插拔 Pluto。Pluto 開機大約需要 20 秒。" },
+    { q: "node_app：TX duty 高時，overflow 次數增加", cause: "USB 2.0 同時傳送 5 MS/s 的 RX stream 與 TX bursts。TX duty 超過大約 0.7 時，bandwidth 不夠。",
+      fix: "保持 <code>--tx-duty-cap 0.7</code>（預設值）。" },
+    { q: "node_app：Feedback age 是紅色", cause: "另一個方向的 SNR 太低。Peer 收不到這個 node 的 feedback。",
+      fix: "調高 peer 的 <code>--tx-gain</code>。兩個方向的 path loss 可以不同。" },
+    { q: "node_app：EADDRINUSE", cause: "另一個 process 已經使用這個 node 的 port。", fix: "停止舊的 process。兩個 node 必須用不同的 <code>--node-id</code>。" }
   ];
 
   // File map: [files, module ids it implements, what it does].
@@ -425,6 +437,10 @@ window.GUIDE_CONTENT = (function () {
     ["dashboard_widgets.py、plots.py", "GUI instruments", "Cards、trend、constellation、spectrum"],
     ["qt_runtime.py、window_layout.py", "（window）", "Qt 啟動、Ctrl-C、<code>--geometry</code>"],
     ["log_limits.py", "（長時間執行）", "Log 大小上限與 rotation"],
+    ["node_app.py、node_options.py", "（雙向 node）", "雙向 node 的 CLI、headless loop、control socket、stats line"],
+    ["node_engine.py", "（雙向 node）", "一個 child process 同時執行 TX 與 RX，兩個方向共用一台 Pluto"],
+    ["node_window.py", "（雙向 node）", "TX、RX 與 link adaptation 的 cards，以及 MCS trend"],
+    ["control.py、la/", "（雙向 node）", "Control 與 feedback 的 wire format、可以替換的 link adaptation"],
     ["udp_send.py、udp_recv.py", "你的程式", "最小的 socket producer 與 consumer"],
     ["experiments/ota_udp_throughput/", "（量測工具）", "各 MCS 的 airtime 與 OTA UDP throughput sweep"]
   ];

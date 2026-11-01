@@ -1,4 +1,4 @@
-# 單向 OFDM message link 的互動導覽
+# OFDM message link 的互動導覽
 
 線上版：<https://s87315teve.github.io/ofdm-message-link/guide/>。
 
@@ -20,6 +20,9 @@ python -m guide.build_data
 ```
 
 `index.html#lab`、`#code`、`#run` 可以直接開啟對應的分頁。
+
+導覽說明單向的 `tx_app` 與 `rx_app`。`執行` 分頁與檔案對照也列出雙向的 `node_app`；完整說明在
+`docs/07-reference.md` 的 7.8 節。
 
 ## 文字的寫法
 

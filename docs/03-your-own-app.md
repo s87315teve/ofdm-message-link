@@ -201,4 +201,175 @@ pkill -TERM -x ffplay
 GUI 主程式結束後，偶爾會留下 `multiprocessing.forkserver` 子 process，它們會佔住 radio。
 用 `pgrep -af forkserver` 檢查，確認命令列含 `ofdm_message_link` 後再 `kill -TERM <pid>`。
 
+## 3.4 寫你自己的 link adaptation 模組
+
+雙向的 `node_app`（[7.8 節](07-reference.md#78-node_app雙向-node-的命令列)）依 peer 回報的
+feedback 為每個 data burst 選 MCS。選 MCS 的演算法與 RX 端的量測方式都是可替換的模組：
+不必改 `node_app`，在命令列指定 class 即可。
+
+### 兩個模組、一條資料流
+
+| 模組 | 在哪一端 | 做什麼 | 命令列 |
+|---|---|---|---|
+| `LinkAdaptation` | TX | 把 feedback 變成下一個 burst 的 MCS | `--link-adaptation SPEC`、`--link-adaptation-arg K=V` |
+| `FeedbackReporter` | RX | 決定量什麼、多久回報一次 | `--feedback-reporter SPEC`、`--feedback-reporter-arg K=V` |
+
+```
+peer 的 RX                                   這個 node 的 TX
+FeedbackReporter.on_preambles / on_burst      LinkAdaptation.on_feedback(report)
+  / on_rx_health（每個 RX chunk）                     │
+FeedbackReporter.due() → build() ──FEEDBACK──▶  LinkAdaptation.decide(now) → Decision(mcs)
+  （附在下一個 burst，或單獨的 control burst）   LinkAdaptation.on_sent(burst)（每個送出的 burst）
+```
+
+Wire format 見 [7.7 節](07-reference.md#77-雙向-link-的-control-與-feedback-wire-format)。
+所有 interface 與資料結構都在
+[`ofdm_message_link/la/api.py`](../src/ofdm_message_link/la/api.py)。
+
+### `SPEC` 與參數的寫法
+
+| `SPEC` | 意義 |
+|---|---|
+| `fixed`（`node_app` 預設） | 固定在 `--mcs-index`；GUI 與 control socket 的 `set_mcs` 可以改 |
+| `olla` | 內建：LTE 式的 inner／outer loop，追 1 % 的 subframe loss |
+| `arf` | 內建範例：Auto Rate Fallback（`la/examples.py`） |
+| `package.module:Class` | 可以 import 的 module 裡的 class |
+| `path/to/file.py:Class` | 一個檔案裡的 class，不需要安裝 |
+
+`--link-adaptation-arg K=V` 可以重複。`V` 先當 Python literal 解析（`5`、`0.02`、`True`、
+`"text"`），失敗就當字串。同一個 `K` 給兩次、或少了 `=`，程式啟動時就停止並說明原因。
+`node_app` 用 `Class(context, **kwargs)` 建立 instance，再檢查它是否實作 interface；
+不符合時一樣在啟動時停止，不會等到第一個 burst。Reporter 的 `SPEC` 內建只有 `default`。
+
+### `LinkAdaptation` interface
+
+不需要繼承任何 base class，有這四個 method 就可以：
+
+| Method | 何時呼叫 | 回傳 |
+|---|---|---|
+| `on_sent(burst: SentBurst)` | 每個 burst 送出後（含 control-only burst） | 無 |
+| `on_feedback(report: FeedbackReport)` | 收到 peer 的每份 feedback | 無 |
+| `decide(now_s: float)` | 每個 data burst 之前 | `Decision(mcs_index, reason, snr_eff_db, offset_db)` |
+| `snapshot()` | GUI 與 stats line 每 0.5 s | 可以轉成 JSON 的 dict |
+
+建構時拿到的 `LaContext`：`ladder`（可用的 v5 entries，PHY rate 由低到高，dominated 的
+entry 已移除）、`thresholds_db`（MCS index → 1 % loss 需要的 preamble SNR，來自
+`configs/la/thresholds_pluto_v5.yaml`）、`initial_mcs_index`、`sample_rate`、`node_id`。
+
+`FeedbackReport` 最常用的欄位：`report_seq`、`snr_mean_db`／`snr_p10_db`／`snr_last_db`
+（沒有量到時為 `None`）、`data_ok_total`／`data_lost_total`（**累計**的 DATA subframe 數）、
+`rx_overflow_total`、`bursts`（最近的 DATA bursts，每個有 MCS、SNR、ok／lost）、
+`received_t_s`（本地收到的時間）。
+
+### 範例：一個 threshold 演算法
+
+```python
+# my_la.py
+from ofdm_message_link.la.api import Decision, LaContext, is_newer_seq
+
+
+class Threshold:
+    """選 reported SNR 夠用的最高 rung。"""
+
+    def __init__(self, context: LaContext, margin_db: float = 0.0):
+        self.ladder = context.ladder              # PHY rate 由低到高
+        self.thresholds = context.thresholds_db   # MCS index -> dB
+        self.margin_db = float(margin_db)
+        self.mcs = context.initial_mcs_index
+        self.last_seq = None
+
+    def on_sent(self, burst):                     # SentBurst；不用可以忽略
+        pass
+
+    def on_feedback(self, report):
+        if self.last_seq is not None and not is_newer_seq(report.report_seq, self.last_seq):
+            return                                # 舊的或重複的 report
+        self.last_seq = report.report_seq
+        if report.snr_mean_db is None:
+            return
+        fits = [e.index for e in self.ladder
+                if self.thresholds[e.index] + self.margin_db <= report.snr_mean_db]
+        self.mcs = fits[-1] if fits else self.ladder[0].index
+
+    def decide(self, now_s):
+        return Decision(self.mcs, reason="threshold")
+
+    def snapshot(self):
+        return {"mcs_index": self.mcs}
+```
+
+```bash
+python -m ofdm_message_link.node_app --node-id 1 \
+    --link-adaptation my_la.py:Threshold --link-adaptation-arg margin_db=1.5
+```
+
+不開 radio 也能先試：自己造 `FeedbackReport` 餵給它。
+
+```python
+from ofdm_message_link.la.api import FeedbackReport, LaContext
+from ofdm_message_link.la.loader import build_link_adaptation
+from ofdm_message_link.la.thresholds import build_ladder, load_thresholds
+
+thresholds = load_thresholds()
+context = LaContext(ladder=build_ladder(thresholds), thresholds_db=thresholds,
+                    initial_mcs_index=8, sample_rate=5e6, node_id=1)
+la = build_link_adaptation("my_la.py:Threshold", context, ["margin_db=1.5"])
+report = FeedbackReport(version=1, reporter_id=0, report_seq=1, window_s=0.02, age_s=0.0,
+                        preambles=10, snr_mean_db=16.0, snr_p10_db=15.0, snr_last_db=16.0,
+                        data_ok_total=40, data_lost_total=0, last_data_seq=None,
+                        psdu_fcs_fail_total=0, header_fail_total=0, rx_overflow_total=0,
+                        last_mcs_index=8)
+la.on_feedback(report)
+print(la.decide(0.0))   # 用目前的 thresholds，16 dB 選 MCS 12
+```
+
+兩個 node 不開 radio 也能整條跑：`--transport udp`（預設）時，兩個 `node_app` 在同一台
+PC 上經 UDP 交換 samples，`--la-log PATH` 會記下每個 decision 與 feedback。
+
+### 規則
+
+- `decide` 在每個 data burst 之前呼叫，要快。回傳 `context.ladder` 裡的 index；其他
+  transmit-visible 的 v5 index 也接受，不合法的 index 會換成較慢的最近 rung，並記錄在 log。
+- 計數器是累計值，而且會 wrap：用 `counter_delta(new, old)` 相減，用
+  `is_newer_seq(new, old)` 判斷 report 是否較新。掉幾份 feedback 不會遺失資訊。
+- 第一份 report 只當基準：沒有前一份可以相減。
+- `snapshot` 只回傳可以轉成 JSON 的值；GUI 的 Link adaptation tab 與 `--la-log` 會顯示。
+- Method 不會同時被呼叫（controller 持有一把 lock），不需要自己加 lock。時間都是
+  `time.monotonic()` 的秒數。
+- 沒有 feedback（例如反方向的 SNR 太低）時，`on_feedback` 就不會被呼叫。演算法要自己決定
+  feedback 太舊時怎麼辦；`olla` 在 0.5 s 沒有 feedback 後每 0.5 s 降一階，最低到 MCS 8。
+
+### 內建範例：ARF
+
+[`la/examples.py`](../src/ofdm_message_link/la/examples.py) 的 `ArfLinkAdaptation` 是一個不到
+一百行的完整演算法，可以當範本複製。它不看 SNR：連續 `up_after` 份沒有 loss 的 report 就升一階，
+連續 `down_after` 份有 loss 就降一階；`probe_fail_down=True` 時，升階後的第一份 report 有 loss
+就立刻降回去。沒有 DATA subframe 的 report（peer 閒置）不改變任何狀態。
+
+```bash
+python -m ofdm_message_link.node_app --node-id 1 --link-adaptation arf
+python -m ofdm_message_link.node_app --node-id 1 \
+    --link-adaptation ofdm_message_link.la.examples:ArfLinkAdaptation \
+    --link-adaptation-arg up_after=5 --link-adaptation-arg probe_fail_down=False
+```
+
+### 自訂 reporter
+
+RX 端的 reporter 用同樣的方式寫與載入：`Class(context: ReporterContext, **kwargs)`，
+`ReporterContext` 有 `node_id`、`peer_node_id`、`max_entries`（≤ 16）。
+
+| Method / 屬性 | 何時呼叫 | 做什麼 |
+|---|---|---|
+| `reporter_id` | 屬性 | 非 0 的 id（0 是內建 reporter），peer 用它分辨 report 的來源 |
+| `on_preambles(now_s, snr_db, *, control_only)` | 每個 RX chunk | 這段 chunk 裡每個 peer preamble 的 SNR |
+| `on_burst(report: BurstReport)` | 每個收到的 DATA burst | 累計 ok／lost，記下最近的 bursts |
+| `on_rx_health(now_s, health: RxHealth)` | 每個 RX chunk | overflow、header／FCS 失敗、clipping、decode backlog |
+| `due(now_s)` / `next_due_s(now_s)` | TX 準備下一個 burst 時 | 是否該回報；下一次何時該回報（閒置的 node 會在那時醒來送 control burst） |
+| `build(now_s)` | `due` 為真時 | 回傳 `FeedbackReport` 並結束這個量測窗 |
+
+只有 peer 的 DATA burst 會讓 report 變成 due；control-only burst 只更新 SNR 統計，否則兩個閒置
+的 node 會互相觸發 control burst。額外的量測放在 `FeedbackReport.extras`，用 type 0x80–0xFF 的
+TLV；不認得的 TLV 會被對方略過。內建的 `la/reporter.py` 的 `DefaultReporter`
+（`period_ms=20`、`keepalive_ms=200`、`max_entries=8`）是最直接的範本。
+
 下一篇：[用真的 SDR 發射](04-ota-hardware.md)。
