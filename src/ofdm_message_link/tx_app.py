@@ -252,11 +252,16 @@ class TransmitWorker:
                         self._admit(pending, first)
                     self._fill(pending)
                     unsent = self._encode_next(pending)
+                # The minimum burst interval runs from start to start: a
+                # Pluto push of a long burst blocks for about its airtime, so
+                # stamping after the push returned would add the whole
+                # interval as idle air after every long burst.
+                handed_at = self._clock()
                 if not self._send_when_there_is_room(sink, unsent.burst.samples):
                     # The radio was stopped underneath us.  The burst keeps
                     # its sequence numbers and goes out first on the next one.
                     continue
-                self._last_burst_at = self._clock()
+                self._last_burst_at = handed_at
                 self._plot_buffers.set_samples(unsent.burst.samples)
                 self._report(unsent)
             except Exception as error:  # surfaced in the window, never silent

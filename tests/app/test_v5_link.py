@@ -586,6 +586,41 @@ def test_min_burst_interval_caps_the_burst_rate_and_fills_the_bursts(profile):
     assert 300 / len(sink.bursts) > 1.5
 
 
+class _SlowSink(_RecordingSink):
+    """Blocks in send() like a Pluto pushing a long burst (about its airtime)."""
+
+    def __init__(self, push_s):
+        super().__init__()
+        self.push_s = push_s
+        self.returns: list[float] = []
+
+    def send(self, samples):
+        super().send(samples)
+        time.sleep(self.push_s)
+        self.returns.append(time.monotonic())
+        return True
+
+
+def test_the_interval_runs_start_to_start_so_long_bursts_leave_no_idle_air(profile):
+    # A push that blocks longer than the interval must be followed at once by
+    # the next one; counting the interval from the push's return would add
+    # it as idle air after every long burst (a third of the air at MCS 8).
+    interval, push = 0.02, 0.05
+    limits = AggregationLimits(min_burst_interval_s=interval, max_subframes=1)
+    worker = TransmitWorker(MessageTransmitter(profile), _Bridge(), aggregation=limits)
+    sink = _SlowSink(push)
+    worker.attach(sink)
+    worker.start()
+    try:
+        for index in range(6):
+            worker.submit("test", bytes([index]) * 100)
+        assert _wait_for(lambda: len(sink.returns) == 6)
+    finally:
+        worker.stop()
+    idle = [start - end for end, start in zip(sink.returns[:-1], sink.arrivals[1:])]
+    assert max(idle) < interval * 0.5, idle
+
+
 def test_a_lone_datagram_after_idle_is_not_delayed(profile):
     limits = AggregationLimits(min_burst_interval_s=0.2)
     transmitter = MessageTransmitter(profile)
