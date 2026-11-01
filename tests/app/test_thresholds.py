@@ -103,3 +103,40 @@ def test_missing_file_is_refused(tmp_path):
 
 def test_parse_sorts_by_index():
     assert list(parse_thresholds({12: 14, 8: 7.5})) == [8, 12]
+
+
+# -- installed packages have no configs/ (review risk) ------------------------
+
+
+def test_the_repository_file_wins_and_the_packaged_copy_is_the_fallback(tmp_path):
+    from ofdm_message_link.la.thresholds import REPO_THRESHOLDS_PATH, default_thresholds_path
+
+    packaged = tmp_path / "thresholds_pluto_v5.yaml"
+    packaged.write_text(REPO_THRESHOLDS_PATH.read_text())
+    missing = tmp_path / "configs" / "la" / "thresholds_pluto_v5.yaml"
+    assert default_thresholds_path() == REPO_THRESHOLDS_PATH  # a source checkout
+    assert default_thresholds_path(REPO_THRESHOLDS_PATH, packaged) == REPO_THRESHOLDS_PATH
+    assert default_thresholds_path(missing, packaged) == packaged  # an installed package
+    assert load_thresholds(default_thresholds_path(missing, packaged)) == load_thresholds()
+    assert default_thresholds_path(missing, tmp_path / "absent.yaml") == missing
+
+
+def test_a_built_package_ships_the_repository_thresholds(tmp_path):
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from ofdm_message_link.la.thresholds import REPO_ROOT, REPO_THRESHOLDS_PATH
+
+    for name in ("setup.py", "pyproject.toml", "MANIFEST.in", "README.md"):
+        shutil.copy(REPO_ROOT / name, tmp_path / name)
+    (tmp_path / "configs" / "la").mkdir(parents=True)
+    shutil.copy(REPO_THRESHOLDS_PATH, tmp_path / "configs" / "la")
+    shutil.copytree(REPO_ROOT / "src", tmp_path / "src",
+                    ignore=shutil.ignore_patterns("*.so", "__pycache__", "*.egg-info"))
+    build = tmp_path / "build_lib"
+    subprocess.run([sys.executable, "setup.py", "-q", "build_py", "-d", str(build)],
+                   cwd=tmp_path, check=True, capture_output=True, timeout=120)
+    shipped = Path(build) / "ofdm_message_link" / "la" / "thresholds_pluto_v5.yaml"
+    assert shipped.read_bytes() == REPO_THRESHOLDS_PATH.read_bytes()
