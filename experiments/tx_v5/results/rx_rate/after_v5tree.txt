@@ -1,0 +1,283 @@
+== --family v5 --mcs 16 --payload 900 --rate 300 --seconds 2 (load 1.07 1.04 0.94 2/2625 394770)
+v5 MCS 16 900 B at 300.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.07 1.03 0.94
+  stream 2.013 s  wall 1.131 s  RTF 1.78  overflows 0/154
+  owner thread CPU 0.882 s (44% of a core at real time, 78% of wall)  process CPU 1.028 s  pool CPU 1.49 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.101 s    54.7%      154 calls
+    decoder.feed_segments                 1.071 s    53.2%     1229 calls
+    decoder.acquire_next                  0.860 s    42.7%     1604 calls
+    acquire_all                           0.807 s    40.1%     1604 calls
+      v5_candidates                       0.367 s    18.2%     1601 calls
+      legacy candidates                   0.222 s    11.0%     1604 calls
+      shared_correlation                  0.178 s     8.8%     1601 calls
+    header probe / inline decode          0.141 s     7.0%      600 calls
+    decoder.note_acquisition (SNR)        0.039 s     2.0%      600 calls
+    receiver.accept_results               0.019 s     0.9%      155 calls
+    receiver.accept                       0.018 s     0.9%      600 calls
+    decoder.retain_prefix                 0.007 s     0.4%     1004 calls
+    decoder.discard                       0.005 s     0.2%     2157 calls
+    pool.collect                          0.001 s     0.1%      307 calls
+== --family v5 --mcs 16 --payload 900 --rate 500 --seconds 2 (load 1.07 1.03 0.94 3/2630 395067)
+v5 MCS 16 900 B at 500.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.07 1.03 0.94
+  stream 2.013 s  wall 1.642 s  RTF 1.226  overflows 0/154
+  owner thread CPU 1.24 s (62% of a core at real time, 76% of wall)  process CPU 1.461 s  pool CPU 2.51 s
+  frames 1000/1000  missing 0  delivered 1000
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.610 s    80.0%      154 calls
+    decoder.feed_segments                 1.537 s    76.3%     1229 calls
+    decoder.acquire_next                  1.194 s    59.3%     1836 calls
+    acquire_all                           1.108 s    55.0%     1836 calls
+      v5_candidates                       0.528 s    26.2%     1832 calls
+      legacy candidates                   0.322 s    16.0%     1836 calls
+    header probe / inline decode          0.241 s    12.0%     1000 calls
+      shared_correlation                  0.209 s    10.4%     1832 calls
+    decoder.note_acquisition (SNR)        0.068 s     3.4%     1000 calls
+    receiver.accept_results               0.026 s     1.3%      155 calls
+    receiver.accept                       0.025 s     1.2%     1000 calls
+    decoder.discard                       0.011 s     0.5%     2757 calls
+    decoder.retain_prefix                 0.006 s     0.3%      836 calls
+    pool.collect                          0.001 s     0.1%      459 calls
+== --family v5 --mcs 16 --payload 900 --rate 800 --seconds 2 (load 1.07 1.03 0.94 2/2625 395369)
+v5 MCS 16 900 B at 800.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.14 1.05 0.94
+  stream 2.013 s  wall 2.532 s  RTF 0.795  overflows 0/154
+  owner thread CPU 1.871 s (93% of a core at real time, 74% of wall)  process CPU 2.252 s  pool CPU 3.94 s
+  frames 1600/1600  missing 0  delivered 1600
+  stages (inclusive, s per stream second):
+    receiver.feed                         2.495 s   124.0%      154 calls
+    decoder.feed_segments                 2.416 s   120.0%     1229 calls
+    decoder.acquire_next                  1.849 s    91.9%     2194 calls
+    acquire_all                           1.713 s    85.1%     2194 calls
+      v5_candidates                       0.805 s    40.0%     2189 calls
+      legacy candidates                   0.580 s    28.8%     2194 calls
+    header probe / inline decode          0.407 s    20.2%     1600 calls
+      shared_correlation                  0.281 s    13.9%     2189 calls
+    decoder.note_acquisition (SNR)        0.114 s     5.7%     1600 calls
+    receiver.accept_results               0.036 s     1.8%      155 calls
+    receiver.accept                       0.035 s     1.7%     1600 calls
+    decoder.discard                       0.017 s     0.9%     3671 calls
+    decoder.retain_prefix                 0.004 s     0.2%      594 calls
+    pool.collect                          0.002 s     0.1%      612 calls
+== --family v5 --mcs 14 --payload 300 --rate 300 --seconds 2 (load 1.14 1.05 0.94 2/2626 395826)
+v5 MCS 14 300 B at 300.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.05 1.03 0.94
+  stream 2.013 s  wall 1.124 s  RTF 1.79  overflows 0/154
+  owner thread CPU 0.918 s (46% of a core at real time, 82% of wall)  process CPU 1.054 s  pool CPU 0.94 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.097 s    54.5%      154 calls
+    decoder.feed_segments                 1.073 s    53.3%     1229 calls
+    decoder.acquire_next                  0.871 s    43.3%     1717 calls
+    acquire_all                           0.818 s    40.6%     1717 calls
+      v5_candidates                       0.381 s    18.9%     1715 calls
+      legacy candidates                   0.242 s    12.0%     1717 calls
+      shared_correlation                  0.164 s     8.1%     1715 calls
+    header probe / inline decode          0.140 s     6.9%      600 calls
+    decoder.note_acquisition (SNR)        0.040 s     2.0%      600 calls
+    receiver.accept_results               0.016 s     0.8%      155 calls
+    receiver.accept                       0.016 s     0.8%      600 calls
+    decoder.discard                       0.007 s     0.4%     2267 calls
+    decoder.retain_prefix                 0.007 s     0.4%     1117 calls
+    pool.collect                          0.001 s     0.0%      307 calls
+== --family v5 --mcs 14 --payload 300 --rate 500 --seconds 2 (load 1.05 1.03 0.94 3/2629 396072)
+v5 MCS 14 300 B at 500.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.05 1.03 0.94
+  stream 2.013 s  wall 1.668 s  RTF 1.207  overflows 0/154
+  owner thread CPU 1.285 s (64% of a core at real time, 77% of wall)  process CPU 1.543 s  pool CPU 1.57 s
+  frames 1000/1000  missing 0  delivered 1000
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.634 s    81.2%      154 calls
+    decoder.feed_segments                 1.596 s    79.3%     1229 calls
+    decoder.acquire_next                  1.271 s    63.1%     2026 calls
+    acquire_all                           1.185 s    58.9%     2026 calls
+      v5_candidates                       0.518 s    25.7%     2026 calls
+      legacy candidates                   0.394 s    19.6%     2026 calls
+    header probe / inline decode          0.239 s    11.9%     1000 calls
+      shared_correlation                  0.227 s    11.3%     2026 calls
+    decoder.note_acquisition (SNR)        0.067 s     3.3%     1000 calls
+    receiver.accept_results               0.024 s     1.2%      155 calls
+    receiver.accept                       0.023 s     1.1%     1000 calls
+    decoder.discard                       0.012 s     0.6%     2951 calls
+    decoder.retain_prefix                 0.007 s     0.3%     1026 calls
+    pool.collect                          0.001 s     0.1%      459 calls
+== --family v5 --mcs 14 --payload 300 --rate 800 --seconds 2 (load 1.05 1.03 0.94 3/2626 396400)
+v5 MCS 14 300 B at 800.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.13 1.05 0.94
+  stream 2.013 s  wall 2.448 s  RTF 0.822  overflows 0/154
+  owner thread CPU 1.891 s (94% of a core at real time, 77% of wall)  process CPU 2.27 s  pool CPU 2.44 s
+  frames 1600/1600  missing 0  delivered 1600
+  stages (inclusive, s per stream second):
+    receiver.feed                         2.402 s   119.3%      154 calls
+    decoder.feed_segments                 2.342 s   116.3%     1229 calls
+    decoder.acquire_next                  1.870 s    92.9%     2504 calls
+    acquire_all                           1.737 s    86.3%     2504 calls
+      v5_candidates                       0.785 s    39.0%     2500 calls
+      legacy candidates                   0.629 s    31.2%     2504 calls
+    header probe / inline decode          0.377 s    18.7%     1600 calls
+      shared_correlation                  0.272 s    13.5%     2500 calls
+    decoder.note_acquisition (SNR)        0.111 s     5.5%     1600 calls
+    receiver.accept_results               0.035 s     1.7%      155 calls
+    receiver.accept                       0.034 s     1.7%     1600 calls
+    decoder.discard                       0.015 s     0.7%     3980 calls
+    decoder.retain_prefix                 0.006 s     0.3%      904 calls
+    pool.collect                          0.002 s     0.1%      612 calls
+== --family v5 --mcs 8 --payload 900 --rate 200 --seconds 2 (load 1.13 1.05 0.94 2/2613 396805)
+v5 MCS 8 900 B at 200.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.13 1.05 0.94
+  stream 2.013 s  wall 0.681 s  RTF 2.954  overflows 0/154
+  owner thread CPU 0.499 s (25% of a core at real time, 73% of wall)  process CPU 0.651 s  pool CPU 1.16 s
+  frames 400/400  missing 0  delivered 400
+  stages (inclusive, s per stream second):
+    receiver.feed                         0.652 s    32.4%      154 calls
+    decoder.feed_segments                 0.632 s    31.4%     1229 calls
+    decoder.acquire_next                  0.449 s    22.3%      704 calls
+    acquire_all                           0.413 s    20.5%      704 calls
+      v5_candidates                       0.198 s     9.8%      701 calls
+      legacy candidates                   0.131 s     6.5%      704 calls
+    header probe / inline decode          0.096 s     4.7%      400 calls
+      shared_correlation                  0.071 s     3.5%      701 calls
+    decoder.note_acquisition (SNR)        0.029 s     1.5%      400 calls
+    receiver.accept_results               0.012 s     0.6%      155 calls
+    receiver.accept                       0.012 s     0.6%      400 calls
+    decoder.discard                       0.003 s     0.1%     1072 calls
+    decoder.retain_prefix                 0.002 s     0.1%      304 calls
+    pool.collect                          0.001 s     0.0%      307 calls
+== --family v5 --mcs 16 --payload 900 --rate 300 --seconds 2 --mode paced (load 1.13 1.05 0.94 3/2607 396970)
+v5 MCS 16 900 B at 300.0/s, paced, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.20 1.07 0.95
+  stream 2.013 s  wall 2.04 s  RTF 0.987  overflows 0/154
+  owner thread CPU 0.95 s (47% of a core at real time, 47% of wall)  process CPU 1.171 s  pool CPU 1.49 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.025 s    50.9%      154 calls
+    decoder.feed_segments                 0.996 s    49.5%     1229 calls
+    decoder.acquire_next                  0.816 s    40.5%     1604 calls
+    acquire_all                           0.762 s    37.9%     1604 calls
+      v5_candidates                       0.377 s    18.7%     1601 calls
+      legacy candidates                   0.223 s    11.1%     1604 calls
+    header probe / inline decode          0.139 s     6.9%      600 calls
+      shared_correlation                  0.137 s     6.8%     1601 calls
+    decoder.note_acquisition (SNR)        0.041 s     2.0%      600 calls
+    receiver.accept_results               0.017 s     0.8%      155 calls
+    receiver.accept                       0.016 s     0.8%      600 calls
+    decoder.retain_prefix                 0.007 s     0.3%     1004 calls
+    decoder.discard                       0.004 s     0.2%     2157 calls
+    pool.collect                          0.001 s     0.0%      307 calls
+== --family v5 --mcs 14 --payload 300 --rate 300 --seconds 2 --mode paced (load 1.20 1.07 0.95 2/2607 397375)
+v5 MCS 14 300 B at 300.0/s, paced, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.20 1.07 0.95
+  stream 2.013 s  wall 2.042 s  RTF 0.986  overflows 0/154
+  owner thread CPU 0.875 s (44% of a core at real time, 43% of wall)  process CPU 1.059 s  pool CPU 1.0 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         0.908 s    45.1%      154 calls
+    decoder.feed_segments                 0.880 s    43.7%     1229 calls
+    decoder.acquire_next                  0.724 s    36.0%     1717 calls
+    acquire_all                           0.674 s    33.5%     1717 calls
+      v5_candidates                       0.330 s    16.4%     1715 calls
+      legacy candidates                   0.195 s     9.7%     1717 calls
+    header probe / inline decode          0.128 s     6.4%      600 calls
+      shared_correlation                  0.125 s     6.2%     1715 calls
+    decoder.note_acquisition (SNR)        0.038 s     1.9%      600 calls
+    receiver.accept_results               0.016 s     0.8%      155 calls
+    receiver.accept                       0.015 s     0.8%      600 calls
+    decoder.retain_prefix                 0.007 s     0.3%     1117 calls
+    decoder.discard                       0.004 s     0.2%     2267 calls
+    pool.collect                          0.001 s     0.0%      307 calls
+== --family legacy --mcs 4 --payload 900 --rate 300 --seconds 2 (load 1.20 1.07 0.95 3/2601 397730)
+legacy MCS 4 900 B at 300.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.10 1.05 0.94
+  stream 2.013 s  wall 0.826 s  RTF 2.438  overflows 0/154
+  owner thread CPU 0.603 s (30% of a core at real time, 73% of wall)  process CPU 0.758 s  pool CPU 1.76 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         0.794 s    39.5%      154 calls
+    decoder.feed_segments                 0.758 s    37.7%     1229 calls
+    decoder.acquire_next                  0.521 s    25.9%     1109 calls
+    acquire_all                           0.487 s    24.2%     1109 calls
+      v5_candidates                       0.204 s    10.2%     1107 calls
+    header probe / inline decode          0.164 s     8.1%      600 calls
+      legacy candidates                   0.146 s     7.2%     1109 calls
+      shared_correlation                  0.114 s     5.7%     1107 calls
+    decoder.note_acquisition (SNR)        0.025 s     1.2%      600 calls
+    receiver.accept_results               0.010 s     0.5%      155 calls
+    receiver.accept                       0.009 s     0.4%      600 calls
+    decoder.retain_prefix                 0.004 s     0.2%      509 calls
+    decoder.discard                       0.003 s     0.2%     1659 calls
+    pool.collect                          0.001 s     0.0%      307 calls
+== --family legacy --mcs 4 --payload 900 --rate 500 --seconds 2 (load 1.10 1.05 0.94 3/2604 397955)
+a 10000-sample burst does not fit a 10000-sample period at 500.0/s
+== --family legacy --mcs 4 --payload 300 --rate 300 --seconds 2 (load 1.10 1.05 0.94 2/2610 398020)
+legacy MCS 4 300 B at 300.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.10 1.05 0.94
+  stream 2.013 s  wall 0.998 s  RTF 2.016  overflows 0/154
+  owner thread CPU 0.771 s (38% of a core at real time, 77% of wall)  process CPU 0.905 s  pool CPU 1.03 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         0.971 s    48.2%      154 calls
+    decoder.feed_segments                 0.950 s    47.2%     1229 calls
+    decoder.acquire_next                  0.693 s    34.4%     1546 calls
+    acquire_all                           0.655 s    32.6%     1546 calls
+      v5_candidates                       0.276 s    13.7%     1544 calls
+      legacy candidates                   0.192 s     9.5%     1546 calls
+    header probe / inline decode          0.168 s     8.3%      600 calls
+      shared_correlation                  0.155 s     7.7%     1544 calls
+    decoder.note_acquisition (SNR)        0.025 s     1.2%      600 calls
+    receiver.accept_results               0.012 s     0.6%      155 calls
+    receiver.accept                       0.012 s     0.6%      600 calls
+    decoder.discard                       0.007 s     0.4%     2102 calls
+    decoder.retain_prefix                 0.006 s     0.3%      946 calls
+    pool.collect                          0.001 s     0.0%      307 calls
+== --family legacy --mcs 4 --payload 300 --rate 500 --seconds 2 (load 1.10 1.05 0.94 2/2627 398307)
+legacy MCS 4 300 B at 500.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.41 1.11 0.97
+  stream 2.013 s  wall 1.431 s  RTF 1.407  overflows 0/154
+  owner thread CPU 1.055 s (52% of a core at real time, 74% of wall)  process CPU 1.273 s  pool CPU 1.66 s
+  frames 1000/1000  missing 0  delivered 1000
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.401 s    69.6%      154 calls
+    decoder.feed_segments                 1.368 s    67.9%     1229 calls
+    decoder.acquire_next                  0.942 s    46.8%     1759 calls
+    acquire_all                           0.887 s    44.0%     1759 calls
+      v5_candidates                       0.334 s    16.6%     1756 calls
+    header probe / inline decode          0.318 s    15.8%     1005 calls
+      legacy candidates                   0.286 s    14.2%     1759 calls
+      shared_correlation                  0.212 s    10.5%     1756 calls
+    decoder.note_acquisition (SNR)        0.041 s     2.0%     1005 calls
+    receiver.accept_results               0.014 s     0.7%      155 calls
+    receiver.accept                       0.013 s     0.7%     1000 calls
+    decoder.discard                       0.007 s     0.4%     2686 calls
+    decoder.retain_prefix                 0.005 s     0.3%      754 calls
+    pool.collect                          0.001 s     0.1%      459 calls
+== --family legacy --mcs 4 --payload 300 --rate 800 --seconds 2 (load 1.41 1.11 0.97 3/2628 398657)
+legacy MCS 4 300 B at 800.0/s, fast, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.41 1.11 0.97
+  stream 2.013 s  wall 1.995 s  RTF 1.009  overflows 0/154
+  owner thread CPU 1.469 s (73% of a core at real time, 74% of wall)  process CPU 1.818 s  pool CPU 2.6 s
+  frames 1600/1600  missing 0  delivered 1600
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.960 s    97.3%      154 calls
+    decoder.feed_segments                 1.905 s    94.6%     1229 calls
+    decoder.acquire_next                  1.292 s    64.2%     2077 calls
+    acquire_all                           1.205 s    59.9%     2077 calls
+    header probe / inline decode          0.480 s    23.8%     1607 calls
+      v5_candidates                       0.446 s    22.1%     2074 calls
+      legacy candidates                   0.433 s    21.5%     2077 calls
+      shared_correlation                  0.266 s    13.2%     2074 calls
+    decoder.note_acquisition (SNR)        0.066 s     3.3%     1607 calls
+    receiver.accept_results               0.020 s     1.0%      155 calls
+    receiver.accept                       0.018 s     0.9%     1600 calls
+    decoder.discard                       0.015 s     0.7%     3562 calls
+    decoder.retain_prefix                 0.004 s     0.2%      470 calls
+    pool.collect                          0.002 s     0.1%      612 calls
+== --family legacy --mcs 4 --payload 300 --rate 300 --seconds 2 --mode paced (load 1.41 1.11 0.97 8/2630 399049)
+legacy MCS 4 300 B at 300.0/s, paced, 4 workers, noise 1.0e-04 dc 0.0 tone 0.0 guard +0.0 dB, load 1.46 1.13 0.97
+  stream 2.013 s  wall 2.041 s  RTF 0.986  overflows 0/154
+  owner thread CPU 0.742 s (37% of a core at real time, 36% of wall)  process CPU 0.936 s  pool CPU 1.05 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         0.776 s    38.5%      154 calls
+    decoder.feed_segments                 0.756 s    37.5%     1229 calls
+    decoder.acquire_next                  0.565 s    28.0%     1546 calls
+    acquire_all                           0.529 s    26.3%     1546 calls
+      v5_candidates                       0.234 s    11.7%     1544 calls
+    header probe / inline decode          0.161 s     8.0%      600 calls
+      legacy candidates                   0.155 s     7.7%     1546 calls
+      shared_correlation                  0.116 s     5.8%     1544 calls
+    decoder.note_acquisition (SNR)        0.024 s     1.2%      600 calls
+    receiver.accept_results               0.009 s     0.5%      155 calls
+    receiver.accept                       0.009 s     0.4%      600 calls
+    decoder.retain_prefix                 0.006 s     0.3%      946 calls
+    decoder.discard                       0.003 s     0.1%     2102 calls
+    pool.collect                          0.001 s     0.0%      307 calls
+done

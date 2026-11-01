@@ -53,11 +53,14 @@ from numpy.typing import ArrayLike, NDArray
 from .channel import _TRAINING_BPSK_V1, ChannelEstimate, ChannelEstimationError
 from .ofdm import OfdmNumerology
 from .sync import (
+    _STEADY_SIGNIFICANCE,
     AcquisitionResult,
     SharedCorrelation,
     SyncError,
     _as_complex_samples,
+    _held,
     _is_finite_real,
+    _steady_grid,
     _validate_unit_interval,
 )
 
@@ -321,72 +324,9 @@ V5_RETAIN_SAMPLES = 640
 # Half-width of the peak search: the M128 triangle spans +-128 offsets around
 # ``stf_start``, and two v5 preambles are never closer than a fixed header.
 _PEAK_RADIUS = V5_PREAMBLE_LENGTH // 2
-# Products on each side of the 128-product metric window whose mean is taken
-# as the steady (DC or CW tone) part of the correlation.  Long against the
-# STF, so the mean is well averaged, short against the seconds a radio's DC
-# offset drifts over.
-_STEADY_SIDE = 448
-# Fewest products a side needs before its mean is trusted.
-_STEADY_MINIMUM = _METRIC_WIDTH
-# Offsets between two measurements of the steady part.
-_STEADY_STEP = 16
 # Samples around a candidate over which its local DC and steady lag-16 and
 # lag-64 products are measured for the coherent stages.
 _LOCAL_SPAN = 1024
-# Standard deviations of white-noise scatter a local steady product must
-# exceed before it is subtracted.
-_STEADY_SIGNIFICANCE = 4.0
-
-
-def _steady_mean(
-    shared: SharedCorrelation, limit: int
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Steady lag-32 product around each metric window offset.
-
-    A DC offset ``c`` puts ``|c|^2`` into every product and a CW tone a
-    constant phasor; neither averages out over 128 products, so without this
-    the normalized metric stays above threshold over the whole buffer and no
-    preamble triangle stands out.  The mean is taken separately over the
-    ``_STEADY_SIDE`` products before the window and those after it, and the
-    side with the smaller mean is used (smallest-of, as in a CFAR detector):
-    a steady interferer is on both sides, a preamble near the window only on
-    one, and must not be subtracted from the noise in front of it.
-    """
-
-    products = shared.real_cum.size
-    side = _STEADY_SIDE
-    step = _STEADY_STEP
-    # The steady part changes slowly by definition, so it is measured every
-    # ``step`` offsets and held in between: a sixteenth of the work of the
-    # full-rate metric it corrects.
-    grid = np.arange(0, limit, step)
-    before_count = np.minimum(grid, side)
-    after_count = np.minimum(products - _METRIC_WIDTH - grid, side)
-    trusted_before = before_count >= _STEADY_MINIMUM
-    trusted_after = after_count >= _STEADY_MINIMUM
-    before_scale = np.where(trusted_before, 1.0 / np.maximum(before_count, 1), 0.0)
-    after_scale = np.where(trusted_after, 1.0 / np.maximum(after_count, 1), 0.0)
-    # Each side's sum is a difference of the cumulative sum at two shifted
-    # positions; padding the cumulative sum with its end values on both sides
-    # turns every clipped position into a plain strided slice.
-    start = side + _METRIC_WIDTH
-    means = []
-    for cumulative in (shared.real_cum, shared.imag_cum):
-        z = np.concatenate(
-            (np.zeros(side + 1), cumulative, np.full(side + _METRIC_WIDTH, cumulative[-1]))
-        )
-        before = z[side : side + limit : step] - z[:limit:step]
-        after = z[start + side : start + side + limit : step] - z[start : start + limit : step]
-        means.append((before * before_scale, after * after_scale))
-    (before_real, after_real), (before_imag, after_imag) = means
-    before_power = np.where(trusted_before, before_real**2 + before_imag**2, np.inf)
-    after_power = np.where(trusted_after, after_real**2 + after_imag**2, np.inf)
-    # An untrusted side never wins the smallest-of choice; with neither side
-    # trusted both means are zero and nothing is subtracted.
-    use_before = before_power <= after_power
-    real = np.where(use_before, before_real, after_real)
-    imag = np.where(use_before, before_imag, after_imag)
-    return np.repeat(real, step)[:limit], np.repeat(imag, step)[:limit]
 
 
 class _LocalInterference:
@@ -458,13 +398,29 @@ def v5_candidates(
     values = _as_complex_samples(samples, "samples")
     if shared.sample_count != values.size:
         raise SyncError("shared correlation does not belong to these samples")
+    return _v5_candidates(values, shared, config)
+
+
+def _v5_candidates(
+    values: NDArray[np.complex64],
+    shared: SharedCorrelation,
+    config: V5SyncConfig,
+) -> tuple[V5Acquisition, ...]:
+    """:func:`v5_candidates` on finite complex64 samples ``shared`` belongs to.
+
+    :func:`~ofdm_link.phy.sync.acquire_all` has already checked both, and a
+    second finiteness pass would read the whole buffer again.
+    """
+
     limit = values.size - _required_tail(config)
     if limit <= 0 or shared.real_cum.size < _METRIC_WIDTH:
         return ()
     real, imag, raw_energy = shared.window(_METRIC_WIDTH)
-    steady_real, steady_imag = _steady_mean(shared, limit)
-    real = real[:limit] - _METRIC_WIDTH * steady_real
-    imag = imag[:limit] - _METRIC_WIDTH * steady_imag
+    steady_real, steady_imag, significant = _steady_grid(shared, limit)
+    # The steady part is held over each grid step, so every per-step
+    # quantity is computed on the grid and only then held at full rate.
+    real = real[:limit] - _held(_METRIC_WIDTH * steady_real, limit)
+    imag = imag[:limit] - _held(_METRIC_WIDTH * steady_imag, limit)
     raw_energy = raw_energy[:limit]
     numerator = real * real
     numerator += imag * imag
@@ -472,13 +428,25 @@ def v5_candidates(
     # too, so a preamble under a DC offset or a tone scores what it would
     # without it.  Where nothing steady is present the correction is the
     # small mean of white products, a few percent of the energy.
-    energy = raw_energy - _METRIC_WIDTH * np.hypot(steady_real, steady_imag)
+    steady_magnitude = np.hypot(steady_real, steady_imag)
+    energy = raw_energy - _held(_METRIC_WIDTH * steady_magnitude, limit)
     threshold = energy * energy
+    if np.any(significant):
+        # Subtracting the steady part leaves the interferer-times-noise cross
+        # terms, which add 2 |m| E' to the white-noise numerator E'^2 / W.
+        # Normalizing by E' (E' + 2 W |m|) keeps noise at the metric it has
+        # without an interferer; unnormalized, a DC or tone near the noise
+        # power held the metric above threshold everywhere, and every
+        # 320-sample neighbourhood went through the coherent stages.  Only
+        # where an interferer is significant, so a clean buffer is unchanged.
+        cross = np.where(significant, 2.0 * _METRIC_WIDTH * steady_magnitude, 0.0)
+        threshold = energy * (energy + _held(cross, limit))
     threshold *= config.detection_threshold
     eligible = numerator >= threshold
     eligible &= energy > 0.0
     eligible &= raw_energy >= config.minimum_power * _METRIC_WIDTH
-    if not np.any(eligible):
+    offsets = np.flatnonzero(eligible)
+    if not offsets.size:
         return ()
 
     # Non-maximum suppression: the largest ``|sum p|`` within +-_PEAK_RADIUS
@@ -487,14 +455,18 @@ def v5_candidates(
     # did not cancel -- yields one candidate per neighbourhood instead of
     # one for the whole stretch, and a peak is left for a later buffer only
     # while its own neighbourhood is incomplete, so no run is deferred
-    # forever however long it is.
-    score = np.where(eligible, numerator, -1.0)
+    # forever however long it is.  Only eligible offsets can win, so the
+    # search runs over those alone, in offset order (ties go to the first).
+    score = numerator[offsets]
     peaks: list[int] = []
     while True:
-        peak = int(np.argmax(score))
-        if score[peak] < 0.0:
+        best = int(np.argmax(score))
+        if score[best] < 0.0:
             break
-        score[max(0, peak - _PEAK_RADIUS) : peak + _PEAK_RADIUS + 1] = -1.0
+        peak = int(offsets[best])
+        first = int(np.searchsorted(offsets, peak - _PEAK_RADIUS, side="left"))
+        last = int(np.searchsorted(offsets, peak + _PEAK_RADIUS, side="right"))
+        score[first:last] = -1.0
         if peak + _PEAK_RADIUS < limit:
             peaks.append(peak)
     if not peaks:
@@ -555,8 +527,11 @@ def v5_candidates(
     windows = sliding_window_view(block, 128, axis=1)  # (candidates, 2*search+1, 128)
     reference = np.conj(_ltf_symbol())
     reference_power = 64.0 * float(np.mean(np.abs(_ltf_symbol()) ** 2))
-    first_corr = windows[:, :, :64] @ reference
-    second_corr = windows[:, :, 64:] @ reference
+    # The second symbol's correlation at a position is the first symbol's 64
+    # positions later, so one pass over every 64-sample window gives both.
+    symbol_corr = sliding_window_view(block, 64, axis=1) @ reference
+    first_corr = symbol_corr[:, : 2 * search + 1]
+    second_corr = symbol_corr[:, 64:]
     power = np.abs(block) ** 2
     cumulative = np.concatenate(
         (np.zeros((starts.size, 1)), np.cumsum(power, axis=1)), axis=1

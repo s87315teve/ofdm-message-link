@@ -293,3 +293,32 @@ def test_back_to_back_v5_bursts_with_the_short_guards() -> None:
     decoded = _feed(_decoder(), stream, 3000)
 
     assert [burst.body for burst in decoded] == bodies
+
+
+
+@pytest.mark.parametrize("segments", [False, True])
+def test_each_chunk_is_scanned_once_when_it_holds_no_preamble(
+    monkeypatch: pytest.MonkeyPatch, segments: bool
+) -> None:
+    # Draining again before new samples arrive rescanned the retained tail
+    # the previous drain had just judged: two acquisition passes per chunk
+    # on the single receive owner.
+    import ofdm_link.phy.streaming as streaming_module
+
+    scans: list[int] = []
+    real = streaming_module.acquire_all
+
+    def counted(samples, legacy, v5):
+        scans.append(np.asarray(samples).size)
+        return real(samples, legacy, v5)
+
+    monkeypatch.setattr(streaming_module, "acquire_all", counted)
+    rng = np.random.default_rng(3)
+    decoder = _decoder()
+    feed = decoder.feed_segments if segments else decoder.feed
+    for _ in range(4):
+        noise = 0.01 * (rng.standard_normal(4096) + 1j * rng.standard_normal(4096))
+        assert feed(noise.astype(np.complex64)) == ()
+
+    assert len(scans) == 4
+    assert scans[1:] == [V5_RETAIN_SAMPLES + 4096] * 3

@@ -1,0 +1,88 @@
+== --family legacy --mcs 4 --payload 900 --rate 300 --seconds 2 (load 4.01 2.63 2.77 6/2651 3791048)
+legacy MCS 4 900 B at 300.0/s, fast, 4 workers, load 4.01 2.63 2.77
+  stream 2.013 s  wall 0.67 s  RTF 3.004  overflows 0/154
+  owner thread CPU 0.434 s (22% of a core at real time, 65% of wall)  process CPU 0.628 s  pool CPU 1.77 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         0.639 s    31.8%      154 calls
+    decoder.feed_segments                 0.613 s    30.5%     1229 calls
+    decoder.acquire_next                  0.327 s    16.2%     1618 calls
+    header probe / inline decode          0.175 s     8.7%      600 calls
+    decoder.note_acquisition (SNR)        0.024 s     1.2%      600 calls
+    pool.submit                           0.015 s     0.7%      600 calls
+    receiver.accept_results               0.008 s     0.4%      155 calls
+    decoder.discard                       0.007 s     0.4%     1701 calls
+    receiver.accept                       0.007 s     0.4%      600 calls
+    pool.collect                          0.002 s     0.1%      754 calls
+    decoder.retain_prefix                 0.001 s     0.1%     1018 calls
+== --family legacy --mcs 4 --payload 900 --rate 500 --seconds 2 (load 4.01 2.63 2.77 6/2655 3791221)
+a 10000-sample burst does not fit a 10000-sample period at 500.0/s
+== --family legacy --mcs 4 --payload 300 --rate 300 --seconds 2 (load 4.01 2.63 2.77 3/2650 3791322)
+legacy MCS 4 300 B at 300.0/s, fast, 4 workers, load 3.93 2.64 2.77
+  stream 2.013 s  wall 0.753 s  RTF 2.674  overflows 0/154
+  owner thread CPU 0.477 s (24% of a core at real time, 63% of wall)  process CPU 0.65 s  pool CPU 1.03 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         0.723 s    35.9%      154 calls
+    decoder.feed_segments                 0.695 s    34.5%     1229 calls
+    decoder.acquire_next                  0.438 s    21.8%     2492 calls
+    header probe / inline decode          0.159 s     7.9%      600 calls
+    decoder.note_acquisition (SNR)        0.023 s     1.1%      600 calls
+    pool.submit                           0.017 s     0.9%      600 calls
+    receiver.accept_results               0.007 s     0.3%      155 calls
+    receiver.accept                       0.006 s     0.3%      600 calls
+    decoder.discard                       0.004 s     0.2%     2144 calls
+    pool.collect                          0.002 s     0.1%      754 calls
+    decoder.retain_prefix                 0.002 s     0.1%     1892 calls
+== --family legacy --mcs 4 --payload 300 --rate 500 --seconds 2 (load 3.93 2.64 2.77 5/2650 3791531)
+legacy MCS 4 300 B at 500.0/s, fast, 4 workers, load 3.93 2.64 2.77
+  stream 2.013 s  wall 1.265 s  RTF 1.591  overflows 0/154
+  owner thread CPU 0.774 s (38% of a core at real time, 61% of wall)  process CPU 1.038 s  pool CPU 1.72 s
+  frames 1000/1000  missing 0  delivered 1000
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.228 s    61.0%      154 calls
+    decoder.feed_segments                 1.182 s    58.7%     1229 calls
+    decoder.acquire_next                  0.690 s    34.2%     2513 calls
+    header probe / inline decode          0.322 s    16.0%     1005 calls
+    decoder.note_acquisition (SNR)        0.045 s     2.2%     1005 calls
+    pool.submit                           0.031 s     1.5%     1000 calls
+    decoder.discard                       0.018 s     0.9%     2758 calls
+    receiver.accept_results               0.011 s     0.5%      155 calls
+    receiver.accept                       0.010 s     0.5%     1000 calls
+    pool.collect                          0.005 s     0.2%     1154 calls
+    decoder.retain_prefix                 0.002 s     0.1%     1508 calls
+== --family legacy --mcs 4 --payload 300 --rate 800 --seconds 2 (load 3.93 2.64 2.77 8/2648 3791784)
+legacy MCS 4 300 B at 800.0/s, fast, 4 workers, load 4.09 2.69 2.79
+  stream 2.013 s  wall 1.836 s  RTF 1.096  overflows 0/154
+  owner thread CPU 1.125 s (56% of a core at real time, 61% of wall)  process CPU 1.536 s  pool CPU 2.76 s
+  frames 1600/1600  missing 0  delivered 1600
+  stages (inclusive, s per stream second):
+    receiver.feed                         1.798 s    89.3%      154 calls
+    decoder.feed_segments                 1.712 s    85.0%     1229 calls
+    decoder.acquire_next                  1.014 s    50.3%     2547 calls
+    header probe / inline decode          0.501 s    24.9%     1607 calls
+    decoder.note_acquisition (SNR)        0.071 s     3.5%     1607 calls
+    pool.submit                           0.064 s     3.2%     1600 calls
+    decoder.discard                       0.022 s     1.1%     3667 calls
+    receiver.accept_results               0.017 s     0.8%      155 calls
+    receiver.accept                       0.016 s     0.8%     1600 calls
+    pool.collect                          0.005 s     0.2%     1754 calls
+    decoder.retain_prefix                 0.001 s     0.1%      940 calls
+== --family legacy --mcs 4 --payload 300 --rate 300 --seconds 2 --mode paced (load 4.09 2.69 2.79 4/2643 3792166)
+legacy MCS 4 300 B at 300.0/s, paced, 4 workers, load 4.09 2.69 2.79
+  stream 2.013 s  wall 2.043 s  RTF 0.985  overflows 0/154
+  owner thread CPU 0.574 s (28% of a core at real time, 28% of wall)  process CPU 0.842 s  pool CPU 1.26 s
+  frames 600/600  missing 0  delivered 600
+  stages (inclusive, s per stream second):
+    receiver.feed                         0.809 s    40.2%      154 calls
+    decoder.feed_segments                 0.775 s    38.5%     1229 calls
+    decoder.acquire_next                  0.490 s    24.3%     2492 calls
+    header probe / inline decode          0.196 s     9.7%      600 calls
+    decoder.note_acquisition (SNR)        0.034 s     1.7%      600 calls
+    pool.submit                           0.018 s     0.9%      600 calls
+    receiver.accept_results               0.009 s     0.4%      155 calls
+    receiver.accept                       0.008 s     0.4%      600 calls
+    decoder.discard                       0.007 s     0.4%     2144 calls
+    pool.collect                          0.002 s     0.1%      754 calls
+    decoder.retain_prefix                 0.002 s     0.1%     1892 calls
+done
