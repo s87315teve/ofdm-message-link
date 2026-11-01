@@ -35,6 +35,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import fcntl
+import functools
 import glob
 import ipaddress
 import os
@@ -107,6 +108,9 @@ _TX_BUFFER_SAMPLES = 1 << 15
 # Longest wait for bursts already handed to the device to finish playing.
 _TX_DRAIN_LIMIT_S = 1.0
 _TUNE_TOLERANCE_HZ = 1_000.0
+# The AD9361 analog filters: RX 0.2-56 MHz, TX 1.25-40 MHz; the narrower range fits both.
+_MIN_RF_BANDWIDTH_HZ = 1_250_000.0
+_MAX_RF_BANDWIDTH_HZ = 40_000_000.0
 _TIMEOUT_MS = 3_000
 
 USB_ACCESS_HINT = (
@@ -143,6 +147,8 @@ _SIGNATURES: dict[str, tuple[Any, list[Any]]] = {
     "iio_buffer_refill": (_SSIZE, [_HANDLE]),
     "iio_buffer_push_partial": (_SSIZE, [_HANDLE, ctypes.c_size_t]),
     "iio_buffer_start": (_HANDLE, [_HANDLE]),
+    "iio_device_attr_read": (_SSIZE, [_HANDLE, _TEXT, ctypes.c_char_p, ctypes.c_size_t]),
+    "iio_device_set_kernel_buffers_count": (ctypes.c_int, [_HANDLE, ctypes.c_uint]),
 }
 _library: ctypes.CDLL | None = None
 
@@ -263,6 +269,17 @@ class IioContext:
         if size < 0:
             raise _failure(size, f"cannot set {device}/{channel}/{attr} to {value}")
 
+    def device_read(self, device: str, attr: str) -> str:
+        """Read one device attribute, such as ``ensm_mode`` on the PHY."""
+
+        text = ctypes.create_string_buffer(1024)
+        size = self._library.iio_device_attr_read(
+            self._device(device), attr.encode(), text, len(text)
+        )
+        if size < 0:
+            raise _failure(size, f"cannot read {device}/{attr}")
+        return text.value.decode()
+
     def take_overflow(self) -> bool:
         """Whether the receive path overflowed since the last call; clears the flag."""
 
@@ -276,8 +293,20 @@ class IioContext:
         self._library.iio_device_reg_write(device, _STATUS_REGISTER, _STATUS_OVERFLOW)
         return True
 
-    def open_buffer(self, samples: int, *, output: bool) -> IioBuffer:
+    def open_buffer(
+        self, samples: int, *, output: bool, kernel_buffers: int | None = None
+    ) -> IioBuffer:
+        """Create one streaming buffer; ``kernel_buffers`` sets the device's count first.
+
+        libiio keeps 4 kernel buffers per device by default.  More of them let
+        a receive stream ride out a longer stall on a shared USB bus.
+        """
+
         device = self._device(_TX_DEVICE if output else _RX_DEVICE)
+        if kernel_buffers is not None:
+            result = self._library.iio_device_set_kernel_buffers_count(device, int(kernel_buffers))
+            if result < 0:
+                raise _failure(result, f"cannot set {kernel_buffers} kernel buffers")
         return IioBuffer(self._library, device, samples, output=output)
 
     def close(self) -> None:
@@ -444,32 +473,51 @@ class PlutoSettings:
     sample_rate: int
     center_frequency: float
     gain_db: float
+    # The AD936x analog filter of this direction; None follows the sample rate.
+    rf_bandwidth: float | None = None
 
     def __post_init__(self) -> None:
         if self.sample_rate not in SUPPORTED_SAMPLE_RATES or self.sample_rate > MAX_SAMPLE_RATE:
             raise ValueError("a Pluto's sample rate must be 5 MS/s")
+        if self.rf_bandwidth is not None and not (
+            _MIN_RF_BANDWIDTH_HZ <= float(self.rf_bandwidth) <= _MAX_RF_BANDWIDTH_HZ
+        ):
+            raise ValueError(
+                f"a Pluto's analog bandwidth must be {_MIN_RF_BANDWIDTH_HZ / 1e6:g}-"
+                f"{_MAX_RF_BANDWIDTH_HZ / 1e6:g} MHz"
+            )
+
+    @property
+    def analog_bandwidth(self) -> int:
+        return round(self.sample_rate if self.rf_bandwidth is None else self.rf_bandwidth)
 
 
-def settings_for(selection: RadioSelection, *, direction: str) -> PlutoSettings:
+def settings_for(
+    selection: RadioSelection, *, direction: str, rf_bandwidth: float | None = None
+) -> PlutoSettings:
     return PlutoSettings(
         uri=selection.address,
         serial=selection.serial,
         sample_rate=int(selection.sample_rate),
         center_frequency=float(selection.center_frequency_hz),
         gain_db=selection.device_gain_db(direction),
+        rf_bandwidth=rf_bandwidth,
     )
 
 
 def _tune(context: Any, settings: PlutoSettings, *, output: bool) -> dict[str, object]:
     """Set rate, bandwidth and frequency for one direction and read them back.
 
-    Analog bandwidth follows the sample rate, as it does for a USRP here.  The
-    sample rate is one setting for both directions of an AD936x.
+    Analog bandwidth follows the sample rate, as it does for a USRP here,
+    unless the settings name one.  The sample rate is one setting for both
+    directions of an AD936x.
     """
 
     oscillator = _TX_LO if output else _RX_LO
     context.write(_PHY, "voltage0", "sampling_frequency", str(settings.sample_rate), output=output)
-    context.write(_PHY, "voltage0", "rf_bandwidth", str(settings.sample_rate), output=output)
+    context.write(
+        _PHY, "voltage0", "rf_bandwidth", str(settings.analog_bandwidth), output=output
+    )
     context.write(
         _PHY, oscillator, "frequency", str(round(settings.center_frequency)), output=True
     )
@@ -505,6 +553,293 @@ def _set_gain(context: Any, gain_db: float, *, output: bool) -> float:
         return _number(context.read(_PHY, "voltage0", "hardwaregain", output=output))
     except OSError as error:
         raise TransportError(f"the Pluto rejected {gain_db:g} dB: {error}") from error
+
+
+# --------------------------------------------------------------------------
+# one context for both directions
+# --------------------------------------------------------------------------
+
+DEFAULT_RX_KERNEL_BUFFERS = 4
+
+
+class SharedPlutoContext:
+    """One libiio context for both directions of one Pluto, shared by reference count.
+
+    Over USB a Pluto opens in one context only: a second context on the same
+    ``usb:`` URI fails with EBUSY (measured in M0).  A node that transmits and
+    receives at once therefore hands its :class:`PlutoSampleSink` and
+    :class:`PlutoSampleSource` a lease on this one context through
+    :meth:`factory`.  The transports stay unchanged.
+
+    Attribute and register calls of every lease go through one lock: libiio
+    0.x does not promise that two threads can drive the control pipe of one
+    context at once.  Buffer refill and push are not locked; they use their
+    own USB pipes, and ctypes releases the GIL while they block.
+
+    The sample rate is one AD936x setting for both directions, and rewriting
+    it can re-run the clock chain under a running stream.  :meth:`configure`
+    writes it once; a lease that writes the same rate again (``_tune`` does)
+    is answered without touching the device, and a different rate is refused
+    while any buffer is open.
+    """
+
+    def __init__(
+        self,
+        uri: str,
+        serial: str,
+        *,
+        open_context: ContextFactory = IioContext,
+        rx_kernel_buffers: int | None = DEFAULT_RX_KERNEL_BUFFERS,
+    ) -> None:
+        if rx_kernel_buffers is not None and not 1 <= int(rx_kernel_buffers) <= 64:
+            raise ValueError("rx_kernel_buffers must be between 1 and 64")
+        self._uri = uri
+        self._serial = serial
+        self._open_context = open_context
+        self._rx_kernel_buffers = rx_kernel_buffers
+        self._attr_lock = threading.RLock()
+        self._context: Any | None = None
+        self._leases = 0
+        self._held = False
+        self._open_buffers = 0
+        self._sample_rate: int | None = None
+
+    @property
+    def uri(self) -> str:
+        return self._uri
+
+    @property
+    def serial(self) -> str:
+        return self._serial
+
+    @property
+    def leases(self) -> int:
+        return self._leases
+
+    @property
+    def is_open(self) -> bool:
+        return self._context is not None
+
+    @property
+    def sample_rate(self) -> int | None:
+        return self._sample_rate
+
+    def _acquire(self) -> Any:
+        with self._attr_lock:
+            if self._context is None:
+                self._context = _open(self._uri, self._serial, self._open_context)
+            return self._context
+
+    def _release_if_unused(self) -> None:
+        with self._attr_lock:
+            if self._context is not None and self._leases == 0 and not self._held:
+                context, self._context = self._context, None
+                self._sample_rate = None
+                context.close()
+
+    def factory(self) -> ContextFactory:
+        """A context factory for one transport: each call takes one lease."""
+
+        return functools.partial(_lease_factory, self)
+
+    def lease(self, uri: str | None = None) -> _Lease:
+        if uri is not None and uri != self._uri:
+            raise OSError(f"this shared context is {self._uri}, not {uri}")
+        with self._attr_lock:
+            context = self._acquire()
+            self._leases += 1
+        return _Lease(self, context)
+
+    def _return(self) -> None:
+        with self._attr_lock:
+            self._leases -= 1
+            self._release_if_unused()
+
+    def configure(self, sample_rate: int) -> None:
+        """Open the context if needed and set the shared sample rate once.
+
+        Call before any buffer exists.  Holds the context open until
+        :meth:`close`, so the transports can come and go under it.
+        """
+
+        rate = int(sample_rate)
+        with self._attr_lock:
+            if self._open_buffers:
+                raise OSError("the sample rate cannot change while a buffer is open")
+            context = self._acquire()
+            self._held = True
+            try:
+                context.write(_PHY, "voltage0", "sampling_frequency", str(rate), output=False)
+                context.write(_PHY, "voltage0", "sampling_frequency", str(rate), output=True)
+                readback = _number(
+                    context.read(_PHY, "voltage0", "sampling_frequency", output=False)
+                )
+            except OSError:
+                self._held = False
+                self._release_if_unused()
+                raise
+            if readback != rate:
+                raise TransportError(
+                    f"the Pluto runs at {readback / 1e6:g} MS/s instead of {rate / 1e6:g} MS/s"
+                )
+            self._sample_rate = rate
+
+    def write_attr(
+        self, device: str, channel: str, attr: str, value: str, *, output: bool = False
+    ) -> None:
+        """One attribute write through the lock, for a caller that holds no lease."""
+
+        with self._attr_lock:
+            if self._context is None:
+                raise OSError("the shared context is not open")
+            self._write(self._context, device, channel, attr, value, output=output)
+
+    def read_attr(self, device: str, channel: str, attr: str, *, output: bool = False) -> str:
+        with self._attr_lock:
+            if self._context is None:
+                raise OSError("the shared context is not open")
+            return self._context.read(device, channel, attr, output=output)
+
+    def _write(self, context, device, channel, attr, value, *, output) -> None:
+        if device == _PHY and channel == "voltage0" and attr == "sampling_frequency":
+            rate = round(float(value))
+            if rate == self._sample_rate:
+                return  # already set for both directions; do not re-run the clock chain
+            if self._open_buffers:
+                raise OSError(
+                    f"cannot change the sample rate to {rate} while the other direction streams"
+                )
+            context.write(device, channel, attr, value, output=output)
+            self._sample_rate = rate
+            return
+        context.write(device, channel, attr, value, output=output)
+
+    def _device_read(self, device: str, attr: str) -> str | None:
+        reader = getattr(self._context, "device_read", None)
+        if reader is None:
+            return None
+        try:
+            return reader(device, attr)
+        except OSError:
+            return None
+
+    def snapshot(self) -> dict[str, object]:
+        """Mode, path rates and RSSI of the device, plus the lease count."""
+
+        result: dict[str, object] = {
+            "uri": self._uri,
+            "serial": self._serial,
+            "leases": self._leases,
+            "open_buffers": self._open_buffers,
+            "sample_rate_sps": self._sample_rate,
+            "rx_kernel_buffers": self._rx_kernel_buffers,
+        }
+        with self._attr_lock:
+            if self._context is None:
+                return result
+            result["ensm_mode"] = self._device_read(_PHY, "ensm_mode")
+            result["rx_path_rates"] = self._device_read(_PHY, "rx_path_rates")
+            result["tx_path_rates"] = self._device_read(_PHY, "tx_path_rates")
+            try:
+                result["rssi_db"] = _number(self._context.read(_PHY, "voltage0", "rssi"))
+            except (OSError, ValueError, IndexError, KeyError):
+                result["rssi_db"] = None
+        return result
+
+    def close(self) -> None:
+        """Drop the hold :meth:`configure` took; the last lease then destroys the context."""
+
+        with self._attr_lock:
+            self._held = False
+            self._release_if_unused()
+
+    def __enter__(self) -> SharedPlutoContext:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+
+def _lease_factory(shared: SharedPlutoContext, uri: str) -> _Lease:
+    return shared.lease(uri)
+
+
+class _LeasedBuffer:
+    """A buffer on the shared context; closing it is counted, its streaming is not locked."""
+
+    def __init__(self, shared: SharedPlutoContext, buffer: Any) -> None:
+        self._shared = shared
+        self._buffer = buffer
+        self._closed = False
+
+    def refill(self):
+        return self._buffer.refill()
+
+    def push(self, interleaved) -> None:
+        self._buffer.push(interleaved)
+
+    def close(self) -> None:
+        with self._shared._attr_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._shared._open_buffers -= 1
+        self._buffer.close()
+
+
+class _Lease:
+    """One transport's view of a :class:`SharedPlutoContext`."""
+
+    def __init__(self, shared: SharedPlutoContext, context: Any) -> None:
+        self._shared = shared
+        self._context = context
+        self._closed = False
+
+    def _live(self) -> Any:
+        if self._closed:
+            raise OSError("this lease on the shared Pluto context is closed")
+        return self._context
+
+    def attr(self, name: str) -> str:
+        with self._shared._attr_lock:
+            return self._live().attr(name)
+
+    def read(self, device: str, channel: str, attr: str, *, output: bool = False) -> str:
+        with self._shared._attr_lock:
+            return self._live().read(device, channel, attr, output=output)
+
+    def write(
+        self, device: str, channel: str, attr: str, value: str, *, output: bool = False
+    ) -> None:
+        with self._shared._attr_lock:
+            self._shared._write(self._live(), device, channel, attr, value, output=output)
+
+    def device_read(self, device: str, attr: str) -> str:
+        with self._shared._attr_lock:
+            return self._live().device_read(device, attr)
+
+    def take_overflow(self) -> bool:
+        with self._shared._attr_lock:
+            return bool(self._live().take_overflow())
+
+    def open_buffer(self, samples: int, *, output: bool) -> _LeasedBuffer:
+        shared = self._shared
+        with shared._attr_lock:
+            context = self._live()
+            if not output and shared._rx_kernel_buffers is not None:
+                buffer = context.open_buffer(
+                    samples, output=False, kernel_buffers=shared._rx_kernel_buffers
+                )
+            else:
+                buffer = context.open_buffer(samples, output=output)
+            shared._open_buffers += 1
+        return _LeasedBuffer(shared, buffer)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._shared._return()
 
 
 # --------------------------------------------------------------------------
