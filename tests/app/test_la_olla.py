@@ -3,7 +3,7 @@ import math
 from collections import Counter
 
 import pytest
-from la_fakes import LADDER, FakeLink, context, loss_probability, report
+from la_fakes import LADDER, BurstLink, FakeLink, context, loss_probability, report
 
 from ofdm_message_link.la.api import LinkAdaptation
 from ofdm_message_link.la.olla import OllaLinkAdaptation
@@ -311,6 +311,10 @@ def test_bad_parameters_are_refused():
         OllaLinkAdaptation(context(), target_loss=0.0)
     with pytest.raises(ValueError):
         OllaLinkAdaptation(context(), offset_min_db=4.0, offset_max_db=3.0)
+    with pytest.raises(ValueError):
+        OllaLinkAdaptation(context(), snr_drop_db=0.0)
+    with pytest.raises(ValueError):
+        OllaLinkAdaptation(context(), snr_drop_reports=0)
 
 
 # -- peer restart (review finding 1) ------------------------------------------
@@ -471,3 +475,82 @@ def test_an_idle_link_with_empty_keepalives_is_not_dead():
         _feed(la, step + 1, t, snr=None, preambles=0)
         assert la.decide(t).reason != "stale"
     assert la.mcs_index == 13
+
+
+# -- SNR filter restart on a deep drop ---------------------------------------------
+
+
+def test_two_reports_far_below_the_filter_restart_it_and_one_does_not():
+    la = OllaLinkAdaptation(context(initial=17), outer_loop=False)
+    t = 0.0
+    for seq in range(1, 51):
+        t += 0.02
+        _feed(la, seq, t, snr=23.0)
+        la.decide(t)
+    _feed(la, 51, t + 0.02, snr=10.0)  # one outlier: filtered as usual
+    assert la.snapshot()["snr_f_db"] > 20.0
+    _feed(la, 52, t + 0.04, snr=23.0)
+    _feed(la, 53, t + 0.06, snr=10.0)
+    assert la.snapshot()["snr_drops"] == 0
+    _feed(la, 54, t + 0.08, snr=10.5)  # the second in a row: restart at the report
+    snap = la.snapshot()
+    assert snap["snr_f_db"] == pytest.approx(10.5) and snap["snr_drops"] == 1
+    assert la.decide(t + 0.08).mcs_index == 9  # 10.5 dB clears 9.0, not 11.0
+
+
+def test_without_the_restart_the_filter_takes_a_quarter_second_to_follow():
+    la = OllaLinkAdaptation(context(initial=17), outer_loop=False, snr_drop_db=None)
+    t = 0.0
+    for seq in range(1, 51):
+        t += 0.02
+        _feed(la, seq, t, snr=23.0)
+    for seq in range(51, 61):
+        t += 0.02
+        _feed(la, seq, t, snr=10.0)
+        if seq <= 58:  # 160 ms after the drop
+            assert la.snapshot()["snr_f_db"] > 11.0
+    assert la.snapshot()["snr_drops"] == 0
+
+
+# -- the M3 hardware link, offline (la_fakes.BurstLink) -------------------------------
+
+
+def _fixed_at_minus_20_db(mcs, seed=1):
+    return BurstLink(None, lambda t: 9.8, seed=seed, fixed_mcs=mcs).run(30).window(5, 30)
+
+
+def test_on_the_m3_link_at_minus_20_db_loss_meets_the_target_above_the_best_fixed_mcs():
+    # Fixed 9 is the fastest rung under 1 % there (about 0.4 %); fixed 10 loses ~4 %.
+    fixed = {mcs: _fixed_at_minus_20_db(mcs) for mcs in (8, 9, 10)}
+    assert fixed[9][0] <= 0.01 < fixed[10][0]
+    best = max(goodput for loss, _, goodput in fixed.values() if loss <= 0.01)
+    goodputs = []
+    for seed in range(1, 7):
+        link = BurstLink(OllaLinkAdaptation(context(initial=8)), lambda t: 9.8, seed=seed)
+        loss, _, goodput = link.run(60).window(10, 60)
+        assert 0.005 <= loss <= 0.015, (seed, loss)
+        assert goodput >= 0.95 * best, (seed, goodput, best)  # a run that visits 8 a lot
+        goodputs.append(goodput)
+    assert sum(goodputs) / len(goodputs) >= best, (goodputs, best)
+
+
+def _gain_step(seed, **old):
+    """M3's -5 -> -20 dB step: 23.2 dB, then 9.8 dB from 10 s on."""
+
+    la = OllaLinkAdaptation(context(initial=8), **({"snr_drop_db": None} if old else {}))
+    link = BurstLink(la, lambda t: 23.2 if t < 10 else 9.8, seed=seed, **old).run(30)
+    return link.window(10, 11.5)[1], link.window(11.5, 30)[0]
+
+
+def test_a_gain_step_down_costs_well_under_half_the_bursts_it_did():
+    # Before: the reporter kept quiet until its 200 ms keepalive while every
+    # burst failed, and the SNR filter took 0.25 s more: ~184 subframes lost
+    # (188-209 on the hardware), 2.5 points of a 30 s segment's loss.
+    seeds = (1, 2, 3, 4)
+    before = [_gain_step(seed, hide_fcs_failures=True) for seed in seeds]
+    after = [_gain_step(seed) for seed in seeds]
+    assert sum(lost for lost, _ in before) / len(seeds) > 150
+    assert sum(lost for lost, _ in after) / len(seeds) < 100
+    for (lost_before, _), (lost_after, loss_after) in zip(before, after, strict=True):
+        assert lost_after < lost_before
+        assert 0.005 <= loss_after <= 0.015  # the loss after the step is unchanged

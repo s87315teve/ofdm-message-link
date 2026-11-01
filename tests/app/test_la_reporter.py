@@ -67,6 +67,28 @@ def test_control_only_preambles_never_make_a_report_due():
     assert report.preambles == 18 and report.snr_mean_db == pytest.approx(14.0)
 
 
+def test_a_failed_psdu_makes_a_report_due_like_a_data_burst():
+    # The peer's bursts fail whole: preambles and FCS failures, no DATA burst.
+    reporter = DefaultReporter(CONTEXT)
+    reporter.on_burst(burst(0.0))
+    reporter.build(0.0)
+    reporter.on_rx_health(0.005, HEALTH)  # the first total is only a baseline
+    reporter.on_preambles(0.006, [9.5], control_only=True)
+    assert not reporter.due(0.030)
+    reporter.on_preambles(0.031, [9.8], control_only=True)
+    reporter.on_rx_health(0.031, RxHealth(overflow_total=3, header_fail_total=4,
+                                          fcs_fail_total=6, clipping_seen=False,
+                                          decode_backlog=False))
+    assert reporter.due(0.031)
+    report = reporter.build(0.031)
+    assert report.snr_mean_db == pytest.approx(9.65) and report.psdu_fcs_fail_total == 6
+    reporter.on_rx_health(0.040, RxHealth(overflow_total=3, header_fail_total=4,
+                                          fcs_fail_total=6, clipping_seen=False,
+                                          decode_backlog=False))
+    assert not reporter.due(0.060)  # no new failure: back to the keepalive
+    assert reporter.due(0.231)
+
+
 def test_window_statistics_and_reset():
     reporter = DefaultReporter(CONTEXT)
     reporter.on_preambles(0.0, [10.0, 12.0], control_only=False)
