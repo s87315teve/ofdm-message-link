@@ -101,7 +101,7 @@ import socket
 socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b"hi", ("127.0.0.1", 52001))
 ```
 
-一個 UDP datagram 就是一則 message。大於 968 bytes 的 message 會自動切成多個 burst、在接收端組回來。
+一個 UDP datagram 就是一則 message。大於 968 bytes 的 message 會自動切成多個 fragment、在接收端組回來。
 
 ### 第三步：傳影像
 
@@ -130,8 +130,8 @@ ffplay 的視窗會出現 webcam 的畫面。沒有 webcam 的話，把 `-f v4l2
 **現在可以動手試：**
 
 1. 把接收端的 `--snr-db` 降到 8 再重開，看畫面什麼時候開始破、`Link` light 怎麼變色。
-2. 在 TX 視窗的 `MCS for next message` 選單換成 MCS 4（16QAM），同樣的 SNR 下比較畫面。
-3. MCS 4 能承載比較高的 bitrate：把 ffmpeg 的 `750k`／`375k`／`832k` 換成 `1300k`／`650k`／`1440k`
+2. 在 TX 視窗的 `MCS for next message` 選單換成 MCS 12（16QAM 1/2），同樣的 SNR 下比較畫面。
+3. MCS 10 以上能承載比較高的 bitrate：把 ffmpeg 的 `750k`／`375k`／`832k` 換成 `1300k`／`650k`／`1440k`
    （需要較高的 SNR）。
 
 每個參數為什麼這樣設、怎麼選 MCS 與 bitrate、一鍵啟動的腳本，見

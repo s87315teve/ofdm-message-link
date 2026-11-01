@@ -90,8 +90,9 @@ def run(variant, mp, snrs, trials):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=1000)
+    ap.add_argument("--quick", action="store_true")
     a = ap.parse_args()
-    snrs = [x * 0.5 for x in range(-24, 13)]
+    snrs = [x * 0.5 for x in range(-10, 17)] if not a.quick else [-4.0, 0.0]
     out = {}
     for mp in (False, True):
         for v in ("v5_sig", "v5_nointerleave", "legacy_nolist", "legacy_list"):

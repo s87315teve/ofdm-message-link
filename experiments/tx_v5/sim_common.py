@@ -104,3 +104,49 @@ def save(name, obj):
     RESULTS.mkdir(parents=True, exist_ok=True)
     with open(RESULTS / name, "w") as h:
         json.dump(obj, h, indent=1)
+
+
+def sweep_curve(make, cfg, start, mp, trials=300, topup=1000, step=0.5, max_span=12.0,
+                seed=0, label="", stop_zero=2):
+    """Loss vs SNR for ``make(rng) -> (tx, expect_body, expect_frame)`` decoded with ``cfg``.
+
+    Starts at ``start`` dB, steps up by ``step`` until ``stop_zero`` consecutive points have
+    zero losses.  Points with 0 < loss <= 5% get topped up to ``topup`` trials.  The noise
+    stream depends only on (seed, snr, multipath) so variants with the same ``make`` are
+    paired trial by trial.  Returns rows with per-stage loss fractions.
+    """
+    rows, zeros, snr = [], 0, start
+    while snr <= start + max_span and zeros < stop_zero:
+        rng = np.random.default_rng(seed * 100003 + int(round(snr * 100)) * 31 + 7 * mp)
+        counts = {"ok": 0, "acq": 0, "hdr": 0, "pay": 0}
+        n = 0
+        for target in (trials, topup):
+            while n < target:
+                tx, body, frame = make(rng)
+                rx = channel(tx, snr, rng, mp)
+                counts[decode_outcome(rx, cfg, body, frame)] += 1
+                n += 1
+            loss = 1 - counts["ok"] / n
+            if not (0 < loss <= 0.05):
+                break
+        row = {"snr": round(snr, 2), "n": n, "loss": 1 - counts["ok"] / n,
+               **{k: counts[k] / n for k in ("acq", "hdr", "pay")}}
+        rows.append(row)
+        print(label, "mp" if mp else "awgn", row, flush=True)
+        zeros = zeros + 1 if row["loss"] == 0 else 0
+        snr += step
+    return rows
+
+
+def v5_maker(mcs, body=V5_BODY):
+    def make(rng):
+        p, tx = v5_burst(rng, mcs, body)
+        return tx, p, None
+    return make
+
+
+def legacy_maker(mcs):
+    def make(rng):
+        f, tx = legacy_burst(rng, mcs, seq=int(rng.integers(0, 65535)))
+        return tx, None, f
+    return make

@@ -13,6 +13,9 @@
 > 只算解出來的 burst，而且比真實 SNR 低 3–5 dB。8.7 之後的 SNR 由每個 burst 的 preamble 在資料 carrier
 > 的頻帶內估計（見 [2.6](02-gui.md#26-統計數字的意義與限制)）。8.1–8.6 當時沒有錄原始 samples，無法用新定義重算，
 > 所以舊的數字保留原樣；**兩種定義的數字不要直接比較。**
+>
+> **8.8 的 v5 burst 用 LTF 估 SNR。** 定義相同（資料 carrier 頻帶內的熱雜訊 SNR），但同一個 TX gain 下
+> v5 的讀數比 legacy 高約 3 dB。這是真的發射功率差，不是估計的偏差，原因見 8.8。
 
 這些都是 demo 等級的觀察：單一擺放位置、時間短、沒有重複多次。不能當作 throughput 或 reliability
 的正式結論。
@@ -348,7 +351,107 @@ coherent 檢查。在邊緣的錄音上，0.25／0.30 讓 MCS 0 在 −20 dB 的
   解得出來（`results/cpu_bench.txt`）。門檻附近 4 個 decode worker 要有空的 CPU 可用，見上面的負載說明。
 - 每個設定只跑一次錄音、即時 run 各兩次，單一擺放位置。
 
-## 8.8 沒有實測過的東西
+## 8.8 Wire v5：Pluto → Pluto，2.45 GHz
+
+`tx-v5` 分支**改了 wire format**：TX 只送 wire v5，RX 同時收 v5 與 v1–v4。改了六件事：
+
+1. Preamble 改成 802.11a 的 L-STF + L-LTF。兩種 preamble 共用一次 acquisition 掃描。
+2. Header 改成 SIG：802.11a SIGNAL 的作法（K=7 convolutional code、BPSK、CRC-16），不再用 ML list。
+3. 802.11 的 scrambler（x⁷+x⁴+1），每個 burst 換一個 seed。
+4. Turbo code 照 TS 36.212 做 rate matching，任何 code rate 都剛好填滿整數個 OFDM symbol。
+   新的 MCS 8–17（QPSK 1/3 到 64QAM 3/4）。
+5. 802.11n 式的 A-MPDU：排隊中的多個 datagram 共用一個 burst。
+6. Guard 從 256／256 改成 16／64 個 zero sample。
+
+做法、每一項的依據、所有腳本與原始數據見 [`experiments/tx_v5/`](../experiments/tx_v5/README.md)。
+
+同一組 Pluto、同一個擺放位置（與 8.7 相同），預設 profile、5 MS/s、RX gain 15 dB。2026-11-01 量測。
+Baseline 是 improve-rx（8.7 的新 RX），在 v5 之前約 1–1.5 小時量。
+
+### 錄音：每個 MCS 遺失 < 1% 的最低 TX gain
+
+TX 每點送 400 個 900-byte burst（每秒 100 個，一個 burst 一個 datagram），RX 錄原始 IQ，之後用修完的
+RX 離線解。全部錄音 0 RX overflow。SNR 是該點的中位數。
+
+| MCS | 格式 | 最低 TX gain | SNR | GUI 門檻 |
+|---:|---|---:|---:|---:|
+| 0（baseline） | QPSK Turbo 1/3 | −18.75 dB | 9.2 dB（legacy） | 9.0 dB |
+| 4（baseline） | 16QAM Turbo 1/3 | −12.5 dB | 13.7 dB（legacy） | 15.0 dB |
+| **8** | QPSK 1/3 | **−25 dB** | 6.7 dB | 7.5 dB |
+| 9 | QPSK 1/2 | −23.75 dB | 7.9 dB | 9.0 dB |
+| 10 | QPSK 2/3 | −21.25 dB | 10.2 dB | 11.0 dB |
+| **12** | 16QAM 1/2 | **−18.75 dB** | 13.0 dB | 14.0 dB |
+| 13 | 16QAM 2/3 | −17.5 dB | 14.3 dB | 15.5 dB |
+| 14 | 16QAM 3/4 | −15 dB | 16.7 dB | 17.5 dB |
+| 15 | 64QAM 1/2 | −16.25 dB | 15.7 dB | 16.5 dB |
+| 16 | 64QAM 2/3 | −11.25 dB | 20.2 dB | 21.0 dB |
+| 17 | 64QAM 3/4 | −11.25 dB | 20.8 dB | 22.0 dB |
+
+（MCS 11 在 TX 選單裡隱藏，沒有量。每點的完整數據在 `experiments/tx_v5/results/v5/summary.md`。）
+
+- **MCS 8 比 baseline MCS 0 少發 6.25 dB**，code rate 一樣是 1/3。量測間距在邊緣是 1.25 dB。
+- **這 6.25 dB 約有一半是發射功率。** Pluto sink 把每個 burst 的 peak 縮放到 0.7。v5 的 PAPR 比較低
+  （MCS 8 9.9 dB，legacy QPSK 12.9 dB），所以縮放後的平均功率多 2.95 dB（預測）；同一個 TX gain 下
+  RX 量到的 SNR 也高 3.17 dB（實測）。另一半是 coding 與 RX：**同樣的 SNR，v5 MCS 8 比 MCS 0 少需要
+  約 3 dB**（6.7 dB 對約 9.5 dB，後者是 baseline 的 9.2 dB 換算到 v5 的刻度）。
+- 16QAM 1/2（MCS 12）也比 baseline MCS 4（16QAM 1/3）少發 6.25 dB，code rate 卻高了一半。
+- **MCS 8 的邊緣不再是 preamble。** 遺失 1–20% 的區間約三分之二是 payload；baseline MCS 0 在
+  −22.5 dB 的 57 個遺失裡有 54 個是 preamble 沒抓到。SIG 失敗佔遺失不到 3%。
+- **三個 64QAM 都開放。** 這組 Pluto 最高約 29.7 dB SNR，三個 64QAM 遺失 < 1% 的 SNR 都低它 6 dB 以上。
+- **MCS 15 比 MCS 14 好。** 同樣 3 bit/symbol，64QAM 1/2 少需要 1 dB。
+- **舊的錄音在新 RX 上結果完全相同**：baseline 的 27 份 legacy 錄音，每一點的遺失與 SNR 都與
+  improve-rx 的 RX 一樣。
+
+GUI 的門檻規則與 8.7 相同：遺失 < 1% 的最低 SNR + 1 dB，四捨五入到 0.5 dB。v5 的 SNR 由兩個 LTF
+symbol 估計，比 legacy 的讀數高約 3 dB，所以 **v5 的門檻和 MCS 0／4 的門檻不能直接比**，要比就用
+TX gain。
+
+### 其他量測
+
+| 項目 | 結果 |
+|---|---|
+| Guard（MCS 8，TX −26.25 dB，每組 2000 個） | (16,64) 3.60%、(0,32) 3.55%、(256,256) 4.20%；(16,64) 再跑一次 5.40%。兩次相同設定差 1.8%，比 guard 的差別大 |
+| Scrambler（MCS 8，TX −23.75 dB，每組 1000 個） | 全零 payload 沒有 scrambler：PAPR 17.0 dB、平均功率少約 7 dB、遺失 99.8%。有 scrambler：全零 0.20%、隨機 0.10% |
+| 兩個 LTF symbol 平均、channel smoothing | 各自值 1–1.5 dB（關掉任何一個，MCS 8 在 −25 dB 從 0.25% 變成 4.0% 或 1.0%） |
+| `phy.rx.llr_noise_source` | 三個選項結果相同（一個 burst 只有一個 noise variance，max-log Turbo 對共同的倍率不敏感） |
+| 空中雜訊（TX 關閉 90 秒） | v5 STF 分數最高 0.084、LTF 分數最高 0.067（門檻 0.20／0.25），0 次 false acquisition |
+
+### 真的 app，即時收發
+
+`goodput_search.py`：900-byte datagram，遺失 < 0.1% 而且送資料期間 0 RX overflow 的最高速率，
+每次 30 秒，aggregation 開。下表的 v5 是**兩個修正之後**的值（第一輪的數字在表後）。
+
+| | TX −5 dB | TX −15 dB |
+|---|---:|---:|
+| Baseline（improve-rx），最好的 MCS | 2.339 Mbit/s（MCS 4） | 1.539 Mbit/s（MCS 0） |
+| v5，最好的 MCS（修正之後） | **9.295 Mbit/s**（MCS 17，+297%） | **5.063 Mbit/s**（MCS 12，+229%） |
+| v5，最好的 MCS（第一輪，修正前） | 7.128 Mbit/s（MCS 14，+205%） | 4.738 Mbit/s（MCS 12，+208%） |
+| Baseline，300-byte datagram | 1.170 Mbit/s（MCS 4） | 0.952 Mbit/s（MCS 0） |
+| v5，300-byte datagram（修正之後） | 6.164 Mbit/s（MCS 14） | 沒有重跑（第一輪 MCS 12：4.252 Mbit/s） |
+| v5，300-byte datagram（第一輪，修正前） | 0.534 Mbit/s（MCS 14，比 baseline 差） | 4.252 Mbit/s（MCS 12） |
+
+- 第一輪到修正之後（900 B，−5 dB）：MCS 16 1.641 → 5.589、MCS 17 1.512 → 9.295、MCS 14 7.128 → 7.217 Mbit/s；−15 dB MCS 12 4.738 → 5.063；300 B MCS 14 −5 dB 0.534 → 6.164。
+- 第一輪的兩個弱點：300 B 比 baseline 差（TX 一個 datagram 一個 burst，burst 率停在每秒 222–300 個，RX 每個 burst 的成本使它 overflow），64QAM 在約 210–230 datagram/s 就 RX overflow。
+- **修正 1：RX 的 acquisition 成本。** 空 stream 加 DC 0.003，接收執行緒從 556% 降到 24% 個 core；v5 MCS 14 300 B 每秒 500 個短 burst，RTF 從 0.85 升到 1.21。**目標 1.5 沒有完全達到。**
+  （`experiments/tx_v5/results/rx_rate/summary.txt`）
+- **修正 2：TX 最小 burst 間隔。** `mac.aggregation.min_burst_interval_ms` 預設 4 ms（最多每秒 250 個 burst；`--min-burst-interval-ms`）。理由：Pluto 推送 0.413 ms + 0.194 µs/sample，加上 RX 每個 burst 的成本。
+  代價是負載高時延遲多一點（見下）。
+- Aggregation 開與關（900 B，第一輪）：−5 dB MCS 14 開 7.128、關 1.971 Mbit/s（3.6 倍）；−15 dB MCS 12 開 4.738、關 2.268（2.1 倍）。關掉時被 RX 每個 burst 的成本限制（約每秒 280–300 個 burst）。修正之後沒有重跑。
+- 延遲（收發同機，p50／p99，含 TX 排隊）：第一輪最好的點 MCS 12–14 為 55／121 到 65／151 ms；低 rate 的 MCS 8、9 貼著 TX 容量，p50 約 440–470 ms。修正之後 67／90 到 192／250 ms，900 B 的 MCS 14（192／250）與 MCS 12（161／281）比修正前高，因為在容量邊緣排隊與 4 ms 的最小間隔。Baseline 的延遲沒有重量。
+- 送資料期間的 RX overflow：兩輪每個最好的點都是 0；第一輪的 64QAM 在約 210–230/s 以上會 overflow，修正之後所有 run（含失敗的）都是 0。
+- 即時的 legacy TX（improve-rx）→ 新 RX（30 秒×2）：MCS 0、−15 dB、200/s 遺失 0.050%／0.000%；MCS 4、−5 dB、300/s 0.078%／0.011%；0 overflow；與 baseline RX 在附近速率的結果在雜訊內相同。
+
+### 這次沒有量到的
+
+- B210、N210、USRP-2901 送或收 v5。
+- MCS 11；64QAM 在比 29.7 dB 更高的 SNR。
+- 模擬的 S1、S3、S4、S7、S8（acquisition、channel estimate、rate matching、SNR 估計、CPU）沒有執行（CPU 留給硬體量測）；
+  同樣的問題由上面的實機量測回答。S2（SIG header：v5 SIG FER 1% 在 0.95 dB AWGN／1.27 dB multipath，legacy 加 ML list 3.0／3.38 dB）與 S5（scrambler）有模擬結果。
+  見 [`experiments/tx_v5/`](../experiments/tx_v5/README.md#49-模擬)。
+- 每點只錄一次、單一擺放位置；邊緣的點有約 2% 的 run-to-run 漂移。
+- 修正之後的 goodput 只重跑 5 個點，每點一次搜尋；300 B MCS 12 −15 dB 與 aggregation 關沒有重跑；MCS 16（5.589）低於 MCS 17（9.295）沒有重查。
+
+## 8.9 沒有實測過的東西
 
 誠實列出來，免得被誤認為已經驗證：
 
