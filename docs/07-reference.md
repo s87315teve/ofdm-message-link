@@ -34,7 +34,7 @@
 | `--aggregation {on,off}` | `on`：radio 可以接下一個 burst 時，把 queue 裡的 datagram 放進同一個 burst（在下面的上限內）。`off`：一個 burst 一個 datagram，供 A/B 量測。預設取 `mac.aggregation.enabled`（`on`） |
 | `--aggregation-max-subframes N` | 一個 burst 最多幾個 datagram，1–64，預設取設定檔（16） |
 | `--aggregation-max-wait-ms MS` | 還有空間的 burst 最多等 MS 毫秒（從最早的 message 到達算起），讓更多 datagram 一起走。0–1000，預設 0：不等，負載低時不增加延遲 |
-| `--min-burst-interval-ms MS` | 兩個 burst 交給 radio 之間至少隔多久，0–50，預設取設定檔（4 ms，最多每秒 250 個 burst）；等的時候繼續收 datagram，讓下一個 burst 帶比較多。閒置之後的第一個 burst 不多等，滿的 burst 不會被留。0 關閉。實際等待是它與 `--aggregation-max-wait-ms` 較大的那個 |
+| `--min-burst-interval-ms MS` | 兩個 burst 開始交給 radio 的時間至少隔多久（start 到 start：比間隔長的 burst 後面不會多等），0–50，預設取設定檔（4 ms，最多每秒 250 個 burst）；等的時候繼續收 datagram，讓下一個 burst 帶比較多。閒置之後的第一個 burst 不多等，滿的 burst 不會被留。0 關閉。實際等待是它與 `--aggregation-max-wait-ms` 較大的那個 |
 | `--max-burst-airtime-ms MS` | 聚合後的 burst 最長多久（含 guard），大於 0、最大 100，預設取設定檔（8 ms）。不論設多少，聚合也會在 80 000 samples 停止；超過上限的單一 datagram 仍然單獨送出 |
 | `--enable-rf` / `--acknowledgement` | RF 發射授權，`--transport uhd` 與 `--transport pluto` 必要。Acknowledgement 的文字是 `I acknowledge that this process will transmit RF`，必須一字不差 |
 
@@ -108,7 +108,7 @@
 |---|---|---|
 | `enabled` | `true` | `false`：一個 burst 一個 datagram |
 | `max_wait_ms` | 0.0 | 還有空間的 burst 最多等多久 |
-| `min_burst_interval_ms` | 4.0 | burst 與 burst 之間至少隔多久（0–50，0 關閉）。短 datagram 時避免每個 datagram 一個 burst：Pluto 推送一次要 0.413 ms + 0.194 µs/sample，RX 每個 burst 也有成本。`AggregationLimits` 本身的預設是 0，直接呼叫的程式碼行為不變 |
+| `min_burst_interval_ms` | 4.0 | 兩個 burst 的開始時間至少隔多久（start 到 start，0–50，0 關閉）。短 datagram 時避免每個 datagram 一個 burst：Pluto 推送一次要 0.413 ms + 0.194 µs/sample，RX 每個 burst 也有成本。`AggregationLimits` 本身的預設是 0，直接呼叫的程式碼行為不變 |
 | `max_subframes` | 16 | 一個 burst 最多幾個 datagram |
 | `max_psdu_bytes` | 8192 | 一個 burst 的 PSDU 最多幾個 byte；不能超過 `phy.rx.max_psdu_bytes`，否則設定檔會被拒絕 |
 | `max_burst_airtime_ms` | 8.0 | 聚合後的 burst 最長多久。換算成 sample 不能超過 80 000（5 MS/s 是 16 ms、10 MS/s 是 8 ms、20 MS/s 是 4 ms），否則設定檔會被拒絕 |
@@ -201,8 +201,8 @@ GNU Radio 內建一組 OFDM blocks。這個專案沒有用它們，而是用 `of
   acquisition、CFO／sample clock offset 補償，以及受保護的 header 都在同一套 wire format 裡。
 - **PHY 只處理 bytes。** 上層不需要知道 GNU Radio 的 tag 或 PDU。
 
-GNU Radio 在這裡的角色是 **radio 的介面**（UHD source／sink、timed burst）以及 rate-1/2
-convolutional code 的 Viterbi decoder。
+GNU Radio 在這裡的角色是 **radio 的介面**（UHD source／sink、timed burst）以及舊格式 convolutional MCS
+（1、2、5、6，只有 RX）的 Viterbi decoder。v5 的 SIG 用專案自己的 C++ Viterbi。
 
 同理，application 與 PHY 之間用一般的 UDP socket，而不是 gr-network 的 block：任何語言寫的程式
 都能接上。

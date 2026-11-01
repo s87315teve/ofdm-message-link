@@ -148,9 +148,11 @@ class TransmitWorker:
     guard cost is shared.  ``max_wait_s > 0`` trades latency for fuller
     bursts by holding a burst that still has room for up to that long after
     its oldest message was submitted.  ``min_burst_interval_s > 0`` caps the
-    burst rate: a burst is held until that long after the previous one was
-    handed to the radio, collecting more datagrams meanwhile (a lone datagram
-    after an idle period still goes at once, a full burst is never held).
+    burst rate: a burst is held until that long after the previous one
+    started to be handed to the radio (start to start, so a burst longer than
+    the interval is followed at once), collecting more datagrams meanwhile (a
+    lone datagram after an idle period still goes at once, a full burst is
+    never held).
     """
 
     def __init__(

@@ -15,6 +15,8 @@ phy:
     decision_mode: turbo
     max_iterations: 8
   sync:
+    # Legacy (v1-v4, receive-only) preamble thresholds; the v5 ones are
+    # phy.rx in default.yaml.
     # The same values as the default 2.45 GHz profile.  They were measured on
     # Plutos (experiments/rx_improvement); this radio pair has not been measured
     # with the improved receiver.  The correlation threshold is what keeps noise

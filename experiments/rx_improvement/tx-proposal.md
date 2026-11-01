@@ -1,5 +1,10 @@
 # 提案：接下來可以改 TX 的地方（未實作）
 
+> **狀態（2026-11-01）：這些提案已在 `tx-v5` 分支實作（wire v5），見 [Wire v5 報告](../tx_v5/README.md)。**
+> 第 1 項（更長的 preamble）→ 802.11a 的 L-STF + L-LTF；第 2 項（header 分散到不同頻率）→ SIG 改用
+> K=7 convolutional code 加 144-bit interleaver；第 3 項改法 A（第二個 training symbol）→ 兩個 L-LTF symbol
+> 平均的 channel estimate。下面保留提案當時的原文與數字。
+
 這份只是提案。`improve-rx` 分支只改了 RX，wire format 和 v1.0.0 完全相同，舊的 TX 照樣能用。
 下面每一項都要改 wire format、升 protocol 版本，新舊兩端就不能互通，所以先寫下來，等你決定。
 

@@ -70,7 +70,7 @@
     <div class="scroller" id="chain" data-mode="sim">
     <svg id="chain-svg" viewBox="0 0 1640 690" role="img" aria-labelledby="chain-title chain-desc">
       <title id="chain-title">單向 OFDM message link 的 block diagram</title>
-      <desc id="chain-desc">TX chain, left to right: ingress, datagram, PHY frame, FEC encoder, symbol mapper, OFDM modulator, burst assembly, peak normalize, sample sink. After the channel, RX chain, right to left: sample source, acquisition, header decode, equalizer, demapper, FEC decoder, frame check, reassembly, egress.</desc>
+      <desc id="chain-desc">TX chain, left to right: ingress, datagram, A-MPDU aggregation, FEC encoder, scrambler, symbol mapper, OFDM modulator, burst assembly, peak normalize, sample sink. After the channel, RX chain, right to left: sample source, acquisition, header decode, equalizer, demapper, descrambler, FEC decoder, A-MPDU unpack, reassembly, egress.</desc>
       <defs>
         <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
         <marker id="ah-ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-ch"/></marker>
@@ -85,21 +85,21 @@
       <text class="t-group" x="176" y="390">rx_app · process 2（RX window）</text>
 
       <!-- layer labels -->
-      <text class="t-group" x="232" y="134" text-anchor="middle">Application</text>
-      <text class="t-group" x="448" y="134" text-anchor="middle">Link（datagram / frame）</text>
-      <text class="t-group" x="1024" y="134" text-anchor="middle">PHY</text>
-      <text class="t-group" x="1384" y="134" text-anchor="middle">Sample transport</text>
+      <text class="t-group" x="227" y="134" text-anchor="middle">Application</text>
+      <text class="t-group" x="419" y="134" text-anchor="middle">Link（datagram / A-MPDU）</text>
+      <text class="t-group" x="995" y="134" text-anchor="middle">PHY</text>
+      <text class="t-group" x="1315" y="134" text-anchor="middle">Sample transport</text>
 
       <!-- MCS control -->
       <g class="blk ctl" data-id="mcs" tabindex="0" role="button">
-        <rect x="608" y="44" width="256" height="58" rx="10"/>
-        <text class="t-title" x="736" y="68" text-anchor="middle">MCS selector（8–17）</text>
-        <text class="t-sub" x="736" y="88" text-anchor="middle">從下一則 message 開始生效</text>
+        <rect x="585" y="44" width="308" height="58" rx="10"/>
+        <text class="t-title" x="739" y="68" text-anchor="middle">MCS selector（8–17）</text>
+        <text class="t-sub" x="739" y="88" text-anchor="middle">從下一則 message 開始生效</text>
       </g>
-      <path class="ctlp" d="M664,102 V194" marker-end="url(#ah-ctl)"/>
-      <path class="ctlp" d="M808,102 V194" marker-end="url(#ah-ctl)"/>
-      <path class="ctlp" d="M864,73 H1096 V194" marker-end="url(#ah-ctl)"/>
-      <text class="t-ctl" x="980" y="66" text-anchor="middle">寫進 burst header</text>
+      <path class="ctlp" d="M611,102 V194" marker-end="url(#ah-ctl)"/>
+      <path class="ctlp" d="M867,102 V194" marker-end="url(#ah-ctl)"/>
+      <path class="ctlp" d="M893,73 H1123 V194" marker-end="url(#ah-ctl)"/>
+      <text class="t-ctl" x="1008" y="66" text-anchor="middle">寫進 SIG</text>
 
       <!-- external producer / consumer -->
       <g class="blk ext" data-id="ext-in" tabindex="0" role="button">
@@ -120,81 +120,92 @@
       <path class="flow" d="M170,460 H132" marker-end="url(#ah)"/>
       <text class="t-edge" x="151" y="452" text-anchor="middle">52002</text>
 
-      <!-- TX chain: x = 176 + 144*i -->
+      <!-- TX chain: x = 170 + 128*i -->
       <g class="blk tx" data-id="tx-in" tabindex="0" role="button">
-        <rect x="170" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="232" y="226" text-anchor="middle">Ingress</text>
-        <text class="t-sub" x="232" y="248" text-anchor="middle">GUI input box</text>
-        <text class="t-sub" x="232" y="264" text-anchor="middle">UDP ingress</text>
+        <rect x="170" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="227" y="222" text-anchor="middle">Ingress</text>
+        <text class="t-sub" x="227" y="244" text-anchor="middle">GUI input box</text>
+        <text class="t-sub" x="227" y="260" text-anchor="middle">UDP ingress</text>
       </g>
       <g class="blk tx" data-id="tx-dgram" tabindex="0" role="button">
-        <rect x="314" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="376" y="226" text-anchor="middle">Datagram</text>
-        <text class="t-sub" x="376" y="248" text-anchor="middle">28 B header</text>
-        <text class="t-sub" x="376" y="264" text-anchor="middle">fragment ≤ 968 B</text>
+        <rect x="298" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="355" y="222" text-anchor="middle">Datagram</text>
+        <text class="t-sub" x="355" y="244" text-anchor="middle">fragment ≤ 968 B</text>
+        <text class="t-sub" x="355" y="260" text-anchor="middle">+ seq, CRC-32</text>
       </g>
-      <g class="blk tx" data-id="tx-frame" tabindex="0" role="button">
-        <rect x="458" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="520" y="226" text-anchor="middle">PHY frame</text>
-        <text class="t-sub" x="520" y="248" text-anchor="middle">16-bit sequence</text>
-        <text class="t-sub" x="520" y="264" text-anchor="middle">+ CRC-32</text>
+      <g class="blk tx" data-id="tx-ampdu" tabindex="0" role="button">
+        <rect x="426" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="483" y="218" text-anchor="middle">A-MPDU</text>
+        <text class="t-sub" x="483" y="237" text-anchor="middle">≤ 16 frames, 8 ms</text>
+        <text class="t-sub" x="483" y="251" text-anchor="middle">PSDU + FCS</text>
+        <text class="t-sub" x="483" y="265" text-anchor="middle">min interval 4 ms</text>
       </g>
       <g class="blk tx" data-id="tx-fec" tabindex="0" role="button">
-        <rect x="602" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="664" y="226" text-anchor="middle">FEC encoder</text>
-        <text class="t-sub" x="664" y="248" text-anchor="middle">Turbo + rate match</text>
-        <text class="t-sub" x="664" y="264" text-anchor="middle">r = 1/3 … 3/4</text>
+        <rect x="554" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="611" y="218" text-anchor="middle">FEC encoder</text>
+        <text class="t-sub" x="611" y="237" text-anchor="middle">Turbo r = 1/3</text>
+        <text class="t-sub" x="611" y="251" text-anchor="middle">LTE rate match</text>
+        <text class="t-sub" x="611" y="265" text-anchor="middle">r = 1/3 … 3/4</text>
+      </g>
+      <g class="blk tx" data-id="tx-scr" tabindex="0" role="button">
+        <rect x="682" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="739" y="222" text-anchor="middle">Scrambler</text>
+        <text class="t-sub" x="739" y="244" text-anchor="middle">802.11 x⁷+x⁴+1</text>
+        <text class="t-sub" x="739" y="260" text-anchor="middle">seed per burst</text>
       </g>
       <g class="blk tx" data-id="tx-map" tabindex="0" role="button">
-        <rect x="746" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="808" y="226" text-anchor="middle">Symbol mapper</text>
-        <text class="t-sub" x="808" y="248" text-anchor="middle">QPSK / 16 / 64QAM</text>
-        <text class="t-sub" x="808" y="264" text-anchor="middle">2 / 4 / 6 bits/symbol</text>
+        <rect x="810" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="867" y="222" text-anchor="middle">Symbol mapper</text>
+        <text class="t-sub" x="867" y="244" text-anchor="middle">QPSK / 16 / 64QAM</text>
+        <text class="t-sub" x="867" y="260" text-anchor="middle">2 / 4 / 6 bits</text>
       </g>
       <g class="blk tx" data-id="tx-ofdm" tabindex="0" role="button">
-        <rect x="890" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="952" y="226" text-anchor="middle">OFDM modulator</text>
-        <text class="t-sub" x="952" y="248" text-anchor="middle">IFFT 64 + CP 16</text>
-        <text class="t-sub" x="952" y="264" text-anchor="middle">48 data, 4 pilots</text>
+        <rect x="938" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="995" y="222" text-anchor="middle">OFDM modulator</text>
+        <text class="t-sub" x="995" y="244" text-anchor="middle">IFFT 64 + CP 16</text>
+        <text class="t-sub" x="995" y="260" text-anchor="middle">48 data, 4 pilots</text>
       </g>
       <g class="blk tx" data-id="tx-burst" tabindex="0" role="button">
-        <rect x="1034" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="1096" y="226" text-anchor="middle">Burst assembly</text>
-        <text class="t-sub" x="1096" y="248" text-anchor="middle">STF, LTF,</text>
-        <text class="t-sub" x="1096" y="264" text-anchor="middle">SIG, payload</text>
+        <rect x="1066" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="1123" y="218" text-anchor="middle">Burst assembly</text>
+        <text class="t-sub" x="1123" y="237" text-anchor="middle">16 | STF | 2×LTF</text>
+        <text class="t-sub" x="1123" y="251" text-anchor="middle">SIG: conv, BPSK</text>
+        <text class="t-sub" x="1123" y="265" text-anchor="middle">payload | 64</text>
       </g>
       <g class="blk tx" data-id="tx-peak" tabindex="0" role="button">
-        <rect x="1178" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="1240" y="226" text-anchor="middle">Peak normalize</text>
-        <text class="t-sub" x="1240" y="248" text-anchor="middle">PAPR ≈ 10 dB</text>
-        <text class="t-sub" x="1240" y="264" text-anchor="middle">peak → 0.7</text>
+        <rect x="1194" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="1251" y="222" text-anchor="middle">Peak normalize</text>
+        <text class="t-sub" x="1251" y="244" text-anchor="middle">PAPR ≈ 9.5–10 dB</text>
+        <text class="t-sub" x="1251" y="260" text-anchor="middle">peak → 0.7</text>
       </g>
       <g class="blk tx" data-id="tx-sink" tabindex="0" role="button">
-        <rect x="1322" y="196" width="124" height="88" rx="10"/>
-        <text class="t-title" x="1384" y="226" text-anchor="middle">Sample sink</text>
-        <text class="t-sub only-sim" x="1384" y="248" text-anchor="middle">UDP sink</text>
-        <text class="t-sub only-sim" x="1384" y="264" text-anchor="middle">127.0.0.1:52101</text>
-        <text class="t-sub only-uhd" x="1384" y="248" text-anchor="middle">UHD sink</text>
-        <text class="t-sub only-uhd" x="1384" y="264" text-anchor="middle">timed (tx_time)</text>
-        <text class="t-sub only-pluto" x="1384" y="248" text-anchor="middle">Pluto sink</text>
-        <text class="t-sub only-pluto" x="1384" y="264" text-anchor="middle">libiio, untimed</text>
+        <rect x="1322" y="196" width="114" height="88" rx="10"/>
+        <text class="t-title" x="1379" y="222" text-anchor="middle">Sample sink</text>
+        <text class="t-sub only-sim" x="1379" y="244" text-anchor="middle">UDP sink</text>
+        <text class="t-sub only-sim" x="1379" y="260" text-anchor="middle">127.0.0.1:52101</text>
+        <text class="t-sub only-uhd" x="1379" y="244" text-anchor="middle">UHD sink</text>
+        <text class="t-sub only-uhd" x="1379" y="260" text-anchor="middle">timed (tx_time)</text>
+        <text class="t-sub only-pluto" x="1379" y="244" text-anchor="middle">Pluto sink</text>
+        <text class="t-sub only-pluto" x="1379" y="260" text-anchor="middle">libiio, untimed</text>
       </g>
-      <path class="flow" d="M294,240 H312" marker-end="url(#ah)"/>
-      <path class="flow" d="M438,240 H456" marker-end="url(#ah)"/>
-      <path class="flow" d="M582,240 H600" marker-end="url(#ah)"/>
-      <path class="flow" d="M726,240 H744" marker-end="url(#ah)"/>
-      <path class="flow" d="M870,240 H888" marker-end="url(#ah)"/>
-      <path class="flow" d="M1014,240 H1032" marker-end="url(#ah)"/>
-      <path class="flow" d="M1158,240 H1176" marker-end="url(#ah)"/>
-      <path class="flow" d="M1302,240 H1320" marker-end="url(#ah)"/>
-      <text class="t-edge" x="304" y="300" text-anchor="middle">bytes</text>
-      <text class="t-edge" x="448" y="300" text-anchor="middle">≤996 B</text>
-      <text class="t-edge" x="592" y="300" text-anchor="middle">bits</text>
-      <text class="t-edge" x="736" y="300" text-anchor="middle">coded</text>
-      <text class="t-edge" x="880" y="300" text-anchor="middle">symbols</text>
-      <text class="t-edge" x="1024" y="300" text-anchor="middle">IQ</text>
-      <text class="t-edge" x="1168" y="300" text-anchor="middle">burst</text>
-      <text class="t-edge" x="1312" y="300" text-anchor="middle">c64</text>
+      <path class="flow" d="M284,240 H296" marker-end="url(#ah)"/>
+      <path class="flow" d="M412,240 H424" marker-end="url(#ah)"/>
+      <path class="flow" d="M540,240 H552" marker-end="url(#ah)"/>
+      <path class="flow" d="M668,240 H680" marker-end="url(#ah)"/>
+      <path class="flow" d="M796,240 H808" marker-end="url(#ah)"/>
+      <path class="flow" d="M924,240 H936" marker-end="url(#ah)"/>
+      <path class="flow" d="M1052,240 H1064" marker-end="url(#ah)"/>
+      <path class="flow" d="M1180,240 H1192" marker-end="url(#ah)"/>
+      <path class="flow" d="M1308,240 H1320" marker-end="url(#ah)"/>
+      <text class="t-edge" x="291" y="300" text-anchor="middle">bytes</text>
+      <text class="t-edge" x="419" y="300" text-anchor="middle">≤996 B</text>
+      <text class="t-edge" x="547" y="300" text-anchor="middle">PSDU</text>
+      <text class="t-edge" x="675" y="300" text-anchor="middle">coded</text>
+      <text class="t-edge" x="803" y="300" text-anchor="middle">bits</text>
+      <text class="t-edge" x="931" y="300" text-anchor="middle">symbols</text>
+      <text class="t-edge" x="1059" y="300" text-anchor="middle">IQ</text>
+      <text class="t-edge" x="1187" y="300" text-anchor="middle">burst</text>
+      <text class="t-edge" x="1315" y="300" text-anchor="middle">c64</text>
 
       <!-- channel -->
       <g class="blk ch" data-id="channel" tabindex="0" role="button">
@@ -207,105 +218,121 @@
         <text class="t-sub only-ota" x="1559" y="362" text-anchor="middle">2.45 GHz default</text>
         <text class="t-mono only-ota" x="1559" y="380" text-anchor="middle">5 MS/s</text>
       </g>
-      <path class="flow-ch" d="M1446,240 H1488" marker-end="url(#ah-ch)"/>
-      <path class="flow-ch" d="M1490,460 H1448" marker-end="url(#ah-ch)"/>
-      <text class="t-edge only-uhd" x="1467" y="228" text-anchor="middle">USRP</text>
-      <text class="t-edge only-uhd" x="1467" y="448" text-anchor="middle">USRP</text>
-      <text class="t-edge only-pluto" x="1467" y="228" text-anchor="middle">Pluto</text>
-      <text class="t-edge only-pluto" x="1467" y="448" text-anchor="middle">Pluto</text>
+      <path class="flow-ch" d="M1436,240 H1488" marker-end="url(#ah-ch)"/>
+      <path class="flow-ch" d="M1490,460 H1438" marker-end="url(#ah-ch)"/>
+      <text class="t-edge only-uhd" x="1463" y="228" text-anchor="middle">USRP</text>
+      <text class="t-edge only-uhd" x="1463" y="448" text-anchor="middle">USRP</text>
+      <text class="t-edge only-pluto" x="1463" y="228" text-anchor="middle">Pluto</text>
+      <text class="t-edge only-pluto" x="1463" y="448" text-anchor="middle">Pluto</text>
 
-      <!-- RX chain: right to left -->
+      <!-- RX chain: right to left, column i under TX column i -->
       <g class="blk rx" data-id="rx-src" tabindex="0" role="button">
-        <rect x="1322" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="1384" y="446" text-anchor="middle">Sample source</text>
-        <text class="t-sub only-sim" x="1384" y="468" text-anchor="middle">UDP source</text>
-        <text class="t-sub only-sim" x="1384" y="484" text-anchor="middle">idle: zeros / AWGN</text>
-        <text class="t-sub only-uhd" x="1384" y="468" text-anchor="middle">UHD source</text>
-        <text class="t-sub only-uhd" x="1384" y="484" text-anchor="middle">free-running</text>
-        <text class="t-sub only-pluto" x="1384" y="468" text-anchor="middle">Pluto source</text>
-        <text class="t-sub only-pluto" x="1384" y="484" text-anchor="middle">libiio, free-running</text>
+        <rect x="1322" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="1379" y="442" text-anchor="middle">Sample source</text>
+        <text class="t-sub only-sim" x="1379" y="464" text-anchor="middle">UDP source</text>
+        <text class="t-sub only-sim" x="1379" y="480" text-anchor="middle">idle: zeros / AWGN</text>
+        <text class="t-sub only-uhd" x="1379" y="464" text-anchor="middle">UHD source</text>
+        <text class="t-sub only-uhd" x="1379" y="480" text-anchor="middle">free-running</text>
+        <text class="t-sub only-pluto" x="1379" y="464" text-anchor="middle">Pluto source</text>
+        <text class="t-sub only-pluto" x="1379" y="480" text-anchor="middle">libiio, free-running</text>
       </g>
       <g class="blk rx" data-id="rx-acq" tabindex="0" role="button">
-        <rect x="1178" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="1240" y="446" text-anchor="middle">Acquisition</text>
-        <text class="t-sub" x="1240" y="468" text-anchor="middle">Schmidl–Cox</text>
-        <text class="t-sub" x="1240" y="484" text-anchor="middle">CFO, gain, SNR</text>
+        <rect x="1194" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="1251" y="438" text-anchor="middle">Acquisition</text>
+        <text class="t-sub" x="1251" y="457" text-anchor="middle">lag-32: v5 + v1–v4</text>
+        <text class="t-sub" x="1251" y="471" text-anchor="middle">DC / CW removed</text>
+        <text class="t-sub" x="1251" y="485" text-anchor="middle">LTF timing, CFO</text>
       </g>
       <g class="blk rx" data-id="rx-header" tabindex="0" role="button">
-        <rect x="1034" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="1096" y="446" text-anchor="middle">Header decode</text>
-        <text class="t-sub" x="1096" y="468" text-anchor="middle">LTF channel</text>
-        <text class="t-sub" x="1096" y="484" text-anchor="middle">SIG: Viterbi, CRC</text>
+        <rect x="1066" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="1123" y="438" text-anchor="middle">Header decode</text>
+        <text class="t-sub" x="1123" y="457" text-anchor="middle">H: 2×LTF, 20 taps</text>
+        <text class="t-sub" x="1123" y="471" text-anchor="middle">in-band SNR</text>
+        <text class="t-sub" x="1123" y="485" text-anchor="middle">SIG: Viterbi, CRC</text>
       </g>
       <g class="blk rx" data-id="rx-eq" tabindex="0" role="button">
-        <rect x="890" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="952" y="446" text-anchor="middle">Equalizer</text>
-        <text class="t-sub" x="952" y="468" text-anchor="middle">FFT + pilot EQ</text>
-        <text class="t-sub" x="952" y="484" text-anchor="middle">SFO tracking</text>
+        <rect x="938" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="995" y="438" text-anchor="middle">Equalizer</text>
+        <text class="t-sub" x="995" y="457" text-anchor="middle">FFT, backoff 3</text>
+        <text class="t-sub" x="995" y="471" text-anchor="middle">pilot EQ</text>
+        <text class="t-sub" x="995" y="485" text-anchor="middle">SFO slope in time</text>
       </g>
       <g class="blk rx" data-id="rx-demap" tabindex="0" role="button">
-        <rect x="746" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="808" y="446" text-anchor="middle">Demapper</text>
-        <text class="t-sub" x="808" y="468" text-anchor="middle">Turbo: soft LLR</text>
-        <text class="t-sub" x="808" y="484" text-anchor="middle">noise from SIG</text>
+        <rect x="810" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="867" y="442" text-anchor="middle">Demapper</text>
+        <text class="t-sub" x="867" y="464" text-anchor="middle">soft LLR</text>
+        <text class="t-sub" x="867" y="480" text-anchor="middle">noise: SIG, LTF</text>
+      </g>
+      <g class="blk rx" data-id="rx-descr" tabindex="0" role="button">
+        <rect x="682" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="739" y="442" text-anchor="middle">Descrambler</text>
+        <text class="t-sub" x="739" y="464" text-anchor="middle">seed from SIG</text>
+        <text class="t-sub" x="739" y="480" text-anchor="middle">flip LLR signs</text>
       </g>
       <g class="blk rx" data-id="rx-fec" tabindex="0" role="button">
-        <rect x="602" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="664" y="446" text-anchor="middle">FEC decoder</text>
-        <text class="t-sub" x="664" y="468" text-anchor="middle">Turbo + rate match</text>
-        <text class="t-sub" x="664" y="484" text-anchor="middle">4 worker processes</text>
+        <rect x="554" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="611" y="438" text-anchor="middle">FEC decoder</text>
+        <text class="t-sub" x="611" y="457" text-anchor="middle">rate dematch</text>
+        <text class="t-sub" x="611" y="471" text-anchor="middle">Turbo, early stop</text>
+        <text class="t-sub" x="611" y="485" text-anchor="middle">4 decode workers</text>
       </g>
       <g class="blk rx" data-id="rx-frame" tabindex="0" role="button">
-        <rect x="458" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="520" y="446" text-anchor="middle">Frame check</text>
-        <text class="t-sub" x="520" y="468" text-anchor="middle">CRC-32</text>
-        <text class="t-sub" x="520" y="484" text-anchor="middle">sequence gap = loss</text>
+        <rect x="426" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="483" y="442" text-anchor="middle">A-MPDU unpack</text>
+        <text class="t-sub" x="483" y="464" text-anchor="middle">CRC-32 per frame</text>
+        <text class="t-sub" x="483" y="480" text-anchor="middle">seq gap = loss</text>
       </g>
       <g class="blk rx" data-id="rx-dgram" tabindex="0" role="button">
-        <rect x="314" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="376" y="446" text-anchor="middle">Reassembly</text>
-        <text class="t-sub" x="376" y="468" text-anchor="middle">by message_id</text>
-        <text class="t-sub" x="376" y="484" text-anchor="middle">drop incomplete</text>
+        <rect x="298" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="355" y="442" text-anchor="middle">Reassembly</text>
+        <text class="t-sub" x="355" y="464" text-anchor="middle">by message_id</text>
+        <text class="t-sub" x="355" y="480" text-anchor="middle">drop incomplete</text>
       </g>
       <g class="blk rx" data-id="rx-out" tabindex="0" role="button">
-        <rect x="170" y="416" width="124" height="88" rx="10"/>
-        <text class="t-title" x="232" y="446" text-anchor="middle">Egress</text>
-        <text class="t-sub" x="232" y="468" text-anchor="middle">GUI message list</text>
-        <text class="t-sub" x="232" y="484" text-anchor="middle">UDP egress</text>
+        <rect x="170" y="416" width="114" height="88" rx="10"/>
+        <text class="t-title" x="227" y="442" text-anchor="middle">Egress</text>
+        <text class="t-sub" x="227" y="464" text-anchor="middle">GUI message list</text>
+        <text class="t-sub" x="227" y="480" text-anchor="middle">UDP egress</text>
       </g>
-      <path class="flow" d="M1322,460 H1304" marker-end="url(#ah)"/>
-      <path class="flow" d="M1178,460 H1160" marker-end="url(#ah)"/>
-      <path class="flow" d="M1034,460 H1016" marker-end="url(#ah)"/>
-      <path class="flow" d="M890,460 H872" marker-end="url(#ah)"/>
-      <path class="flow" d="M746,460 H728" marker-end="url(#ah)"/>
-      <path class="flow" d="M602,460 H584" marker-end="url(#ah)"/>
-      <path class="flow" d="M458,460 H440" marker-end="url(#ah)"/>
-      <path class="flow" d="M314,460 H296" marker-end="url(#ah)"/>
+      <path class="flow" d="M1322,460 H1310" marker-end="url(#ah)"/>
+      <path class="flow" d="M1194,460 H1182" marker-end="url(#ah)"/>
+      <path class="flow" d="M1066,460 H1054" marker-end="url(#ah)"/>
+      <path class="flow" d="M938,460 H926" marker-end="url(#ah)"/>
+      <path class="flow" d="M810,460 H798" marker-end="url(#ah)"/>
+      <path class="flow" d="M682,460 H670" marker-end="url(#ah)"/>
+      <path class="flow" d="M554,460 H542" marker-end="url(#ah)"/>
+      <path class="flow" d="M426,460 H414" marker-end="url(#ah)"/>
+      <path class="flow" d="M298,460 H286" marker-end="url(#ah)"/>
 
-      <!-- RX control: the header selects demapper and decoder -->
-      <path class="ctlp" d="M1096,416 V398 H808 V414" marker-end="url(#ah-ctl)"/>
-      <path class="ctlp" d="M808,398 H664 V414" marker-end="url(#ah-ctl)"/>
-      <text class="t-ctl" x="952" y="392" text-anchor="middle">SIG → MCS、length、scrambler seed、noise</text>
+      <!-- RX control: the SIG selects demapper, descrambler and decoder -->
+      <path class="ctlp" d="M1123,416 V398 H611 V414" marker-end="url(#ah-ctl)"/>
+      <path class="ctlp" d="M867,398 V414" marker-end="url(#ah-ctl)"/>
+      <path class="ctlp" d="M739,398 V414" marker-end="url(#ah-ctl)"/>
+      <text class="t-ctl" x="867" y="392" text-anchor="middle">SIG → MCS、length、scrambler seed；SIG + LTF → noise</text>
+
+      <!-- legacy path -->
+      <text class="t-sub" x="1195" y="536" text-anchor="middle">Legacy v1–v4 burst（只有 RX）：</text>
+      <text class="t-sub" x="1195" y="552" text-anchor="middle">同一個 scan，舊的 header 與 payload decoder</text>
 
       <!-- GUI instruments -->
       <g class="blk ins" data-id="gui-spectrum" tabindex="0" role="button">
-        <rect x="1300" y="586" width="168" height="62" rx="10"/>
-        <text class="t-title" x="1384" y="612" text-anchor="middle">Spectrum · RX level</text>
-        <text class="t-sub" x="1384" y="632" text-anchor="middle">沒有 decode 成功時也更新</text>
+        <rect x="1295" y="586" width="168" height="62" rx="10"/>
+        <text class="t-title" x="1379" y="612" text-anchor="middle">Spectrum · RX level</text>
+        <text class="t-sub" x="1379" y="632" text-anchor="middle">沒有 decode 成功時也更新</text>
       </g>
       <g class="blk ins" data-id="gui-const" tabindex="0" role="button">
-        <rect x="868" y="586" width="168" height="62" rx="10"/>
-        <text class="t-title" x="952" y="612" text-anchor="middle">Constellation · EVM</text>
-        <text class="t-sub" x="952" y="632" text-anchor="middle">只顯示 decode 成功的 burst</text>
+        <rect x="911" y="586" width="168" height="62" rx="10"/>
+        <text class="t-title" x="995" y="612" text-anchor="middle">Constellation · EVM</text>
+        <text class="t-sub" x="995" y="632" text-anchor="middle">只顯示 decode 成功的 burst</text>
       </g>
       <g class="blk ins" data-id="gui-stats" tabindex="0" role="button">
-        <rect x="436" y="586" width="168" height="62" rx="10"/>
-        <text class="t-title" x="520" y="612" text-anchor="middle">Stats · Link light</text>
-        <text class="t-sub" x="520" y="632" text-anchor="middle">Goodput / Loss / SNR</text>
+        <rect x="399" y="586" width="168" height="62" rx="10"/>
+        <text class="t-title" x="483" y="612" text-anchor="middle">Stats · Link light</text>
+        <text class="t-sub" x="483" y="632" text-anchor="middle">Goodput / Loss / SNR</text>
       </g>
-      <path class="tap" d="M1384,504 V584" marker-end="url(#ah-tap)"/>
-      <path class="tap" d="M952,504 V584" marker-end="url(#ah-tap)"/>
-      <path class="tap" d="M520,504 V584" marker-end="url(#ah-tap)"/>
+      <path class="tap" d="M1379,504 V584" marker-end="url(#ah-tap)"/>
+      <path class="tap" d="M995,504 V584" marker-end="url(#ah-tap)"/>
+      <path class="tap" d="M483,504 V584" marker-end="url(#ah-tap)"/>
     </svg>
     </div>
     <p class="hint">窄螢幕可以左右捲動這張圖。你也可以用 Tab 鍵移動，用 Enter 選擇 block。</p>

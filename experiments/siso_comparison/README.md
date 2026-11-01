@@ -28,6 +28,9 @@ python experiments/siso_comparison/siso_sweep.py experiments/siso_comparison 80 
 
 > **後續：** 報告找到的兩個 RX 問題（LLR 飽和、header 太脆弱）已經在 `improve-rx` 分支修掉，
 > 實機量測與做法見 [`../rx_improvement/`](../rx_improvement/README.md)。上面表格是修正**之前**的數字。
+> 之後 `tx-v5` 分支改了 TX（wire v5：802.11a 的 STF 與兩個 LTF、K=7 convolutional code 的 SIG、
+> scrambler、rate matching、A-MPDU），TX 只送 v5，RX 同時收 v5 與 v1–v4，見 [`../tx_v5/`](../tx_v5/README.md)。
+> 下面摘要的 header 描述（96 bit × 3 重複）是舊格式。
 
 ## 結論摘要（AWGN，900 B burst，50% 成功點的真實 SNR）
 

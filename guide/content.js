@@ -35,7 +35,7 @@ window.GUIDE_CONTENT = (function () {
     },
     {
       id: "tx-link", cls: "tx", area: "tx-link", arrow: "right", row: "TX",
-      name: "Link", line: "Fragment、sequence number、CRC",
+      name: "Link", line: "Fragment、sequence number、CRC、A-MPDU",
       sum: "Link layer 切分 message，並加上 RX 組回與檢查所需的資料。",
       blocks: [
         {
@@ -61,7 +61,8 @@ window.GUIDE_CONTENT = (function () {
             "每個 frame 前面有 4-byte delimiter。Delimiter 內有 frame 的 length 與 CRC-8。",
             "Burst 的最後有 4-byte FCS。FCS 是整個 PSDU 的 CRC-32。",
             "Radio 可以接受下一個 burst 時，這個 block 放入 queue 裡的 frames。上限是 16 個 frames、8192 bytes 與 8 ms airtime。",
-            "Queue 只有一個 frame 時，這個 block 不等待。"],
+            "兩個 burst 的開始時間至少相隔 4 ms。等待時，這個 block 把新的 frames 放進同一個 burst。所以 burst 數最多每秒 250 個。",
+            "比 4 ms 長的 burst 不等待。閒置之後的第一個 burst 也不等待。滿的 burst 不等待。"],
           input: "一個或多個 PHY frames", output: "一個 PSDU",
           code: ["<code>aggregation.py</code>：<code>plan_aggregate</code>", "<code>ofdm_link.phy.ampdu</code>：<code>pack_ampdu</code>"],
           opts: ["<code>--aggregation</code>、<code>--aggregation-max-subframes</code>、<code>--min-burst-interval-ms</code>、<code>--max-burst-airtime-ms</code>"],
@@ -71,20 +72,29 @@ window.GUIDE_CONTENT = (function () {
     },
     {
       id: "tx-phy", cls: "tx", area: "tx-phy", arrow: "right", row: "TX",
-      name: "PHY", line: "Bits 變成 OFDM burst",
-      sum: "PHY 把 frame bits 變成一個 burst 的 complex samples。",
+      name: "PHY", line: "PSDU 變成 OFDM burst",
+      sum: "PHY 把一個 PSDU 變成一個 burst 的 complex samples。",
       blocks: [
         {
           name: "FEC encoder",
           does: ["這個 block 加入 redundant bits。", "RX 用這些 bits 修正 noise 造成的錯誤。",
             "全部 MCS 使用同一個 Turbo encoder。它的 rate 是 1/3。",
-            "然後 rate matching 刪除或重複一些 bits。所以 code rate 可以是 1/3、1/2、2/3 或 3/4。",
-            "Rate matching 讓 coded bits 剛好填滿整數個 OFDM symbols。",
-            "最後 scrambler 把 coded bits 與一個已知的序列做 XOR。所以 payload 的內容不會改變 PAPR。"],
+            "然後 LTE rate matching（TS 36.212）刪除或重複一些 bits。所以 code rate 可以是 1/3、1/2、2/3 或 3/4。",
+            "Rate matching 讓 coded bits 剛好填滿整數個 OFDM symbols。Payload 沒有 padding。"],
           input: "PSDU bits", output: "Coded bits",
-          code: ["<code>ofdm_link.phy.psdu_codec</code>：<code>RateMatchedTurboCodec</code>", "<code>ofdm_link.phy.rate_match</code>", "<code>ofdm_link.phy.scrambler</code>"],
+          code: ["<code>ofdm_link.phy.psdu_codec</code>：<code>RateMatchedTurboCodec</code>", "<code>ofdm_link.phy.rate_match</code>"],
           opts: ["由 MCS 決定"],
           gui: "TX 的 <code>MCS for next message</code> 選單顯示 code rate。"
+        },
+        {
+          name: "Scrambler",
+          does: ["這個 block 把 coded bits 與一個已知的序列做 XOR。這個序列來自 802.11 的 x⁷+x⁴+1 LFSR。",
+            "所以 payload 的內容不會改變 constellation 的統計、PAPR 與發射功率。",
+            "TX 每個 burst 使用另一個 seed（1 到 127）。TX 把 seed 寫進 SIG。所以 RX 不需要設定。"],
+          input: "Coded bits", output: "Scrambled bits",
+          code: ["<code>ofdm_link.phy.scrambler</code>：<code>scramble_bits</code>", "<code>link.py</code>：<code>MessageTransmitter</code>（seed）"],
+          opts: ["<code>phy.v5.scrambler</code>（預設 <code>true</code>；<code>false</code> 送 seed 0，只用於實驗）"],
+          gui: "—"
         },
         {
           name: "Symbol mapper",
@@ -108,7 +118,8 @@ window.GUIDE_CONTENT = (function () {
           name: "Burst assembly",
           does: ["這個 block 依序接上四個部分：STF、LTF、3 個 SIG symbols、payload。",
             "STF 與 LTF 來自 802.11a。RX 用 STF 找 burst，用 LTF 做 channel estimation。",
-            "SIG symbols 使用 BPSK 與 convolutional code。SIG 內有 MCS、length 與 scrambler seed。",
+            "SIG symbols 使用 BPSK 與 K=7、rate 1/2 的 convolutional code。一個 interleaver 把 coded bits 分散到三個 symbols 的 carriers。",
+            "SIG 內有 MCS、PSDU length、scrambler seed 與 CRC-16。",
             "Link 在 burst 的前面加 16 個 zero samples，在後面加 64 個。"],
           input: "OFDM symbols", output: "一個 burst",
           code: ["<code>ofdm_link.phy.burst_v5</code>：<code>encode_burst_v5</code>", "<code>ofdm_link.phy.header_v5</code>", "<code>link.py</code>：加上 guard samples"],
@@ -125,7 +136,7 @@ window.GUIDE_CONTENT = (function () {
       blocks: [
         {
           name: "Peak normalize",
-          does: ["v5 burst 的 PAPR 大約是 10 dB。Peak 常常大於 1.0。", "Radio 會 clip 大於 1.0 的 samples。",
+          does: ["v5 burst 的 PAPR 大約是 9.5 到 10 dB。Peak 常常大於 1.0。", "Radio 會 clip 大於 1.0 的 samples。",
             "所以這個 block 把每個 burst 的 peak 縮放到 0.7。"],
           input: "一個 burst", output: "Peak 為 0.7 的 burst",
           code: ["<code>transport.py</code>：<code>scale_to_peak</code>"],
@@ -198,16 +209,17 @@ window.GUIDE_CONTENT = (function () {
     },
     {
       id: "rx-phy", cls: "rx", area: "rx-phy", arrow: "left", row: "RX",
-      name: "PHY", line: "Samples 變回 frame bits",
+      name: "PHY", line: "Samples 變回 PSDU",
       sum: "PHY 在 stream 裡找到每個 burst，然後 decode。SIG 告訴 RX 要用哪一種 MCS。RX 也 decode 舊格式（v1–v4）的 burst。",
       blocks: [
         {
           name: "Acquisition",
-          does: ["這個 block 用 Schmidl–Cox metric 找 preamble。STF 每 16 個 samples 重複一次。",
-            "一次計算找兩種 burst：v5 與舊格式。兩種 preamble 都相隔 32 個 samples 重複。",
-            "這個 block 用 STF 估計 coarse CFO，用 LTF 找準確的起點與 fine CFO。",
-            "LTF 有兩個相同的 symbols。相同的部分是 signal，不同的部分是 noise。它只看 data carriers 所在的頻帶，所以每個 burst 都有一個 SNR，就算後面 decode 失敗也一樣。"],
-          input: "Sample stream", output: "Burst 起點、CFO、gain、SNR",
+          does: ["這個 block 計算 samples 與 32 個 samples 之前的 samples 的 correlation。Preamble 重複時，這個 correlation 變大。",
+            "一次計算找兩種 burst：v5 與舊格式（v1–v4）。兩種 preamble 都相隔 32 個 samples 重複。v5 的 window 有 128 個 products，舊格式有 32 個。",
+            "DC offset 或 CW tone 在每個 product 加上一個穩定的成分。這個 block 先減去這個成分，然後比較門檻。",
+            "這個 block 用 STF 估計 coarse CFO，並用 STF 的 coherent correlation 擋掉 tone 與 spur。",
+            "然後它用 LTF 的兩個 symbols 找準確的起點與 fine CFO。舊格式的 training symbol 只像第一個 LTF symbol。所以這一步擋掉舊格式的 burst。"],
+          input: "Sample stream", output: "Burst 起點、CFO",
           code: ["<code>ofdm_link.phy.sync</code>：<code>acquire_all</code>", "<code>ofdm_link.phy.sync_v5</code>", "<code>ofdm_link.phy.streaming</code>：<code>StreamingBurstDecoder</code>"],
           opts: ["<code>phy.rx.v5_stf_threshold</code>（0.20）、<code>v5_correlation_threshold</code>（0.25）", "舊格式：<code>sync.detection_threshold</code>、<code>correlation_threshold</code>"],
           gui: "RX 的 <code>Decode</code> tab：decode funnel；<code>SNR (2 s)</code> card。"
@@ -215,6 +227,7 @@ window.GUIDE_CONTENT = (function () {
         {
           name: "Header decode",
           does: ["這個 block 用兩個 LTF symbols 的平均做 channel estimation。Channel 的 impulse response 比 cyclic prefix 短，所以它把 estimate 平滑成 20 個 taps，去掉大部分的 noise。",
+            "LTF 的兩個 symbols 相同。相同的部分是 signal，不同的部分是 noise。這個 block 只看 data carriers 所在的頻帶。所以每個 burst 都有一個 SNR，就算後面 decode 失敗也一樣。",
             "然後它用 Viterbi decoder 與 CRC-16 解出 3 個 SIG symbols。",
             "CRC 失敗時，RX 丟棄這個 burst。SIG 比最穩的 payload 更耐 noise，所以不需要其他方法。",
             "SIG 解出來之後，它的 symbols 是已知的。這個 block 用它們量出 payload 會遇到的 noise。",
@@ -227,48 +240,59 @@ window.GUIDE_CONTENT = (function () {
         },
         {
           name: "Equalizer",
-          does: ["這個 block 移除 cyclic prefix，然後做 FFT。", "它用 channel estimate 與 4 個 pilots 修正 amplitude 與 phase。",
-            "它也追蹤 sample clock offset。"],
+          does: ["這個 block 移除 cyclic prefix，然後做 FFT。每個 FFT window 在 cyclic prefix 裡提早 3 個 samples 開始。所以 timing 晚一點也不會混進下一個 symbol。",
+            "它用 channel estimate 與 4 個 pilots 修正 amplitude 與 phase。",
+            "它也追蹤 sample clock offset。Pilots 的 phase slope 沿著時間 unwrap。Drift 變大時，它把 FFT window 移動整數個 samples。"],
           input: "Payload OFDM symbols", output: "Equalized data symbols",
           code: ["<code>ofdm_link.phy.channel</code>：<code>equalize_with_pilots</code>", "<code>ofdm_link.phy.burst</code>：sample clock tracking"],
-          opts: ["—"],
+          opts: ["<code>phy.rx.fft_backoff_samples</code>（預設 3）"],
           gui: "RX 的 constellation 與 <code>mean EVM</code>。"
         },
         {
           name: "Demapper",
-          does: ["這個 block 把 symbols 變回 LLRs。它用 SIG 與 LTF 量到的 noise 計算每個 bit 的 LLR。",
-            "然後它用 SIG 的 scrambler seed 還原 scrambling。",
-            "SIG 的 MCS 決定使用哪一種 demapper。"],
-          input: "Equalized symbols", output: "Bits 或 LLRs",
-          code: ["<code>ofdm_link.phy.soft</code>：<code>soft_demap_symbols</code>", "<code>ofdm_link.runtime.factory</code>：<code>select_frame_decoder</code>"],
-          opts: ["由 SIG 的 MCS 決定"], gui: "—"
+          does: ["這個 block 把 symbols 變回 LLRs。",
+            "它用一個 noise variance 計算每個 bit 的 LLR。這個值是 SIG 量到的 noise 與 LTF 量到的 noise 中比較大的那個。",
+            "SIG 的 MCS 決定使用哪一種 demapper：QPSK、16QAM 或 64QAM。"],
+          input: "Equalized symbols", output: "LLRs",
+          code: ["<code>ofdm_link.phy.soft</code>：<code>soft_demap_symbols</code>", "<code>ofdm_link.phy.burst_v5</code>：<code>_sig_noise_variance</code>"],
+          opts: ["由 SIG 的 MCS 決定", "<code>phy.rx.llr_noise_source</code>（預設 <code>max</code>，只用於實驗）"], gui: "—"
+        },
+        {
+          name: "Descrambler",
+          does: ["這個 block 用 SIG 的 scrambler seed 產生同一個序列。",
+            "序列的 bit 是 1 時，它把 LLR 的正負號反過來。所以 FEC decoder 收到 scrambling 之前的 LLRs。"],
+          input: "LLRs", output: "LLRs",
+          code: ["<code>ofdm_link.phy.scrambler</code>：<code>descramble_llrs</code>"],
+          opts: ["由 SIG 的 scrambler seed 決定"], gui: "—"
         },
         {
           name: "FEC decoder",
-          does: ["這個 block 修正 bit errors。", "它先把 LLRs 放回 rate matching 之前的位置。", "Turbo decoder 是 native C++。它最多做 8 次 iterations。",
-            "這一步使用最多 CPU 時間。所以 4 個 worker processes 平行 decode。"],
-          input: "Bits 或 LLRs", output: "Frame bits",
+          does: ["這個 block 修正 bit errors。", "它先把 LLRs 放回 rate matching 之前的位置。被刪除的位置填 0。",
+            "Turbo decoder 是 native C++。它最多做 8 次 iterations。Code block 的 CRC 正確時，它提早停止。",
+            "這一步使用最多 CPU 時間。所以 4 個 worker processes 平行 decode。一個 worker decode 一個 burst。",
+            "最後它檢查整個 PSDU 的 FCS。"],
+          input: "LLRs", output: "PSDU bytes 與 FCS 的結果",
           code: ["<code>ofdm_link.runtime.segment_decode_pool</code>：<code>SegmentDecodePool</code>", "<code>ofdm_link.phy.turbo</code>"],
-          opts: ["<code>--decode-workers</code>（預設 4）"],
+          opts: ["<code>--decode-workers</code>（預設 4）", "<code>phy.rx.turbo_max_iterations</code>（預設 8）"],
           gui: "RX 的 <code>Hardware</code> tab：<code>decode_pool</code> 計數。"
         }
       ]
     },
     {
       id: "rx-link", cls: "rx", area: "rx-link", arrow: "left", row: "RX",
-      name: "Link", line: "CRC 檢查、loss 計數、reassembly",
+      name: "Link", line: "A-MPDU unpack、CRC 檢查、loss 計數、reassembly",
       sum: "Link layer 只接受正確的 frame，然後把 fragments 組回 message。",
       blocks: [
         {
-          name: "Frame check",
-          does: ["這個 block 用 delimiters 把 PSDU 分成 frames。",
+          name: "A-MPDU unpack 與 frame check",
+          does: ["這個 block 用 delimiters 把 PSDU 分成 frames。Delimiter 壞了時，它每 4 bytes 找下一個 delimiter。",
             "CRC-32 正確時，frame 才算 decode 成功。FCS 失敗時，CRC-32 正確的 frames 仍然交付。",
             "Sequence number 跳號時，表示有 frame 遺失。",
             "RX 無法分辨「沒找到 preamble」與「CRC 失敗」。RX 把兩種情況都算成 loss。"],
           input: "PSDU bytes", output: "一個或多個 datagrams",
-          code: ["<code>link.py</code>：<code>MessageReceiver</code>、<code>_SequenceTracker</code>"],
+          code: ["<code>ofdm_link.phy.ampdu</code>：<code>unpack_ampdu</code>", "<code>link.py</code>：<code>MessageReceiver</code>、<code>_SequenceTracker</code>"],
           opts: ["—"],
-          gui: "RX 的 <code>Loss (10 s)</code> card 與 link light。"
+          gui: "RX 的 <code>Loss (10 s)</code> card 與 link light。RX 的 <code>Decode</code> tab：PSDU、subframe 與 delimiter 的計數。"
         },
         {
           name: "Reassembly",
@@ -379,8 +403,8 @@ window.GUIDE_CONTENT = (function () {
     { mod: "channel", cap: "Channel 在 samples 上加 noise。", shape: [["s-z", "noise"], ["s-p", "burst + noise"], ["s-z", "noise"]] },
     { mod: "rx-tr", cap: "RX 收到連續的 stream。Burst 在 stream 裡的某個位置。",
       shape: [["s-z", "idle samples"], ["s-p", "burst + noise"], ["s-z", "idle samples"]] },
-    { mod: "rx-phy", cap: "PHY 找到 burst，讀出 SIG，然後 decode payload。",
-      shape: [["s-h", "frame header 7 B"], ["s-h", "datagram header 28 B"], ["s-p", "fragment ≤ 968 B"], ["s-c", "CRC-32"]] },
+    { mod: "rx-phy", cap: "PHY 找到 burst，讀出 SIG，然後 decode payload。結果是一個 PSDU。",
+      shape: [["s-h", "delimiter 4 B"], ["s-h", "frame header 7 B"], ["s-h", "datagram header 28 B"], ["s-p", "fragment ≤ 968 B"], ["s-c", "CRC-32"], ["s-c", "FCS"]] },
     { mod: "rx-link", cap: "Link layer 把 PSDU 分成 frames，檢查 CRC，然後把 fragments 組回 message。", shape: [["s-p", "message bytes"]] },
     { mod: "rx-app", cap: "RX window 顯示 message，並把它送到 UDP port 52002。", shape: [["s-p", "message bytes"]] },
     { mod: "ext-out", cap: "你的程式收到的 bytes 與來源送出的 bytes 相同。", shape: [["s-p", "message bytes"]] }
