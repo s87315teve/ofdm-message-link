@@ -241,15 +241,19 @@ class _LagMonitor:
 
 
 def _bound_numeric_threads() -> None:
-    """One BLAS/OpenMP thread.
+    """One BLAS/OpenMP thread, and freed buffers kept for reuse.
 
     Unbounded, NumPy's pool spun 19 threads at ~40% CPU each in the receive
     engine during a 330 burst/s video run, and the decode owner starved.
+    The allocator setting stops the owner faulting in fresh pages for every
+    large temporary (see :mod:`ofdm_link.runtime.allocator`).
     """
 
+    from ofdm_link.runtime.allocator import keep_freed_memory
     from ofdm_link.runtime.cpu_budget import apply_cpu_budget
 
     apply_cpu_budget(1)
+    keep_freed_memory()
 
 
 class _NoLag:

@@ -1,0 +1,59 @@
+# rx_throughput_bench.py, 4 decode workers, 65536-sample chunks, 20-core host
+# improve_rx = 3ce3228 (legacy-only RX); before = tx-v5 eb930aa; after = rx-rate
+
+## Traffic: 20 dB SNR white noise, 10 kHz CFO
+stream                                       |                 improve_rx |                     before |                      after
+                                             |     RTF  owner%  ovf  load |     RTF  owner%  ovf  load |     RTF  owner%  ovf  load
+-----------------------------------------------------------------------------------------------------------------------------------
+legacy MCS4 300B 300/s fast                  |      2.67    24%   0  3.93 |      1.53    46%   0  4.01 |      2.02    38%   0  1.10
+legacy MCS4 300B 300/s paced                 |      0.98    28%   0  4.09 |      0.99    44%   0  4.01 |      0.99    37%   0  1.46
+legacy MCS4 300B 500/s fast                  |      1.59    38%   0  3.93 |      1.21    59%   0  4.01 |      1.41    52%   0  1.41
+legacy MCS4 300B 800/s fast                  |      1.10    56%   0  4.09 |      0.86    79%   0  4.01 |      1.01    73%   0  1.41
+legacy MCS4 900B 300/s fast                  |      3.00    22%   0  4.01 |      1.67    38%   0  4.01 |      2.44    30%   0  1.10
+v5 MCS8 900B 200/s fast                      |                          - |      2.08    32%   0  2.69 |      2.95    25%   0  1.13
+v5 MCS14 300B 300/s fast                     |                          - |      1.37    59%   0  2.29 |      1.79    46%   0  1.05
+v5 MCS14 300B 300/s paced                    |                          - |      0.99    62%   0  2.88 |      0.99    44%   0  1.20
+v5 MCS14 300B 500/s fast                     |                          - |      0.85    86%   0  2.67 |      1.21    64%   0  1.05
+v5 MCS14 300B 800/s fast                     |                          - |      0.61   123%   0  2.69 |      0.82    94%   0  1.13
+v5 MCS16 900B 300/s fast                     |                          - |      1.28    60%   0  1.98 |      1.78    44%   0  1.07
+v5 MCS16 900B 300/s paced                    |                          - |      0.98    59%   0  2.88 |      0.99    47%   0  1.20
+v5 MCS16 900B 500/s fast                     |                          - |      1.02    76%   0  2.14 |      1.23    62%   0  1.07
+v5 MCS16 900B 800/s fast                     |                          - |      0.65   117%   0  2.29 |      0.80    93%   0  1.14
+
+RTF = stream seconds / wall seconds (fast mode; paced mode is capped at ~1).
+owner% = rx-worker thread CPU / stream seconds (share of one core at real time).
+ovf = chunks dropped because the 16-deep source queue was full (paced mode).
+load = /proc/loadavg 1-min at the end of the run.
+
+## Interference: no bursts unless a rate is given; noise 9e-6 (Pluto-like idle);
+## traffic rows: 20 dB in-band SNR, guard band +10 dB, DC 0.003
+stream                                       |                     before |                      after
+                                             |     RTF  owner%  ovf  load |     RTF  owner%  ovf  load
+------------------------------------------------------------------------------------------------------
+v5 MCS14 300B 300/s fast dc0.003 guard+10    |      0.94    90%   0  1.77 |      1.36    61%   0  1.63
+v5 MCS14 300B 300/s paced dc0.003 guard+10   |      0.98    86%   0  1.79 |      0.99    64%   0  1.98
+v5 MCS14 300B 500/s fast dc0.003 guard+10    |      0.74   112%   0  1.79 |      1.08    76%   0  1.63
+no bursts                                    |      4.37    20%   0  1.98 |      5.48    16%   0  1.46
+no bursts tone0.003                          |      0.18   552%   0  1.70 |      3.74    24%   0  1.42
+no bursts tone0.01                           |      0.10   959%   0  1.67 |      2.47    38%   0  1.42
+no bursts dc0.003                            |      0.18   556%   0  1.98 |      3.76    24%   0  1.46
+no bursts dc0.003 guard+10                   |      0.52   188%   0  1.67 |      3.56    26%   0  1.42
+no bursts dc0.01                             |      0.11   884%   0  1.83 |      2.44    38%   0  1.46
+
+## sim_acq.py, 1000 trials (before == after, identical output)
+loadavg start: 1.09 1.04 0.94 3/2634 393598
+1000 trials/point
+channel   SNR  P_legacy  P_v5   cross(leg->v5, v5->leg)
+AWGN     -6    0.009   0.006   0, 0
+AWGN     -4    0.049   0.328   0, 0
+AWGN     -2    0.328   0.930   0, 0
+AWGN     +0    0.810   0.999   0, 0
+AWGN     +2    0.998   1.000   0, 0
+AWGN     +4    1.000   1.000   0, 0
+5-tap    -6    0.004   0.000   0, 0
+5-tap    -4    0.056   0.084   0, 0
+5-tap    -2    0.321   0.784   0, 0
+5-tap    +0    0.816   0.999   0, 0
+5-tap    +2    0.997   1.000   0, 0
+5-tap    +4    1.000   1.000   0, 0
+loadavg end: 1.07 1.04 0.94 1/2649 394703

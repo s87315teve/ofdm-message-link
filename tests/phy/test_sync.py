@@ -12,6 +12,7 @@ from ofdm_link.phy.sync import (
     AcquisitionResult,
     SyncConfig,
     SyncError,
+    _cfo_corrected_correlation,
     _moving_sum,
     acquire_preamble,
     generate_preamble,
@@ -270,3 +271,20 @@ def test_noise_alone_stays_far_below_the_correlation_threshold() -> None:
     ).astype(np.complex64) / np.sqrt(2.0)
 
     assert acquire_preamble(noise, config) is None
+
+
+
+@pytest.mark.parametrize("length", [80, 77, 8, 3])
+def test_cfo_corrected_correlation_matches_rotating_each_window(length: int) -> None:
+    # The legacy coherent stage builds its rotation phasors in two factors;
+    # the result must be the rotate-then-correlate value it replaced.
+    rng = np.random.default_rng(length)
+    shape = (37, length)
+    windows = (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(np.complex64)
+    reference = np.exp(1j * rng.uniform(0, 2 * np.pi, length))
+    step = rng.uniform(-np.pi / 32, np.pi / 32, 37)
+    direct = (windows * np.exp(1j * step[:, None] * np.arange(length)[None, :])) @ reference
+
+    factored = _cfo_corrected_correlation(windows, reference, step)
+
+    np.testing.assert_allclose(factored, direct, rtol=1e-12, atol=1e-12)
