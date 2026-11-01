@@ -10,6 +10,12 @@ A-MPDU of one or more serialized frames, one datagram per frame, so several
 small datagrams can share one preamble and SIG.  The receiver decodes v5 and
 legacy v1-v4 bursts side by side, because older transmitters stay in use.
 
+Two-way use (``node_app``) adds a link layer on top without changing what a
+one-way peer sees: a node puts one CONTROL frame first in each burst (see
+:mod:`.control`), numbered from a separate control sequence so DATA sequences
+stay contiguous.  The hooks for that are optional and default to off, so
+``tx_app`` and ``rx_app`` produce and accept exactly what they always did.
+
 Loss is therefore real and visible.  :class:`MessageReceiver` reports it from
 gaps in the PHY frame sequence number, which cannot distinguish a burst whose
 preamble was never detected from one that failed its CRC; both are counted as
@@ -20,12 +26,15 @@ subframe costs only itself and shows up as a one-frame gap.
 
 from __future__ import annotations
 
+import enum
 import itertools
 import threading
+import time
 from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -61,6 +70,7 @@ from ofdm_link.runtime.factory import build_burst_config, select_frame_decoder
 from . import datagram
 from .aggregation import AggregationLimits, plan_aggregate
 from .datagram import Datagram, ReassembledMessage, Reassembler
+from .la.api import BurstReport
 
 DEFAULT_FRAME_PAYLOAD_BYTES = 996
 # Serialized frame overhead around a datagram: 7-byte header + CRC-32.
@@ -72,6 +82,9 @@ _DECODER_CHUNK_SAMPLES = 8192
 _SEQUENCE_MODULUS = 1 << 16
 # Non-zero 802.11 scrambler seeds; 0 would switch the scrambler off.
 _SCRAMBLER_SEEDS = 127
+DEFAULT_SEED_RANGE = (1, _SCRAMBLER_SEEDS)
+# DATA burst reports kept between two drains.
+BURST_REPORT_HISTORY = 256
 
 
 def load_link_config(config_path: str | Path, overlays: Sequence[str | Path] = ()) -> LinkConfig:
@@ -223,6 +236,12 @@ def mpdu_length(piece: Datagram) -> int:
     return FRAME_OVERHEAD_BYTES + datagram.HEADER_SIZE + len(piece.payload)
 
 
+def control_mpdu_length(payload: bytes) -> int:
+    """Bytes one CONTROL payload occupies as a serialized frame (one MPDU)."""
+
+    return FRAME_OVERHEAD_BYTES + len(payload)
+
+
 def aggregate_body_length(datagrams: Sequence[Datagram]) -> int:
     """A-MPDU body bytes (PSDU FCS excluded) for these datagrams as subframes."""
 
@@ -236,6 +255,9 @@ class OutgoingBurst:
     ``samples`` include the guards.  ``sequences[i]`` is the PHY frame
     sequence number of ``datagrams[i]``; they are consecutive because numbers
     are assigned when the burst is encoded, in transmission order.
+
+    ``control_sequences`` number the CONTROL frames that precede the data
+    (from their own counter); a control-only burst has no datagrams.
     """
 
     samples: NDArray[np.complex64]
@@ -245,12 +267,18 @@ class OutgoingBurst:
     modulation: MCS
     wire_version: int
     psdu_bytes: int
+    control_sequences: tuple[int, ...] = ()
+    scrambler_seed: int = 0
 
     @property
     def sequence(self) -> int:
-        """Sequence number of the first frame: the burst's name in logs."""
+        """First DATA sequence number (the control one for a control-only burst)."""
 
-        return self.sequences[0]
+        return self.sequences[0] if self.sequences else self.control_sequences[0]
+
+    @property
+    def control_only(self) -> bool:
+        return not self.datagrams
 
     @property
     def subframe_count(self) -> int:
@@ -282,9 +310,20 @@ class MessageTransmitter:
         *,
         mcs_entry: McsTableEntry | None = None,
         scrambler: bool | None = None,
+        seed_range: tuple[int, int] = DEFAULT_SEED_RANGE,
     ) -> None:
+        """``seed_range`` (inclusive, within 1..127) is the scrambler seeds this
+        transmitter cycles through; two nodes on one channel use disjoint
+        ranges so a receiver can tell their bursts apart from the SIG alone.
+        """
+
         if not isinstance(profile, PhyProfile):
             raise TypeError("profile must be a PhyProfile")
+        low, high = seed_range
+        if not (type(low) is int and type(high) is int and 1 <= low <= high <= _SCRAMBLER_SEEDS):
+            raise ValueError("seed_range must be (low, high) with 1 <= low <= high <= 127")
+        self._seed_low = low
+        self._seed_count = high - low + 1
         entry = default_v5_entry(profile.mcs) if mcs_entry is None else mcs_entry
         self._profile = profile
         self._burst_config = build_burst_config(profile.config)
@@ -293,6 +332,7 @@ class MessageTransmitter:
         self._scrambler = profile.scrambler if scrambler is None else bool(scrambler)
         self._codec_lock = threading.Lock()
         self._sequence = itertools.count()
+        self._control_sequence = itertools.count()
         self._seed_counter = itertools.count()
         self._message_ids = itertools.count(1)
         self._origin = datagram.local_origin()
@@ -306,6 +346,10 @@ class MessageTransmitter:
     @property
     def origin(self) -> int:
         return self._origin
+
+    @property
+    def seed_range(self) -> tuple[int, int]:
+        return (self._seed_low, self._seed_low + self._seed_count - 1)
 
     @property
     def active_mcs_entry(self) -> McsTableEntry:
@@ -348,22 +392,34 @@ class MessageTransmitter:
         datagrams: Sequence[Datagram],
         limits: AggregationLimits,
         entry: McsTableEntry | None = None,
+        *,
+        extra_mpdu_lengths: Sequence[int] = (),
     ) -> int:
-        """How many leading ``datagrams`` the next burst should carry (FIFO)."""
+        """How many leading ``datagrams`` the next burst should carry (FIFO).
+
+        ``extra_mpdu_lengths`` are MPDUs that go first in the burst (CONTROL
+        frames); they count against every cap.  At least one datagram is
+        still taken from a non-empty queue, as without extras.
+        """
 
         chosen = self.active_mcs_entry if entry is None else entry
-        return plan_aggregate(
-            [mpdu_length(piece) for piece in datagrams],
+        extras = [int(length) for length in extra_mpdu_lengths]
+        take = plan_aggregate(
+            [*extras, *(mpdu_length(piece) for piece in datagrams)],
             lambda body: self.burst_sample_count(chosen, body),
             self._profile.sample_rate,
             limits,
         )
+        if not extras:
+            return take
+        return min(len(datagrams), max(take - len(extras), 1))
 
     def encode_datagrams(
         self,
         datagrams: Sequence[Datagram],
         *,
         entry: McsTableEntry | None = None,
+        control_payloads: Sequence[bytes] = (),
     ) -> OutgoingBurst:
         """Encode ``datagrams`` as the subframes of one v5 burst, in order.
 
@@ -373,16 +429,42 @@ class MessageTransmitter:
         also takes the next scrambler seed (1..127) so that constellation
         statistics, PAPR and the level after peak scaling do not depend on
         what the application sent.
+
+        ``control_payloads`` become CONTROL frames ahead of the data, each
+        numbered from the separate control sequence; ``datagrams`` may then
+        be empty (a control-only burst).
         """
 
         pieces = tuple(datagrams)
-        if not pieces:
-            raise ValueError("a burst needs at least one datagram")
+        controls = tuple(control_payloads)
+        if not pieces and not controls:
+            raise ValueError("a burst needs at least one datagram or control payload")
+        if any(type(payload) is not bytes for payload in controls):
+            raise TypeError("control payloads must be bytes")
         chosen = self.active_mcs_entry if entry is None else require_v5_entry(entry)
         with self._codec_lock:
+            control_sequences = tuple(
+                next(self._control_sequence) % _SEQUENCE_MODULUS for _ in controls
+            )
             sequences = tuple(next(self._sequence) % _SEQUENCE_MODULUS for _ in pieces)
-            seed = next(self._seed_counter) % _SCRAMBLER_SEEDS + 1 if self._scrambler else 0
+            seed = (
+                next(self._seed_counter) % self._seed_count + self._seed_low
+                if self._scrambler
+                else 0
+            )
         mpdus = [
+            serialize_frame(
+                Frame(
+                    protocol_version=CURRENT_PROTOCOL_VERSION,
+                    kind=FrameKind.CONTROL,
+                    mcs=chosen.modulation,
+                    sequence=sequence,
+                    payload=payload,
+                )
+            )
+            for sequence, payload in zip(control_sequences, controls, strict=True)
+        ]
+        mpdus += [
             serialize_frame(
                 Frame(
                     protocol_version=CURRENT_PROTOCOL_VERSION,
@@ -408,6 +490,8 @@ class MessageTransmitter:
             modulation=chosen.modulation,
             wire_version=V5_WIRE_VERSION,
             psdu_bytes=encoded.header.psdu_length,
+            control_sequences=control_sequences,
+            scrambler_seed=seed,
         )
 
     def encode_message(self, message: bytes) -> tuple[OutgoingBurst, ...]:
@@ -456,6 +540,10 @@ class ReceiveStats:
     subframes_bad: int = 0
     bad_delimiters: int = 0
     delimiter_resyncs: int = 0
+    # CRC-valid CONTROL frames (link-layer PDUs, never datagrams), and bursts
+    # a control handler dropped whole (a node's own leakage).
+    control_frames: int = 0
+    dropped_bursts: int = 0
 
     @property
     def expected_bursts(self) -> int:
@@ -552,6 +640,8 @@ class _BurstContext:
     payload_symbols: NDArray[np.complex64]
     evm: float | None
     effective_snr_db: float | None
+    # Absolute stream offset of the burst, the key for its preamble SNR.
+    burst_start: int | None = None
 
 
 @dataclass
@@ -579,8 +669,43 @@ class _SequenceTracker:
         self.last = sequence
 
 
+@dataclass(frozen=True, slots=True)
+class ControlContext:
+    """What the receiver knows about the burst a CONTROL frame came in.
+
+    ``link_snr_db`` is that burst's preamble SNR, None if it was not measured.
+    """
+
+    t_s: float
+    mcs_index: int | None
+    link_snr_db: float | None
+    control_sequence: int
+
+
+class ControlVerdict(enum.Enum):
+    """A control handler's answer.  DROP_BURST counts only for the burst's
+    first CRC-valid subframe: the whole PSDU is then neither tracked nor
+    delivered (a node uses it for its own transmitter's leakage)."""
+
+    ACCEPT = 0
+    DROP_BURST = 1
+
+
+class ControlHandler(Protocol):
+    """Receives the payload of every CRC-valid CONTROL frame, on the RX thread."""
+
+    def on_control(self, payload: bytes, context: ControlContext) -> ControlVerdict: ...
+
+
 class MessageReceiver:
-    """Recover application messages from a free-running sample stream."""
+    """Recover application messages from a free-running sample stream.
+
+    CONTROL frames are never datagrams: they are counted in
+    ``ReceiveStats.control_frames`` and, if a ``control_handler`` is given,
+    handed to it.  Every burst that carried at least one of our DATA frames
+    is also summarised as a :class:`~ofdm_message_link.la.api.BurstReport`
+    for :meth:`drain_burst_reports`.
+    """
 
     def __init__(
         self,
@@ -589,6 +714,8 @@ class MessageReceiver:
         max_pending_messages: int = 16,
         max_observations: int = 64,
         decode_workers: int = 1,
+        control_handler: ControlHandler | None = None,
+        clock=time.monotonic,
     ) -> None:
         if not isinstance(profile, PhyProfile):
             raise TypeError("profile must be a PhyProfile")
@@ -606,6 +733,9 @@ class MessageReceiver:
         self._origin = datagram.local_origin()
         self._stats = ReceiveStats()
         self._observations: deque[BurstObservation] = deque(maxlen=max_observations)
+        self._control_handler = control_handler
+        self._clock = clock
+        self._burst_reports: deque[BurstReport] = deque(maxlen=BURST_REPORT_HISTORY)
         # One worker keeps the original inline decoder untouched.  More move
         # each burst's payload decode, and its quality measurement, to worker
         # processes while acquisition and headers stay on this owner.
@@ -645,6 +775,18 @@ class MessageReceiver:
 
         drained = tuple(self._observations)
         self._observations.clear()
+        return drained
+
+    def drain_burst_reports(self) -> tuple[BurstReport, ...]:
+        """Take the report of every DATA burst accepted since the last call.
+
+        Bounded like :meth:`drain_observations`.  ``subframes_lost`` is the
+        growth of the DATA sequence-gap count at that burst, so it covers
+        whole bursts missed before it as well as its own bad subframes.
+        """
+
+        drained = tuple(self._burst_reports)
+        self._burst_reports.clear()
         return drained
 
     def drain_link_snr_db(self) -> tuple[float, ...]:
@@ -748,9 +890,20 @@ class MessageReceiver:
             payload_symbols=burst.payload_symbols,
             evm=quality[0],
             effective_snr_db=quality[1],
+            burst_start=getattr(burst, "burst_start", None),
         )
+        if frame.kind == FrameKind.CONTROL:
+            verdict = self._accept_control(frame, context)
+            if verdict is ControlVerdict.DROP_BURST:
+                self._stats = replace(self._stats, dropped_bursts=self._stats.dropped_bursts + 1)
+                return []
+            self._observe(context, frame.sequence, is_ours=False, subframes=1)
+            return []
+        missing_before = self._tracker.missing
         delivered, is_ours = self._accept_frame(frame, context)
         self._observe(context, frame.sequence, is_ours=is_ours, subframes=1)
+        if is_ours:
+            self._report_burst(context, frame.sequence, 1, missing_before, fcs_ok=None)
         return delivered
 
     def _accept_psdu(self, burst, quality) -> list[ReceivedMessage]:
@@ -770,11 +923,16 @@ class MessageReceiver:
             payload_symbols=burst.payload_symbols,
             evm=quality[0],
             effective_snr_db=quality[1],
+            burst_start=getattr(burst, "burst_start", None),
         )
         delivered: list[ReceivedMessage] = []
         good = bad = 0
         first_sequence: int | None = None
+        first_control: int | None = None
+        first_data: int | None = None
+        data_ok = 0
         any_ours = False
+        missing_before = self._tracker.missing
         for mpdu in parsed.mpdus:
             try:
                 frame = deserialize_frame(mpdu)
@@ -782,11 +940,27 @@ class MessageReceiver:
                 bad += 1
                 continue
             good += 1
+            if frame.kind == FrameKind.CONTROL:
+                verdict = self._accept_control(frame, context)
+                if good == 1 and verdict is ControlVerdict.DROP_BURST:
+                    self._stats = replace(
+                        self._stats, dropped_bursts=self._stats.dropped_bursts + 1
+                    )
+                    return []
+                if first_control is None:
+                    first_control = frame.sequence
+                continue
             if first_sequence is None:
                 first_sequence = frame.sequence
             messages, is_ours = self._accept_frame(frame, context)
+            if is_ours:
+                data_ok += 1
+                if first_data is None:
+                    first_data = frame.sequence
             any_ours = any_ours or is_ours
             delivered.extend(messages)
+        if first_sequence is None:
+            first_sequence = first_control
         self._stats = replace(
             self._stats,
             psdus_received=self._stats.psdus_received + 1,
@@ -798,7 +972,56 @@ class MessageReceiver:
         )
         if first_sequence is not None:
             self._observe(context, first_sequence, is_ours=any_ours, subframes=good)
+        if first_data is not None:
+            self._report_burst(
+                context,
+                first_data,
+                data_ok,
+                missing_before,
+                fcs_ok=bool(burst.result.fcs_ok),
+            )
         return delivered
+
+    def _accept_control(self, frame: Frame, context: _BurstContext) -> ControlVerdict:
+        """Count one CRC-valid CONTROL frame and hand it to the handler."""
+
+        self._stats = replace(self._stats, control_frames=self._stats.control_frames + 1)
+        if self._control_handler is None:
+            return ControlVerdict.ACCEPT
+        verdict = self._control_handler.on_control(
+            frame.payload,
+            ControlContext(
+                t_s=self._clock(),
+                mcs_index=context.mcs_index,
+                link_snr_db=self._snr_at(context.burst_start),
+                control_sequence=frame.sequence,
+            ),
+        )
+        return verdict if isinstance(verdict, ControlVerdict) else ControlVerdict.ACCEPT
+
+    def _report_burst(
+        self,
+        context: _BurstContext,
+        first_sequence: int,
+        subframes_ok: int,
+        missing_before: int,
+        *,
+        fcs_ok: bool | None,
+    ) -> None:
+        self._burst_reports.append(
+            BurstReport(
+                t_s=self._clock(),
+                first_sequence=first_sequence,
+                mcs_index=context.mcs_index,
+                snr_db=self._snr_at(context.burst_start),
+                subframes_ok=subframes_ok,
+                subframes_lost=self._tracker.missing - missing_before,
+                fcs_ok=fcs_ok,
+            )
+        )
+
+    def _snr_at(self, burst_start: int | None) -> float | None:
+        return None if burst_start is None else self._decoder.snr_at(burst_start)
 
     def _observe(
         self, context: _BurstContext, sequence: int, *, is_ours: bool, subframes: int

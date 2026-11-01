@@ -16,36 +16,15 @@ from dataclasses import dataclass
 
 from ofdm_link.phy.mcs_table import mcs_entry
 
+from .la.thresholds import load_thresholds
 from .link import RateMeter
 
-# Preamble SNR each MCS needs, from the Pluto-to-Pluto captures in
-# docs/08-measurements.md (8.7): the lowest SNR at which the receiver lost
-# under 1 % of 900-byte bursts, plus 1 dB, rounded to 0.5 dB.  The SNR is the
-# in-band thermal SNR the SNR card shows.  It is not the scale of v1.0.0's
-# 8 / 11 dB, which came from the EVM and read 2-4 dB lower: by TX power the
-# new receiver needs about 10 dB less for MCS 0 and 5 dB less for MCS 4.  An
-# MCS missing here has no measured threshold, and its light is judged on
-# loss alone.
-#
-# The wire-v5 values (8-17) come from the v5 captures in docs/08-measurements.md
-# (8.8), same rule; the SNR is the in-band SNR of the two LTF symbols.  At the
-# same TX gain it reads about 3 dB above the legacy preamble's, because the
-# scrambled v5 waveform has about 3 dB less PAPR and so leaves more mean power
-# after peak normalization; at equal SNR, v5 MCS 8 needs about 3 dB less than
-# MCS 0.  MCS 14 needs more than MCS 15 for the same 3 bits per symbol.
-SNR_THRESHOLD_DB: Mapping[int, float] = {
-    0: 9.0,
-    4: 15.0,
-    8: 7.5,
-    9: 9.0,
-    10: 11.0,
-    12: 14.0,
-    13: 15.5,
-    14: 17.5,
-    15: 16.5,
-    16: 21.0,
-    17: 22.0,
-}
+# Preamble SNR each MCS needs for < 1 % loss, plus 1 dB: the measured table in
+# configs/la/thresholds_pluto_v5.yaml, which the link adaptation reads too (see
+# the file for the captures behind it).  The SNR is the in-band preamble SNR
+# the SNR card shows.  An MCS missing here has no measured threshold, and its
+# light is judged on loss alone.
+SNR_THRESHOLD_DB: Mapping[int, float] = load_thresholds()
 
 LOSS_WINDOW_S = 10.0
 SNR_WINDOW_S = 2.0

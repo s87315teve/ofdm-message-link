@@ -44,6 +44,10 @@ if TYPE_CHECKING:
 # Preamble SNR readings kept between two drains; a caller that stops draining
 # loses the oldest rather than growing the decoder without bound.
 LINK_SNR_HISTORY = 4096
+# Preamble SNRs kept by stream offset for :meth:`StreamingBurstDecoder.snr_at`.
+# A burst is looked up once its payload has decoded, which with decode
+# workers can be several bursts after its acquisition; this is ample.
+SNR_AT_HISTORY = 512
 
 
 def link_snr_db(
@@ -211,6 +215,7 @@ class StreamingBurstDecoder:
         self._mode: str | None = None
         self._link_snrs: deque[float] = deque(maxlen=LINK_SNR_HISTORY)
         self._last_snr_start: int | None = None
+        self._snr_by_start: deque[tuple[int, float]] = deque(maxlen=SNR_AT_HISTORY)
 
     @property
     def config(self) -> BurstConfig:
@@ -254,6 +259,29 @@ class StreamingBurstDecoder:
         self._link_snrs.clear()
         return drained
 
+    def snr_at(
+        self, burst_start: int, *, tolerance: int = V5_PREAMBLE_LENGTH
+    ) -> float | None:
+        """Preamble SNR, in dB, of the burst that starts at ``burst_start``.
+
+        ``burst_start`` is an absolute stream offset, as a decoded burst
+        reports it on either path (:meth:`feed` or a decoded
+        :class:`BurstSegment`).  The reading recorded nearest to it within
+        ``tolerance`` samples is returned, or None if there is none: the
+        burst is older than the bounded history, or its preamble could not
+        be measured.  Unlike :meth:`drain_link_snr_db`, this does not consume
+        anything.
+        """
+
+        best: tuple[int, float] | None = None
+        for start, snr in reversed(self._snr_by_start):
+            if start < burst_start - tolerance:
+                break
+            distance = abs(start - burst_start)
+            if distance <= tolerance and (best is None or distance < best[0]):
+                best = (distance, snr)
+        return None if best is None else best[1]
+
     def _note_acquisition(self, acquisition: AnyAcquisition) -> None:
         """Count one acquisition and record its SNR, once per physical preamble.
 
@@ -285,6 +313,7 @@ class StreamingBurstDecoder:
         snr = link_snr_db(measurement, numerology)
         if snr is not None:
             self._link_snrs.append(snr)
+            self._snr_by_start.append((start, snr))
 
     def feed(self, complex_chunk: ArrayLike) -> tuple[AnyDecodedBurst, ...]:
         """Consume one contiguous sample chunk and emit every complete burst.

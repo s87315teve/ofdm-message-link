@@ -165,4 +165,55 @@ preamble 偵測、channel estimation、burst header，以及完整 burst 在有 
 
 修改 PHY 之後，除了跑測試，也請重新產生互動導覽的資料：`python -m guide.build_data`。
 
+## 7.7 雙向 link 的 control 與 feedback wire format
+
+只有雙向的 `node_app` 會送 control frame。`tx_app` 與 `rx_app` 沒有設定 hook 時，送出與接收的內容
+都和以前一樣（`tests/app/test_tx_policy.py` 用固定 seed 比對 burst 的 hash）。
+
+**位置。** Node 的每個 v5 burst 的第一個 MPDU 是一個 `FrameKind.CONTROL` frame：`mcs` = 該 burst
+的 modulation，`sequence` 來自一個**獨立的** 16-bit control counter，payload 是一個 Link Control PDU
+（LCP）。DATA frame 的 sequence 因此保持連續，舊版 `rx_app` 不會看到假的 gap，只把 CONTROL frame
+記在 `control_frames`。沒有 data 時，node 送一個只含 CONTROL frame 的 control-only burst（MCS 8）。
+兩個 node 用不同的 scrambler seed 範圍：node 1 用 1–63，node 2 用 64–127（`tx_app` 仍用 1–127）。
+
+**LCP header（8 bytes，big-endian）**
+
+| Offset | 欄位 | 型別 | 說明 |
+|---:|---|---|---|
+| 0 | magic | u16 | `0x4C43`（"LC"） |
+| 2 | version | u8 | 1；其他版本整個 LCP 被忽略 |
+| 3 | pdu_type | u8 | 1 LINK_HEADER、2 FEEDBACK、3 STATUS（保留給 ARQ）；不認得的 type 被忽略 |
+| 4 | src_node | u8 | 1–254；等於自己的 id 時，整個 PSDU 是自己 TX 的洩漏，丟棄 |
+| 5 | dst_node | u8 | 0 = 任何 node |
+| 6 | flags | u8 | b0 CONTROL_ONLY、b1 LBT_MODE、b2 TX_QUEUE_NONEMPTY |
+| 7 | body_length | u8 | LINK_HEADER 為 0 |
+
+**FEEDBACK body v1（36 bytes 固定部分）**
+
+| Offset | 欄位 | 型別 | 說明 |
+|---:|---|---|---|
+| 0 | report_seq | u16 | 每份 report +1；TX 忽略不是較新的值 |
+| 2 | window_ms | u16 | SNR 統計的時間窗 |
+| 4 | age_ms | u16 | 時間窗結束到 encode 的時間（飽和） |
+| 6 | preambles | u16 | 時間窗內 peer 的所有 preamble |
+| 8 / 10 / 12 | snr_mean / p10 / last | i16 | 0.01 dB；`0x8000` = 無 |
+| 14 | data_ok_total | u32 | 累計 CRC 正確的 DATA subframe |
+| 18 | data_lost_total | u32 | 累計 DATA sequence gap |
+| 22 | last_data_seq | u16 | fb_flags b0 = 1 時才有效 |
+| 24 / 26 / 28 | psdu_fcs_fail / header_fail / rx_overflow total | u16 | 累計，mod 2^16 |
+| 30 | last_mcs_index | u8 | `0xFF` = 無 |
+| 31 | fb_flags | u8 | b0 last_seq_valid、b1 clipping_seen、b2 decode_backlog |
+| 32 | reporter_id | u8 | 0 = 內建 reporter |
+| 33 | n_entries | u8 | ≤ 16 |
+| 34 | tlv_length | u16 | entries 後面 TLV 的 bytes |
+| 36 | entries | 6 B 各一 | seq_first u16、mcs u8、snr 0.25 dB u8（`0xFF` = 無）、ok u8、lost u8 |
+| … | TLVs | | type u8、len u8、value；0x80–0xFF 給自訂 reporter |
+
+- 計數器是累計值，所以掉了幾份 feedback 也不會遺失資訊：TX 把收到的兩份相減。
+- 解碼端遇到任何格式錯誤都回傳 `None`，不會丟例外；body 比已知的長時，多出的部分被忽略。
+- 成本：LINK_HEADER 每個 burst 24 bytes（含 delimiter 與 padding）；4 個 entries 的 FEEDBACK
+  是 84 bytes。
+- Codec 在 [`ofdm_message_link/control.py`](../src/ofdm_message_link/control.py)，report 的資料結構在
+  [`ofdm_message_link/la/api.py`](../src/ofdm_message_link/la/api.py)。
+
 回到 [README](../README.md)。
