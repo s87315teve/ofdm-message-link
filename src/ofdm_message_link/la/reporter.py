@@ -2,7 +2,8 @@
 
 What it measures: the SNR of every peer preamble in the window (mean,
 10th percentile and last, in dB), cumulative counts of DATA subframes the
-peer's bursts delivered and lost, the receiver's health counters, and up to
+peer's bursts delivered and lost, the receiver's health counters (clipping
+and decode backlog: set if any chunk in the window had them), and up to
 ``max_entries`` of the most recent DATA bursts as compact entries.
 
 When a report is due:
@@ -91,6 +92,9 @@ class DefaultReporter:
         self._last_data_seq: int | None = None
         self._last_mcs: int | None = None
         self._health: RxHealth | None = None
+        # Per-chunk flags, ORed over the report window.
+        self._clipping_seen = False
+        self._decode_backlog = False
 
     def _seen(self, now_s: float) -> None:
         if self._first_seen_t is None:
@@ -122,6 +126,8 @@ class DefaultReporter:
     def on_rx_health(self, now_s: float, health: RxHealth) -> None:
         self._seen(now_s)
         self._health = health
+        self._clipping_seen = self._clipping_seen or bool(health.clipping_seen)
+        self._decode_backlog = self._decode_backlog or bool(health.decode_backlog)
 
     def next_due_s(self, now_s: float) -> float | None:
         reference = self._last_report_t
@@ -147,9 +153,9 @@ class DefaultReporter:
         flags = 0
         if self._last_data_seq is not None:
             flags |= FLAG_LAST_SEQ_VALID
-        if health is not None and health.clipping_seen:
+        if self._clipping_seen:
             flags |= FLAG_CLIPPING_SEEN
-        if health is not None and health.decode_backlog:
+        if self._decode_backlog:
             flags |= FLAG_DECODE_BACKLOG
         entries = tuple(self._entries)[-self.max_entries :] if self.max_entries else ()
         report = FeedbackReport(
@@ -181,6 +187,8 @@ class DefaultReporter:
         self._snr_last = None
         self._entries.clear()
         self._new_data = False
+        self._clipping_seen = False
+        self._decode_backlog = False
         return report
 
 
