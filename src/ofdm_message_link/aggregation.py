@@ -29,7 +29,8 @@ class AggregationLimits:
     """Caps on one aggregate; ``enabled=False`` sends one MPDU per burst.
 
     ``min_burst_interval_s`` is a burst-rate cap: a burst is held until that
-    long after the previous one was handed to the radio, collecting more
+    long after the previous one started to be handed to the radio (start to
+    start, so a long burst is never followed by idle air), collecting more
     datagrams meanwhile.  0 disables it.  The dataclass default is 0 so a bare
     ``AggregationLimits()`` keeps the plain opportunistic behaviour; the
     configuration's default (4 ms) is applied by ``options.aggregation_limits``.
