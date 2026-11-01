@@ -271,7 +271,7 @@ entry 已移除）、`thresholds_db`（MCS index → 1 % loss 需要的 preamble
 
 ```python
 # my_la.py
-from ofdm_message_link.la.api import Decision, LaContext, is_newer_seq
+from ofdm_message_link.la.api import Decision, FeedbackTracker, LaContext
 
 
 class Threshold:
@@ -282,15 +282,14 @@ class Threshold:
         self.thresholds = context.thresholds_db   # MCS index -> dB
         self.margin_db = float(margin_db)
         self.mcs = context.initial_mcs_index
-        self.last_seq = None
+        self.tracker = FeedbackTracker()          # 處理重複、舊的 report 與 peer 重新啟動
 
     def on_sent(self, burst):                     # SentBurst；不用可以忽略
         pass
 
     def on_feedback(self, report):
-        if self.last_seq is not None and not is_newer_seq(report.report_seq, self.last_seq):
+        if self.tracker.update(report) is None:
             return                                # 舊的或重複的 report
-        self.last_seq = report.report_seq
         if report.snr_mean_db is None:
             return
         fits = [e.index for e in self.ladder
@@ -336,9 +335,13 @@ PC 上經 UDP 交換 samples，`--la-log PATH` 會記下每個 decision 與 feed
 
 - `decide` 在每個 data burst 之前呼叫，要快。回傳 `context.ladder` 裡的 index；其他
   transmit-visible 的 v5 index 也接受，不合法的 index 會換成較慢的最近 rung，並記錄在 log。
-- 計數器是累計值，而且會 wrap：用 `counter_delta(new, old)` 相減，用
-  `is_newer_seq(new, old)` 判斷 report 是否較新。掉幾份 feedback 不會遺失資訊。
-- 第一份 report 只當基準：沒有前一份可以相減。
+- 計數器是累計值，而且會 wrap。不要自己比 `report_seq` 或相減：用 `FeedbackTracker`。`update(report)` 對晚到或重複的
+  report 回傳 `None`（忽略）；否則回傳 `FeedbackDelta`，裡面是這份 report 相對於上一份新增的 `ok`、`lost`
+  （已處理 u32 wrap）。Peer 重新啟動時（`session_id` 不同、超過 `rebaseline_after_s` 沒收到 report，或計數器倒退），
+  它的第一份 report 只當新的基準，`rebaselined` 會說明原因（`"first"`、`"session"`、`"gap"`、`"backwards"`），`ok` 與
+  `lost` 是 0。只比 `report_seq` 的寫法會在 peer 重新啟動後（序號從 0 開始）忽略它約 11 分鐘。掉幾份 feedback 不會遺失
+  資訊。純粹的 `counter_delta(new, old)` 與 `is_newer_seq(new, old)` 仍在 `la.api`，但自訂演算法應該用 `FeedbackTracker`。
+- 第一份 report 只當基準：沒有前一份可以相減（`FeedbackTracker` 會回傳 `rebaselined="first"`）。
 - `snapshot` 只回傳可以轉成 JSON 的值；GUI 的 Link adaptation tab 與 `--la-log` 會顯示。
 - Method 不會同時被呼叫（controller 持有一把 lock），不需要自己加 lock。時間都是
   `time.monotonic()` 的秒數。

@@ -35,6 +35,12 @@ TX 和 RX 是**兩個各自啟動的 process**，彼此只透過 sample transpor
 
 兩個視窗最上方都會一直標示這一點。
 
+另有一個**雙向**的 `node_app`：兩台 ADALM-Pluto 各跑一個，FDD（2420／2460 MHz）同時收發，每個方向仍是 UDP 語意
+（沒有 ARQ），並且預設用 `olla` link adaptation 依 peer 回報的 SNR 與遺失調 MCS。每個方向可同時載
+3.2 Mbit/s（MCS 12），同時傳兩路影像也實測過。用法見 [`docs/07-reference.md` 7.9](docs/07-reference.md#79-node_app雙向-node-的命令列)
+與 [`docs/03-your-own-app.md` 3.4](docs/03-your-own-app.md#34-寫你自己的-link-adaptation-模組)，設計與量測見
+[`experiments/duplex_fdd/`](experiments/duplex_fdd/README.md)。
+
 ## 安裝
 
 需要 Linux（在 Ubuntu 上開發與測試）與 [conda](https://docs.conda.io/)（Miniconda 或 Anaconda 都可以）。

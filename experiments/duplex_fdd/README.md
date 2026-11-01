@@ -9,13 +9,11 @@
 **`tx_app` 與 `rx_app` 不變。** 沒有設定 hook 時，它們送出的 burst 與以前 bit 相同（golden-hash
 測試），收的東西也一樣。
 
-表裡的數字分四種，每張表都會標明：
+表裡的數字分三種，每張表都會標明：
 
 - **實測**：兩台 Pluto 的即時 run 或錄音，有結果檔。
 - **模擬**：測試或 review script 在假的 link 上的輸出。只記在 commit message 裡的會註明「commit 記錄」。
 - **預測**：由模型或設計算出來的，沒有量。
-- **初步**：硬體量測還在進行，數字是從已完成的 run 算出來的，WP-A 的 `results/<run>/README.md`
-  完成後以它為準。
 
 兩台 ADALM-Pluto（韌體 v0.39）：`…1e6e77` = node 1 = A，`…1ef9c6` = node 2 = B。
 A→B 是 node 1 發、node 2 收（2420 MHz），B→A 相反（2460 MHz）。
@@ -31,13 +29,13 @@ A→B 是 node 1 發、node 2 收（2420 MHz），B→A 相反（2460 MHz）。
 | 3 | 一台 Pluto 一個 process（`node_app`），有 GUI 也有 headless | **完成**。TX 與 RX 在同一個 engine 子 process，共用一個 libiio context；`--headless` 給腳本，視窗模式給 demo | 2.2 |
 | 4 | UDP ports | **完成**。`base = 52200 + 10·node_id`：node 1 ingress／egress／control／UDP sample = 52211／52212／52213／52214，node 2 = 52221–52224。不設 `SO_REUSEADDR`，衝突時 EADDRINUSE | 2.2 |
 | 5 | `tx_app`／`rx_app` 照常可用 | **完成**。Hook 預設 `None`；golden-hash 測試確認沒有 policy 時 burst 不變；`rx_app` 收 node 的 burst 時 CONTROL frame 只記在 `control_frames` | 2.4 |
-| 6 | 雙向 datagram | **完成**（UDP transport：`test_node_udp_duplex.py` 兩個方向逐 byte 正確）；**實測**：MCS 12、兩個方向各 3.24 Mbit/s 同時跑，A→B 0 遺失、B→A 0.86%（初步，4.3） | 4.3 |
+| 6 | 雙向 datagram | **完成**（UDP transport：`test_node_udp_duplex.py` 兩個方向逐 byte 正確）；**實測**：MCS 12、兩個方向各 3.25 Mbit/s 同時跑，A→B 0 遺失、B→A 0.86%（4.3） | 4.3 |
 | 7a | 可替換的 LA：Protocol 介面 | **完成**。`LinkAdaptation`、`FeedbackReporter` 是 `typing.Protocol`，不需要繼承 | 2.3 |
 | 7b | `module:Class` loader | **完成**。`fixed`／`olla`／`arf`、`package.module:Class`、`path/file.py:Class`；`--link-adaptation-arg K=V` 以 Python literal 解析；錯誤一行 `SystemExit` | 2.3 |
 | 7c | 可替換的 reporter | **完成**。`--feedback-reporter SPEC`，內建 `default` | 2.3 |
 | 7d | Feedback piggyback，有 version 欄位 | **完成**。每個 burst 的第一個 MPDU 是 CONTROL frame（LCP header 有 `version`，其他版本被忽略並計數） | 2.4 |
 | 7e | 閒置時送 control burst | **完成**。沒有 data 時送 control-only burst（MCS 8，約 0.48 ms） | 2.4 |
-| 7f | 預設是兩個 loop 的 OLLA，target 1% | **演算法完成，但命令列預設不是它。** 內建的預設演算法是 `olla.OllaLinkAdaptation`（inner loop + outer loop，`target_loss=0.01`）；`node_app` 的 `--link-adaptation` 預設目前是 `fixed`（固定在 `--mcs-index`），要 LA 必須給 `--link-adaptation olla`。量測腳本都明確給 `olla`。要改預設，只要改 `node_options.DEFAULT_LINK_ADAPTATION`（這份文件沒有改程式） | 2.3 |
+| 7f | 預設是兩個 loop 的 OLLA，target 1% | **完成**。`node_app` 的 `--link-adaptation` 預設是 `olla`（`node_options.DEFAULT_LINK_ADAPTATION`；inner loop + outer loop，`target_loss=0.01`），從 `--mcs-index` 開始；要固定 MCS 給 `--link-adaptation fixed`。**實測**：M3 在 gain step 下整個 run 3.19–3.23 Mbit/s，優於每個固定 MCS；但 −20 dB 時 OLLA 在 MCS 9↔10 之間震盪、遺失 3.2–3.6%，高於 1% 的目標，是已知限制（4.4） | 2.3、4.4 |
 | 8 | 單元測試 | **完成**。LA、control wire、link hooks、node 的每一部分都有測試（6 節）；合併 `tx-v5` 時全部 1577 個測試通過（2 個已知的環境失敗） | 6 |
 | 9 | ARQ 只提案 | **完成**：LTE RLC AM 式的提案，沒有實作 | 5 |
 
@@ -53,14 +51,27 @@ A→B 是 node 1 發、node 2 收（2420 MHz），B→A 相反（2460 MHz）。
 - **第一次 M2 smoke 失敗的原因是 RX acquisition 的 CPU**：Pluto 的 LO 洩漏是 DC，舊的
   acquisition 在 DC 或 CW 下每個 offset 都進入 coherent 階段，RX owner 單獨就吃 0.88 core 而
   overflow。修完（`7006eb6`）之後，同樣的 smoke 0 overflow，A→B 遺失 10.8% → 0（2.5、4.3）。
-- **雙向不比單向多掉（M2，初步）。** MCS 12 的三個 gain，同一個方向雙向與單向的遺失差
-  ≤ 0.7 個百分點、SNR 差 ≤ 0.2 dB（MCS 8 的差在 TX 端）。但**雙向的延遲高 2–6 倍**（MCS 12 p50 單向 77–107 ms、雙向
-  91–637 ms），原因沒有查。
-- **Node 的 MCS 8 容量比 `tx_app` 低**：180 datagram/s（1.30 Mbit/s）送不完，只到 1.16–1.22 Mbit/s，
-  而 `tx_v5` 第一輪的 `tx_app` 有 1.748（4.3，原因沒有查）。
+- **雙向不比單向多掉（M2，實測）。** 每個 gain 點、每個方向的空中遺失與 SNR 相同（差 ≤ 0.7 個百分點、≤ 0.2 dB）：
+  MCS 12 在 −5／0 dB 的 0%／0.86%（SNR 22.8／21.0 dB，各 3.25 Mbit/s），−12.5／−6.5 dB 的 0.02%／3%，
+  −20／−14 dB（低於 MCS 12 的 threshold）的 25%／60%。RX overflow 雙向每個 run 0–3 次（多在 `…6e77`），單向 0；
+  engine 0.61–0.67 core，decode workers 0.4–2.0 core。**雙向的延遲較高**（MCS 12 p50 最高 637 ms，單向約 100 ms），
+  因為發送端在接近它的 airtime 上限運轉。B→A（2460 MHz，Wi-Fi channel 11）有約 0.8–1.15% 的遺失下限。
+- **Node 的 TX airtime 上限是 0.66–0.70，每個 MCS 都一樣（同時接收時）。** 一次 push 要花 airtime 的約 1.33 倍
+  （USB 2.0）；duty cap 0.7 與不設 cap 一樣（1.125 對 1.135 Mbit/s，0 次 cap 等待）。所以低 MCS（MCS 8，180/s）
+  在發送端就掉 datagram（現在算進 `tx.ingress_dropped_queue_full`）。先前 MCS 8 的短缺有一部分是 burst 間隔的 bug，
+  已在 `f3f84fc` 修成 start 到 start（4.3）。
 - **審查找到 7 個 LA／link 的 bug，全部修了**，每個都有先失敗後通過的測試（2.5）。其中 OLLA 的
   per-report clamp 讓 loss 的平衡點從 1% 跑到約 4%（每份 report 16 個 subframe）或 9%（40 個）。
-- M3（LA 跟著 gain 變化）與 M4（雙向影像）：【待填：M3】【待填：M4】
+- **LA 跟著 gain 變化（M3，實測）。** Node A −5 → −20 → −5 dB、offered 4 Mbit/s：OLLA 整個 run 3.19–3.23 Mbit/s、
+  p50 61–72 ms；固定 12 是 2.92（p50 664 ms）、固定 15 是 2.64（−20 dB 時 96% 遺失）、固定 10 是 2.22、固定 8 是 1.13。
+  OLLA 在 −5 dB 於 0.1–0.5 秒內到 MCS 17、遺失 ≤ 0.07%；gain step 後 0.3 秒內降階，step 那一刻 0 個遺失。
+  **已知限制：** −20 dB 時 OLLA 約每秒在 MCS 9↔10 之間來回，遺失 3.2–3.6%，高於 1% 的目標（調整中，在 `la-tune`
+  分支，結果出來前以此為準）。B→A 閒置（feedback 只靠 control burst）的行為相同；feedback 從不過時（最大 0.43 秒）。
+  固定 15 時 node 2 overflow 42 次（decode workers 忙著解失敗的 burst）（4.4）。
+- **雙向影像（M4，實測）。** 60 秒、OLLA、TX −5 dB：750 與 1300 kbit/s 兩端都解出完整 60 秒（877–884 frame）。
+  A→B corrupt 行 2／4、遺失 0.01–0.02%、MCS 17；B→A corrupt 行 96／155，來自 ch-11 的遺失下限，OLLA 在約 MCS 10
+  （offset −3 到 −4.6 dB）。Engine 0.66–0.82 core，overflow 0–1 次。`video_duplex.sh` 的 consumer 卡住問題已修
+  （timeout 5 秒加 SIGKILL）（4.5）。
 
 ## 2. 做法
 
@@ -197,8 +208,8 @@ peer 重新啟動、長時間的空檔，回傳計數器的增量；自訂演算
 
 | `SPEC` | 意義 |
 |---|---|
-| `fixed` | 固定在 `--mcs-index`（`node_app` 目前的預設） |
-| `olla` | 內建預設演算法：兩個 loop 的 OLLA，target 1% |
+| `fixed` | 固定在 `--mcs-index` |
+| `olla` | 內建預設演算法（`node_app` 的預設）：兩個 loop 的 OLLA，target 1% |
 | `arf` | 內建範例：Auto Rate Fallback（`la/examples.py`，不到一百行，可當範本） |
 | `package.module:Class` | 可以 import 的 module |
 | `path/to/file.py:Class` | 一個檔案，不用安裝 |
@@ -352,7 +363,7 @@ guard +10 dB）每秒 300 個 burst：90% → 61%。`sim_acq.py` 修正前後輸
 | OLLA 用與大小有關的 gain，不用 per-report clamp | Clamp 讓平衡點跑到 4–9%（2.5 第 6 項） |
 | Ladder 拿掉 MCS 14 | 與 MCS 15 同樣 3 bit/symbol，多需要 1 dB |
 | Fixed mode 凍結 OLLA，不重設 offset | 操作員介入前學到的仍然有效 |
-| `split` layout 沒有實作（待定） | RX 修正之後 smoke2 0 overflow；MCS 12 雙向有 3 次／60 秒，碰到設計的 1 次／分鐘的線，看 M2 完整結果再決定（4.3） |
+| `split` layout 沒有實作（待定） | RX 修正之後 smoke2 0 overflow；M2 完整結果的雙向 run 每個 0–3 次／60 秒（最壞 MCS 12、−5／0 dB 的 3 次），碰到設計的 1 次／分鐘的線；M3 固定 15 的 node 2 有 42 次，原因是失敗的 burst 佔滿 decode workers（4.3、4.4）。仍沒有實作 |
 
 ## 3. 怎麼量的
 
@@ -465,7 +476,7 @@ python experiments/duplex_fdd/summarize_duplex.py experiments/duplex_fdd/results
 
 **第一次 smoke 與 RX 修正之後的 smoke（實測）。** MCS 8、每方向 100 datagram/s × 900 B、20 秒、RX gain 15 dB。
 
-| | smoke（`results/m2/smoke/`，`2496d7f`，修正前） | smoke2（`results/m2/smoke2/`，`16af5b9`，修正後；初步） |
+| | smoke（`results/m2/smoke/`，`2496d7f`，修正前） | smoke2（`results/m2/smoke2/`，`16af5b9`，修正後） |
 |---|---|---|
 | TX gain A／B | −20／−20 dB | −20／−14 dB |
 | A→B 遺失（SNR） | 10.8%（9.9 dB） | **0%**（9.6 dB） |
@@ -477,92 +488,176 @@ python experiments/duplex_fdd/summarize_duplex.py experiments/duplex_fdd/results
 A→B 兩次的 gain 與 SNR 相同，所以 10.8% → 0 與 overflow 25 → 0 是 RX 修正的效果。B→A 第二次把 node 2
 的 gain 提高 6 dB（路徑不對稱），遺失的差主要是 SNR。
 
-**Matrix（初步）。** WP-A 的 M2 matrix 在寫這份文件時還在跑（MCS 8 −20 dB 的 B→A 單向還沒完成）。下表是
-已經完成的 run，在 run 目錄的副本上用 `summarize_duplex.py` 算出（`git 16af5b9`，WP-A 的 worktree 有未
-commit 的修改）。900 B，每方向 MCS 12 450/s（3.24 Mbit/s）、MCS 8 180/s（1.30 Mbit/s），60 秒；node 2 的
-TX gain 比 node 1 高（`--m2-gain2-offset`：−5 dB 那組 +5，其他 +6，路徑不對稱）。MCS 是固定的。
-「遺失」是 udp_load 逐 byte 比對的 datagram 遺失，「subframe」是接收端的 PHY sequence gap。
-Overflow 是接收端在前 3 秒以後的 RX overflow；CPU 是 node 所有 process 合計（parent 約 3%，其餘是 engine
-子 process 與 3 個 decode workers），接收端／發送端。
+**Matrix（實測，以 `results/m2/README.md` 與各 run 的 `summary.json` 為準）。** 900 B，每方向 MCS 12 450/s
+（3.24 Mbit/s）、MCS 8 180/s（1.30 Mbit/s），60 秒，RX gain 15 dB，3 個 decode workers，duty cap 0.7；
+node 2 的 TX gain 比 node 1 高 6 dB（`run_matrix.sh fixed --m2-gain2-offset 6`，上限 0 dB；路徑不對稱），
+MCS 固定。每個 run 開始時 load1 < 4。每點一次雙向、兩次單向（反方向只有 control burst）。程式是
+`16af5b9` 加上還沒 commit 的 ingress 丟棄計數（不影響射頻路徑）。「遺失」是 `udp_load` 逐 byte 比對的
+datagram 遺失，「空中遺失」是接收端的 sequence gap，SNR 是接收端 2 秒 preamble SNR 的中位數，RX ovf 是前
+3 秒以後的接收端 overflow，CPU 單位是 core，取自 stats 行：發送端與接收端的 engine 子 process，以及接收端的
+decode workers。
 
-A→B（node 1 → node 2，2420 MHz）：
+| MCS，TX dB A／B | 方向 | Run | 速率/s | 遺失 | 空中遺失 | Goodput Mbit/s | 延遲 p50／p99 ms | SNR dB | RX ovf | Engine 發／收 | Workers 收 |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 12，−5／0 | A→B | 雙向 | 450 | 0.00% | 0.00% | 3.251 | 91／293 | 22.8 | 0 | 0.66／0.65 | 0.81 |
+| | A→B | 單向 | 450 | 0.00% | 0.00% | 3.243 | 77／160 | 22.9 | 0 | 0.84／0.52 | 0.81 |
+| | B→A | 雙向 | 450 | 0.86% | 0.86% | 3.212 | 284／382 | 21.0 | 3 | 0.65／0.66 | 0.84 |
+| | B→A | 單向 | 450 | 0.81% | 0.81% | 3.213 | 107／231 | 21.2 | 0 | 0.83／0.52 | 0.83 |
+| 12，−12.5／−6.5 | A→B | 雙向 | 450 | 0.02% | 0.02% | 3.254 | 235／374 | 16.4 | 1 | 0.67／0.66 | 0.81 |
+| | A→B | 單向 | 450 | 0.00% | 0.00% | 3.240 | 79／143 | 16.4 | 0 | 0.85／0.52 | 0.81 |
+| | B→A | 雙向 | 450 | 3.33% | 2.96% | 3.115 | 585／698 | 15.7 | 1 | 0.66／0.67 | 0.87 |
+| | B→A | 單向 | 450 | 3.51% | 3.51% | 3.128 | 85／180 | 15.7 | 0 | 0.84／0.53 | 0.87 |
+| 12，−20／−14 | A→B | 雙向 | 450 | 24.7% | 24.7% | 2.427 | 546／670 | 9.5 | 1 | 0.63／0.64 | 1.55 |
+| | A→B | 單向 | 450 | 24.1% | 24.0% | 2.455 | 85／150 | 9.6 | 0 | 0.81／0.51 | 1.52 |
+| | B→A | 雙向 | 450 | 60.8% | 60.4% | 1.271 | 637／726 | 8.7 | 2 | 0.64／0.63 | 1.99 |
+| | B→A | 單向 | 450 | 60.0% | 60.0% | 1.299 | 96／156 | 8.7 | 0 | 0.78／0.48 | 1.99 |
+| 8，−20／−14 | A→B | 雙向 | 180 | 10.5% | 0.00% | 1.131 | 1766／1843 | 9.6 | 1 | 0.62／0.61 | 0.40 |
+| | A→B | 單向 | 180 | 5.88% | 0.02% | 1.191 | 1670／1751 | 9.6 | 0 | 0.82／0.49 | 0.41 |
+| | B→A | 雙向 | 180 | 16.8% | 5.04% | 1.051 | 1802／1886 | 8.3 | 0 | 0.61／0.62 | 0.41 |
+| | B→A | 單向 | 180 | 13.4% | 5.31% | 1.095 | 1719／1783 | 8.5 | 0 | 0.82／0.48 | 0.42 |
 
-| MCS | TX gain A／B | Run | Goodput | 遺失 | subframe | SNR | 延遲 p50／p99 | Overflow | CPU 收／發 |
-|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| 12 | −5／0 dB | 雙向 | 3.240 Mbit/s | 0 | 0 | 22.7 dB | 91／293 ms | 0 | 153%／154% |
-| 12 | −5／0 dB | 單向 | 3.240 | 0 | 0 | 22.8 | 77／160 | 0 | 138%／94% |
-| 12 | −12.5／−6.5 dB | 雙向 | 3.239 | 0.02% | 0.02% | 16.4 | 235／374 | 1 | 154%／158% |
-| 12 | −12.5／−6.5 dB | 單向 | 3.240 | 0 | 0 | 16.4 | 79／143 | 0 | 139%／95% |
-| 12 | −20／−14 dB | 雙向 | 2.439 | 24.7% | 24.7% | 9.6 | 546／670 | 1 | 225%／267% |
-| 12 | −20／−14 dB | 單向 | 2.461 | 24.1% | 24.0% | 9.6 | 85／150 | 0 | 210%／90% |
-| 8 | −20／−14 dB | 雙向 | 1.160 | 10.5% | 0 | 9.6 | 1766／1843 | 1 | 106%／106% |
-| 8 | −20／−14 dB | 單向 | 1.220 | 5.9% | 0.02% | 9.6 | 1670／1751 | 0 | 94%／93% |
+- **雙向不比單向多掉（實測）。** 每個 gain 點、每個方向的空中遺失與 SNR 在計數雜訊內相同：0.86% 對
+  0.81%、2.96% 對 3.51%、24.7% 對 24.0%、60.4% 對 60.0%、5.0% 對 5.3%。與 M1「量不到 SI」一致：自己的
+  發射機不會把 40 MHz 外的底噪墊高。兩個 node 都沒有聽到自己的 burst（`own_bursts_heard` =
+  `own_seed_drops` = 0），feedback 在每個 run 都雙向流通。
+- **SNR 與 threshold 表一致。** MCS 12 要 14 dB（Wi-Fi 之下實際要約 16 dB）：22.8／21.0 dB 時 0–0.9%，
+  16.4／15.7 dB 時 0–3.5%，9.5／8.7 dB 時 24–61%。A→B 的 SNR 是 22.8／16.4／9.6 dB（−5／−12.5／−20 dB），
+  B→A 是 21.0／15.7／8.5 dB（0／−6.5／−14 dB）。node 1 在 −20 dB 的 A→B SNR 9.6 dB 高於 MCS 8 的
+  7.5 dB，所以不需要原本預留的 dip 變體。
+- **RX overflow 很少。** 雙向 run 每個 0–3 次，幾乎都在 node 1（`…6e77`，M0 就會 overflow 的那台），單向
+  run 全部 0。RX acquisition 的修正是雙向能跑的關鍵：修正前 engine 約 1 core、每秒 overflow 1–2 次
+  （`smoke/`）；現在 engine 不論只發、只收或同時，都是 0.61–0.67 core。Decode workers 在 good burst 時
+  每個 node 0.4–0.9 core，大多數 burst 解不出來時（MCS 12，−20 dB）1.5–2.0 core。兩個 node 合計約 2–5 core
+  （`cpu.jsonl`：每個 node 106–267%）。3 個 workers 沒有 overflow，所以不需要 2 個 workers 的重複。
+  設計的 `split` 觸發條件是 > 1 次／分鐘；最壞的 3 次（MCS 12，−5／0 dB，B→A）高於這條線；`split` 仍然沒有
+  實作，見 2.6。
+- **雙向的延遲較高，遺失相同。** MCS 12、450/s 讓發送端的 airtime 到 0.63–0.64，接近它的上限（每個 burst 6 個
+  subframe，約 66 個 data burst/s）。雙向時同一個 node 還要跑接收，發送速度約慢 5%，TX queue 裡有 70–230 則而不是
+  約 13（`tx.pending`），所以 p50 是 91–637 ms 而不是 77–107 ms。MCS 12 沒有 datagram 因此遺失。
+- **B→A（2460 MHz）有遺失下限。** 在 21 dB SNR（比 MCS 12 的 threshold 高 7 dB）仍掉 0.8%，A→B 在
+  16–23 dB 卻是 0。遺失成串出現；2460 MHz 在 Wi-Fi channel 11，M1 在那裡量到 1.6–29% 的佔用。這是推測，
+  沒有另外查；LA 會把它看成 channel 遺失（M3、M4）。
 
-B→A（node 2 → node 1，2460 MHz）：
+**發送端的 airtime 上限 0.66–0.70（實測），低 MCS 在發送端就掉。** MCS 8、180/s 的 A→B 空中遺失幾乎是 0，
+datagram 卻掉 5.9–10.5%、延遲 p50 約 1.7–1.8 s：遺失在發送端的 queue，不在空中。發送端的 airtime 到 0.67–0.70，
+`duty_cap_waits` = 0，`tx.pending` 到 272；雙向比單向少送約 5%（A→B 1.131 對 1.191 Mbit/s）。這些丟棄當時沒有
+算進 `tx.ingress_dropped_queue_full`（UDP ingress 忽略 queue 滿），現在算進去了，從下一次 run 起有數字。
 
-| MCS | TX gain A／B | Run | Goodput | 遺失 | subframe | SNR | 延遲 p50／p99 | Overflow | CPU 收／發 |
-|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
-| 12 | −5／0 dB | 雙向 | 3.212 Mbit/s | 0.86% | 0.86% | 21.0 dB | 284／382 ms | 3 | 154%／153% |
-| 12 | −5／0 dB | 單向 | 3.214 | 0.81% | 0.81% | 21.2 | 107／231 | 0 | 139%／94% |
-| 12 | −12.5／−6.5 dB | 雙向 | 3.132 | 3.33% | 2.96% | 15.7 | 585／698 | 1 | 158%／154% |
-| 12 | −12.5／−6.5 dB | 單向 | 3.126 | 3.51% | 3.51% | 15.7 | 85／180 | 0 | 144%／94% |
-| 12 | −20／−14 dB | 雙向 | 1.272 | 60.8% | 60.4% | 8.7 | 637／726 | 2 | 267%／225% |
-| 12 | −20／−14 dB | 單向 | 1.296 | 60.0% | 60.0% | 8.8 | 96／156 | 0 | 251%／86% |
-| 8 | −20／−14 dB | 雙向 | 1.079 | 16.8% | 5.0% | 8.4 | 1802／1886 | 0 | 106%／106% |
-| 8 | −20／−14 dB | 單向 | 還在跑 | | | | | | |
+這個上限不是 duty cap（`results/m2/cap_mcs8_cap0.7/`、`cap_mcs8_cap1.0/`，M3 之後以 start-to-start 的 burst
+間隔量的）：MCS 8，兩個 node 都 −5 dB，每方向 180/s，30 秒，`--tx-duty-cap` 0.7 與 1.0。
 
-- **雙向沒有比單向多掉。** 同一個方向、同一個 gain，雙向與單向的遺失差 ≤ 0.7 個百分點、SNR 差 ≤ 0.2 dB
-  （MCS 8 的差在 TX 端，見下），與 M1「量不到 SI」一致。
-- **SNR 與 threshold 表一致。** MCS 12 要 14 dB：22.7／21.0 dB 時 0–0.9%，16.4／15.7 dB 時 0–3.5%，
-  9.6／8.7 dB 時 24–61%。−20 dB 正是 LA 應該降到 MCS 8–9 的地方（M3）。
-- **B→A（2460 MHz）一直比 A→B 掉得多**，即使 SNR 比 threshold 高 7 dB（21.0 dB 時 0.8%）。遺失成串出現
-  （−5 dB 雙向的第一批是 datagram 270–284 連續 15 個）；2460 MHz 在 Wi-Fi channel 11，M1 的 phase a 在這裡
-  有 1.6% 的佔用（2420 MHz 是 0）。這是推測，沒有另外查。
-- **雙向的延遲高 2–6 倍**：MCS 12 單向 p50 77–107 ms，雙向 91–637 ms，越接近邊緣越高。原因沒有查；設計稿
-  的風險 3（同一個 engine 裡 RX owner 與 TX encode 搶 GIL）是候選，`split` layout 是為它準備的備案。
-- **MCS 8 在 180/s 送不完。** A→B 的 subframe 遺失 ≈ 0，datagram 卻掉 5.9–10.5%、延遲 p50 1.7–1.8 s：
-  遺失在 TX 端或 run 結束時還在 queue 裡，不在空中。Node 1 每個 burst 平均只帶 1.65 個（雙向）／1.98 個
-  （單向）datagram，duty cap 沒有等過（`duty_cap_waits` 0），ingress 沒有因 queue 滿而丟。`tx_v5` 第一輪
-  的 `tx_app` 在 MCS 8 有 1.748 Mbit/s，這裡只有 1.16–1.22。可能的原因（沒有查）：CONTROL subframe 佔掉
-  MCS 8 的 8 ms airtime 上限裡的空間（2 個 900 B 已經 7.70 ms，雙向時 FEEDBACK 更大）；4 ms 最小 burst
-  間隔從前一個 burst 推完才開始算（`tx_v5` 第一輪之後才加，MCS 8 沒有重量）。設計稿 `split` 的另一個觸發
-  條件是「TX burst 率 < 同 MCS 的 `tx_app` 的 85%」。
-- **低 SNR 時 decode 的 CPU 變高**：MCS 12 在 −20 dB 接收端 2.1–2.7 core（解不出的 burst 跑滿 Turbo 的
-  iteration），高 SNR 時約 1.4–1.6 core。每個 run 的 RX overflow ≤ 3 次（≤ 3 次／分鐘）；設計的 `split`
-  觸發條件是 > 1 次／分鐘。
+| Cap | 方向 | Goodput Mbit/s | 遺失（全在發送端） | 發送端 airtime | Cap 等待 | Push 牆鐘時間／airtime |
+|---:|---|---:|---:|---:|---:|---|
+| 0.7 | A→B | 1.125 | 8.6% | 0.67 | 0 | 25.95 s／19.65 s = 1.32 |
+| 0.7 | B→A | 1.102 | 10.1% | 0.66 | 0 | 26.13 s／19.34 s = 1.35 |
+| 1.0（不限） | A→B | 1.135 | 7.7% | 0.68 | – | – |
+| 1.0（不限） | B→A | 1.110 | 10.0% | 0.66 | – | – |
 
-【待填：M2】（WP-A 的 `results/m2/README.md` 完成後以它為準：補 MCS 8 −20 dB 的 B→A 單向、必要時的
-−5 → −15 → −5 dB 變化，核對上面的初步數字與推測）
+不設 cap 送得跟有 cap 一樣多，cap 一次也沒等過。限制是 Pluto 的 push：接收端同時以 5 MS/s 串流時，推一個 burst
+要花它 airtime 的約 1.33 倍，所以 airtime 的天花板是 1/1.33 ≈ 0.75；node 還要 encode，到不了，停在 0.66–0.70。
+這是 M0 的 USB 2.0 上限（TX＋RX 約 36 MB/s，M0 的 TX duty 在 0.78 封頂）。每個 MCS 都一樣：MCS 12、15、17 在
+M2–M4 也是 airtime 0.6–0.7。0.7 的 cap 剛好在天花板下，保護 `…6e77` 的接收端（TX duty ≥ 0.8 就 overflow，M0）。
+
+**先前 MCS 8 的短缺有一部分是 bug，已修。** 最小 burst 間隔 4 ms 原本從前一個 push 結束才開始算（`tx-v5`
+`f3f84fc` 改成 start 到 start），所以每個約 8 ms 的 MCS 8 burst 後面多 4 ms 空檔。M2 的 run 全部用舊程式；MCS 12 也
+靠近這個限制（66 個 data burst/s，上限約 80），可能解釋了雙向延遲的一部分。修了之後 MCS 8 仍然只到 airtime 0.66–0.70
+（上表），所以剩下的是 USB 的 push 時間。**所以低 MCS 的 datagram 容量在 node 上比 `tx_app` 低**（`tx_v5` 第一輪的
+`tx_app` 有 1.748 Mbit/s，node 同時接收只到 1.05–1.19）。
 
 ### 4.4 M3：LA 跟著 gain 變化
 
-【待填：M3】
+**實測**，`results/m3/README.md` 與各 run 的 `summary.json`、`la_*.jsonl`、`node*_stats.jsonl`。程式是 `337b445`（duplex-fdd 加
+la-fix、RX acquisition 修正與 start-to-start 的最小 burst 間隔 `f3f84fc`）。同一個 bench：FDD 2420／2460 MHz，
+RX gain 15 dB，900 B datagram，3 個 decode workers，duty cap 0.7。Node A 依 `0:-5,30:-20,60:-5`（ready 後的秒數）變
+gain，node B 固定 −5 dB。A→B 555/s（4.0 Mbit/s，比任何一階在 −20 dB 載得動的都多），B→A 139/s（1.0 Mbit/s）；
+每個 run 90 秒加開頭與尾巴。Run：`olla` ×2、`olla` 而 B→A 閒置（feedback 只靠 control burst）、固定 MCS 8／10／12／15
+（15 取代 14，14 被 ladder 當作劣勢拿掉；ladder 是 8 9 10 12 13 15 16 17）。每個 run 開始時 load1 < 4。舊的 burst
+間隔的一個早期 run 在 `results/m3_prefix/`，不拿來比較。
 
-要填的表（每個方向；A→B 是 gain step 的方向）：
+A→B 每 30 秒一段的數字（goodput = 接收端在該段收到的 bytes；空中 = sequence gap 的 subframe 遺失；整個 run 的
+datagram 遺失含 offered 4 Mbit/s 超過該階容量時在發送端丟的，即 `tx.ingress_dropped_queue_full`）：
 
-| Run | 0–30 s（−5 dB）goodput／遺失／MCS 中位數 | 30–60 s（−20 dB） | 60–90 s（−5 dB） | 整個 run goodput／遺失 | step 之後的收斂時間（30 s／60 s） | step 後第一秒遺失的 subframe |
-|---|---|---|---|---|---|---|
-| `olla` #1 | | | | | | |
-| `olla` #2 | | | | | | |
-| `olla`，B→A 閒置 | | | | | | |
-| 固定 MCS 8 | | | | | — | |
-| 固定 MCS 10 | | | | | — | |
-| 固定 MCS 12 | | | | | — | |
-| 固定 MCS 15 | | | | | — | |
+| Run | 0–30 s（−5 dB） | 30–60 s（−20 dB） | 60–90 s（−5 dB） | 整個 run（udp_load） |
+|---|---|---|---|---|
+| `olla` #1 | 3.29 Mbit/s，空中 0.00%，MCS → 17 | 1.81 Mbit/s，3.31%，MCS 9↔10（30 次變化） | 3.38 Mbit/s，0.01%，MCS 17 | 3.21 Mbit/s，p50 70 ms |
+| `olla` #2 | 3.30 Mbit/s，0.07%，→ 17 | 1.80 Mbit/s，3.24%，9↔10（30 次） | 3.41 Mbit/s，0.07%，17 | 3.23 Mbit/s，p50 72 ms |
+| `olla`，B→A 閒置 | 3.28 Mbit/s，0.00%，→ 17 | 1.75 Mbit/s，3.62%，8–10（31 次） | 3.41 Mbit/s，0.06%，17 | 3.19 Mbit/s，p50 61 ms |
+| 固定 8 | 0.93 Mbit/s，0% | 1.12 Mbit/s，0% | 1.02 Mbit/s，0% | 1.13 Mbit/s，p50 1780 ms |
+| 固定 10 | 1.84 Mbit/s，0% | 2.14 Mbit/s，4.04% | 2.01 Mbit/s，0.13% | 2.22 Mbit/s，p50 912 ms |
+| 固定 12 | 2.67 Mbit/s，0% | 2.41 Mbit/s，24.5% | 2.75 Mbit/s，0.87% | 2.92 Mbit/s，p50 664 ms |
+| 固定 15 | 3.36 Mbit/s，0% | 0.16 Mbit/s（96% 遺失） | 3.31 Mbit/s，0.18% | 2.64 Mbit/s，p50 78 ms |
 
-另外：MCS 軌跡 vs. gain step 的圖（`duplex_AB.png`）、SNR_f 與 offset 的軌跡、與最好的固定 MCS（整個
-run 遺失 ≤ 1%，以及每個 segment）的比較、B→A 方向（feedback piggyback 的方向）的 goodput 與遺失。
+A→B 的 SNR：−5 dB 時 22.8–23.4 dB，−20 dB 時 9.5–10.2 dB。Threshold：MCS 9 是 9.0、10 是 11.0、12 是 14.0、15 是
+16.5、17 是 22.0 dB。第一段的 goodput 含第一份 feedback 到達前約 3.5 秒的 MCS 8。B→A（139/s，−5 dB，SNR
+17.5 dB）在每個 run 都載到 0.98–1.00 Mbit/s：OLLA 下遺失 1.1%（MCS 約 10，81–93 次變化），固定階 0–2.4%；
+與 M2 量到的這條 Wi-Fi channel 11 路徑的約 0.8% 遺失下限一致。
+
+- **整個 run，OLLA 贏過每個固定 MCS。** 3.19–3.23 Mbit/s，對固定 12 的 2.92、15 的 2.64、10 的 2.22、8 的
+  1.13，延遲也最低（p50 61–72 ms，固定 12 是 664 ms）。固定階不是在 −5 dB 浪費容量（8、10、12），就是在 −20 dB 崩潰
+  （15：96% 遺失；12：24.5% 空中遺失）。
+- **−5 dB：OLLA 選到最好的階並守住。** 第一份 feedback 之後（開始後約 3.5 秒）與 60 秒回到 −5 dB 之後，0.1–0.5 秒內
+  到 MCS 17，offset 守在 +3 dB（上限），空中遺失 ≤ 0.07%。Goodput 3.3–3.4 Mbit/s 與最好的固定階（15：
+  3.31–3.36）相同；此時發送端已在 airtime 上限（0.66–0.68，沒有 duty-cap 等待，見 4.3），所以 17 在這裡載得不比 15 多。
+- **−20 dB：OLLA 立刻反應，但會震盪，而且沒達到遺失目標。** Gain step 之後 0.3 秒內 17 → 12 → 9 → 8，第一秒 0 個
+  frame 遺失；之後約每秒一次在 9 ↔ 10 之間來回：每秒約 250 個 subframe，outer loop 在 1–2 秒內把 offset 抬約
+  +2.5 dB，升到 10 就掉，inner loop 又降回去。空中遺失 3.2–3.6%，**高於 1% 的目標**，所以 `summarize_duplex.py` 的
+  「收斂」判準（1 秒窗遺失 < 2%）一直沒達到。Goodput 1.75–1.81 Mbit/s：比固定 8（1.12，0% 遺失）多，但比固定 10
+  （2.14，4% 遺失）少，因為約一半時間在 MCS 9。**這是已知的限制**：原因可能在 `la/olla.py` 的每個 subframe 上調步長、
+  per-report clamp 或 `up_hold_reports` 對這麼高的 burst 率不合適；調整正在 `la-tune` 分支進行，結果出來之前這份文件
+  以上面的數字為準。
+- **只靠 control burst 的 feedback 與搭便車的一樣好。** B→A 閒置時，OLLA 的軌跡、goodput（3.19 Mbit/s）與遺失
+  （−20 dB 時空中 3.6%）與有載的 run 相同。Feedback 從不過時：所有 run 的 `la.feedback_age_s` 最大 0.43 秒
+  （固定 8，node 2）。
+- **回到 −5 dB：** OLLA 下 step 後第一秒遺失 0–11 個 frame（固定 12：116）。
+- **同時接收時，每階的容量：** 固定 8 只載到 0.93–1.12 Mbit/s；發送端 airtime 到 0.69、`duty_cap_waits` = 0，
+  49,950 個 datagram 中 35,615 個在滿的 send queue 被丟，現在算進 `tx.ingress_dropped_queue_full`。start-to-start 的
+  修正沒有讓 MCS 8 在雙向時超過 airtime 約 0.69。固定 12 載到 2.67–2.75，15／17 載到 3.3–3.4，都在 airtime 0.6–0.7 附近。
+- **RX overflow：** 每個 run 0–2 次，固定 15 除外：node 2 的接收端 overflow 42 次，因為 −20 dB 那段幾乎每個 MCS 15 的
+  burst 都失敗，decode workers 用到 1.55 core。每個 node 的 CPU：engine 0.6–0.9 core，decode workers 0.4–1.6 core。
+
+與最好的固定階的比較（OLLA 取兩次的平均）：
+
+| | OLLA（2 次平均） | 每段最好的固定階 |
+|---|---|---|
+| 0–30 s，−5 dB | 3.29 Mbit/s，空中 0.04% | 15：3.36 Mbit/s，0% |
+| 30–60 s，−20 dB | 1.80 Mbit/s，3.3% | 10：2.14 Mbit/s，4.0%（8：1.12 Mbit/s，0%） |
+| 60–90 s，−5 dB | 3.40 Mbit/s，0.04% | 15：3.31 Mbit/s，0.18% |
+| 整個 run | 3.21 Mbit/s，p50 71 ms | 12：2.92 Mbit/s，p50 664 ms |
+
+MCS 軌跡、SNR_f 與 offset 隨 gain step 變化的圖是每個 run 目錄的 `duplex_AB.png`、`duplex_BA.png`。
 
 ### 4.5 M4：雙向影像
 
-【待填：M4】
+**實測**，`results/m4/README.md` 與 `video_750k/`、`video_1300k/` 的 `summary.json`、`video_counts.json`。程式 `6ba3868`（OLLA
+預設、start-to-start 的 burst 間隔、RX 修正）。兩個 node 的 TX gain 都 −5 dB，RX gain 15 dB，`--la olla` 從 MCS 8
+起，3 個 decode workers，duty cap 0.7。A→B 是 webcam（`/dev/video0`，MJPEG 1280×720、15 fps），B→A 是
+`ffmpeg -f lavfi testsrc2`，都是 H.264 CBR、MPEG-TS、752 B UDP packet，60 秒，編碼設定同 `scripts/run_ota_video_demo.sh`。
+每端用 `ffmpeg -i udp://… -f null -` 消費並數 `corrupt` 與 `error` 行。M3 在 −5 dB 兩個方向都是 MCS ≥ 10，所以 750
+kbit/s 之後照計畫再跑 1300 kbit/s。
 
-要填的表：
+| kbit/s | 方向 | 解出的 frame | corrupt／error 行 | Datagram 遺失 | MCS（OLLA） | SNR dB | 發送端 airtime | RX ovf | Engine 發／收 | Workers 收 |
+|---:|---|---:|---:|---:|---|---:|---:|---:|---:|---:|
+| 750 | A→B（camera） | 883 | 2／2 | 0.01% | 0.1 秒後 17，3 次變化 | 23.3 | ≤ 0.09 | 1（node 2） | 0.69／0.77 | 0.26 |
+| 750 | B→A（testsrc2） | 877 | 96／65 | 1.15% | 約 10（8–15），92 次變化 | 17.0 | ≤ 0.35 | 0（node 1） | 0.77／0.69 | 0.28 |
+| 1300 | A→B（camera） | 884 | 4／2 | 0.02% | 17，3 次變化 | 23.1 | ≤ 0.15 | 0 | 0.66／0.82 | 0.39 |
+| 1300 | B→A（testsrc2） | 884 | 155／125 | 1.15% | 約 10（8–15），103 次變化 | 16.8 | ≤ 0.54 | 1 | 0.82／0.66 | 0.42 |
 
-| 方向 | 來源 | bitrate | 交付／遺失的 datagram | corrupt 行 | error 行 | 解出的 frame | goodput 中位數 | MCS 軌跡 |
-|---|---|---:|---|---:|---:|---:|---:|---|
-| A→B | webcam | 750 kbit/s | | | | | | |
-| B→A | testsrc2 | 750 kbit/s | | | | | | |
+Frame 數是消費端解出的（camera 60 秒約 14.7 fps，lavfi 15 fps）。Datagram 遺失是接收端 subframe 遺失。Feedback 全程雙向
+流通、從不過時；兩個 node 都沒聽到自己的 burst；沒有 datagram 在發送端被丟（`tx.ingress_dropped_queue_full` = 0）。
+
+- **兩個方向同時承載即時影像。** 在 750 與 1300 kbit/s，兩端都解出完整 60 秒（877–884 frame）。Corrupt 行數的是這些
+  frame 裡受損的。
+- **A→B（camera，2420 MHz）很乾淨。** 60 秒內 2–4 行 corrupt，datagram 遺失 0.01–0.02%。OLLA 在第一份 feedback 之後
+  0.1 秒內從 MCS 8 到 17 並守住，所以 camera 串流只佔 9–15% 的 airtime。
+- **B→A（2460 MHz）出現那個 channel 的遺失下限。** 96（750 kbit/s）與 155（1300 kbit/s）行 corrupt 來自 17 dB SNR
+  下 1.15% 的 datagram 遺失，比 MCS 10 的 threshold 高 6 dB；與 M2、M3 在這條 Wi-Fi channel 11 路徑量到的約 0.8–1.1% 相同。
+  OLLA 以 −3 到 −4.6 dB 的負 offset 守在約 MCS 10，把遺失維持在接近 1% 的目標，每秒仍變 MCS 約 1.5 次。這種遺失要靠
+  PHY 之上的 FEC 或 ARQ（第 5 節）或比較安靜的 channel。
+- **負載：** engine 0.66–0.82 core，decode workers 每個 node 0.26–0.42 core；RX overflow 每個 run 0–1 次。
+- **腳本修正：** 第一個 run（750 kbit/s）結束時兩個消費端 `ffmpeg` 沒有因 SIGTERM 結束（卡在 UDP read 的 process 要等到
+  下一個 packet 才處理 signal），`video_duplex.sh` 等了約 8 分鐘，直到手動 kill。計數不受影響（消費端已記完，node 在
+  `--duration` 停止）。現在 consumer URL 有 `&timeout=5000000`（5 秒沒資料就結束），8 秒後還活著就 SIGKILL；1300 kbit/s
+  的 run 用修好的腳本，自己結束。
 
 ## 5. ARQ 提案（沒有實作）
 
@@ -648,7 +743,7 @@ Pluto 沒有 timestamp，給不了。
 | `results/usb/`、`results/usb_duty/` | M0（`usb_capacity.json`、`usb_summary.md`、`records.jsonl`、`meta.json`） |
 | `results/si/README.md`、`results/si/run1/` | M0／M1 的整理與決定；`si_summary.md`、`si_scan.json`、`records.jsonl` |
 | `results/m2/` | M2：`README.md`、`smoke/`、`smoke2/` 與 matrix 的 run 目錄（每個有 stats、LA log、load、CPU、meta） |
-| `results/m3/`、`results/m4/` | M3、M4（量測中） |
+| `results/m3/`、`results/m4/` | M3（`olla` ×2、`olla` B→A 閒置、固定 8／10／12／15；`m3_prefix/` 是舊 burst 間隔的一次 run）、M4（`video_750k/`、`video_1300k/`） |
 
 程式（`src/ofdm_message_link/`）：`node_app.py`、`node_options.py`、`node_engine.py`、`node_window.py`、
 `control.py`、`la/`（`api`、`loader`、`thresholds`、`fixed`、`olla`、`reporter`、`examples`、`controller`）、
@@ -672,9 +767,10 @@ node `test_pluto_shared.py`、`test_node_options.py`、`test_config_duplex.py`�
 - `…1e6e77` 在 duty 0.78 會 overflow、`…1ef9c6` 不會，原因（裝置或 port）沒有分開查；0.7 的上限是
   由這兩台、這台 PC 的 USB 拓撲量出來的。
 - 2420／2460 在 Wi-Fi channel 1／11 裡，遺失含有 Wi-Fi 的部分，沒有分開。
-- M2 的 matrix 在寫這份文件時還沒跑完；4.3 的 matrix 數字是初步的，WP-A 的 worktree 有未 commit 的
-  修改（`meta.json` 的 `git_dirty`）。M3、M4 在寫這份文件時還沒有數據。
+- M2 的程式是 `16af5b9` 加上還沒 commit 的 ingress 丟棄計數（`meta.json` 的 `git_dirty`），M2 的 run 用舊的 burst
+  間隔；M3、M4 用修正後的程式。
+- OLLA 在 −20 dB 的震盪（遺失 3.2–3.6%）還沒有解決，調整在 `la-tune` 分支（4.4）。
+- Node 同時接收時，TX airtime 上限約 0.66–0.70（USB 2.0），低 MCS 的 datagram 容量因此低於 `tx_app`（4.3）。
 - 每點只跑一次；延遲包含 TX 排隊，收發在同一台 PC。
 - 2.5 的 bug 修正數字來自 review script 與單元測試的假 link，不是硬體。
 - LBT 與 `split` layout 只有設計，沒有實作；ARQ 只有提案。
-- `node_app` 的 `--link-adaptation` 預設是 `fixed`，不是 owner 要求的 `olla`（1 節第 7f 項）。
