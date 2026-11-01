@@ -9,6 +9,8 @@
 >
 > 預設的 2.45 GHz profile 只有 8.5 的 Pluto 對 Pluto、與 8.6 的 N210 對 Pluto 短時間量測。
 >
+> 8.9 的雙向 FDD 用 2420／2460 MHz，在 2.4 GHz ISM 頻段內，但分別落在 Wi-Fi channel 1 與 11。
+>
 > **SNR 的定義在 8.7 改了。** 8.1–8.6 的 SNR（`SNR (2 s)`、`effective SNR`）是由 EVM 推算的舊定義：
 > 只算解出來的 burst，而且比真實 SNR 低 3–5 dB。8.7 之後的 SNR 由每個 burst 的 preamble 在資料 carrier
 > 的頻帶內估計（見 [2.6](02-gui.md#26-統計數字的意義與限制)）。8.1–8.6 當時沒有錄原始 samples，無法用新定義重算，
@@ -451,7 +453,148 @@ TX gain。
 - 每點只錄一次、單一擺放位置；邊緣的點有約 2% 的 run-to-run 漂移。
 - 修正之後的 goodput 只重跑 5 個點，每點一次搜尋；300 B MCS 12 −15 dB 與 aggregation 關沒有重跑；MCS 16（5.589）低於 MCS 17（9.295）沒有重查。
 
-## 8.9 沒有實測過的東西
+## 8.9 雙向 FDD：兩個 `node_app`，Pluto ↔ Pluto，2420／2460 MHz
+
+`duplex-fdd` 分支加了雙向的 `node_app`：一台 Pluto 一個 process，同時在一個頻率發、在另一個頻率收
+（FDD）。每個 burst 的第一個 subframe 帶 feedback，讓對方的 link adaptation（LA）為每個 burst 選 MCS。
+語意仍是 UDP，沒有 ARQ（只有提案）。`tx_app` 與 `rx_app` 不變。
+
+設計、每個決定的依據、review 修的問題、ARQ 提案、所有腳本與原始數據見
+[`experiments/duplex_fdd/`](../experiments/duplex_fdd/README.md)。命令列見
+[7.9](07-reference.md#79-node_app雙向-node-的命令列)，wire format 見
+[7.8](07-reference.md#78-雙向-link-的-control-與-feedback-wire-format)，怎麼換成自己的 LA 見
+[3.4](03-your-own-app.md#34-寫你自己的-link-adaptation-模組)。
+
+同一組 Pluto、同一個擺放位置（與 8.7、8.8 相同），5 MS/s、RX gain 15 dB。2026-11-01 量測。
+Node 1（`…1e6e77`）在 2420 MHz 發、2460 MHz 收；node 2（`…1ef9c6`）相反。A→B 是 node 1 → node 2。
+
+### 先量：USB 與自干擾
+
+**USB（M0）。** 一台 Pluto 只能開一個 libiio context，第二個回 EBUSY，所以 node 的 TX 與 RX 共用一個
+context，在同一個 process。Pluto 同時以 5 MS/s 接收時，TX 推的 duty 最多到 0.78：
+
+| 要求的 TX duty | `…1e6e77` overflow／分鐘 | `…1ef9c6` overflow／分鐘 |
+|---:|---:|---:|
+| 0、0.5、0.6、0.7 | 0 | 0 |
+| 0.8、0.9（實際 0.78） | 222–224 | 0 |
+| 0.9，兩台同時，4 或 8 個 kernel buffers | 177–183 | 0 |
+
+TX 是 −89.75 dB，所以這是 USB 2.0 的頻寬，不是 RF；kernel buffers 沒有幫助。兩台設定相同，差別在
+裝置或 port（兩台與 webcam 共用一條 480 Mbit/s 的 bus）。所以 `node_app --tx-duty-cap` 預設 0.7。
+
+**自干擾（M1）。** 自己的 TX 送真的 MCS 14 aggregate（duty 0.7），peer 送已知的 burst，比較自己的 TX
+開與關：
+
+| 間距 | RX gain | data carrier 的底噪上升 | peer 的 SNR 下降 |
+|---|---|---:|---:|
+| 20、40、70 MHz | 15、30 dB | ≤ 0.15 dB，與自己的 TX gain 無關 | ≤ 0.6 dB（大多 ≤ 0.2，正負都有） |
+| 40 MHz（決定的設定） | 15 dB | 0.00／0.05 dB（兩台 DUT） | 0.43／0.04 dB |
+
+- **量不到自干擾。** TX 的寬頻雜訊會讓底噪隨自己的 gain 每 dB 升約 1 dB，這裡斜率是 −0.04…+0.03 dB/dB；
+  沒有 spur；overflow 不變。
+- 判定表裡幾個 FAIL 都來自遺失的差：每個 phase 只有 200 個 burst（1 個 = 0.5%），加上 Wi-Fi。同樣的組合
+  底噪與 SNR 都沒變。RX gain 45 dB 會 clip，與自己的 TX 無關。
+- **決定：FDD 2420／2460 MHz、RX gain 15 dB、analog BW 5 MHz，不需要 LBT。**
+- 2420、2460 MHz 分別在 Wi-Fi channel 1、11 裡。TX 關閉時 1 ms block 高於底噪 6 dB 的比例（RX gain 15 dB）：
+  2420 MHz 0%、2460 MHz 1.6%。LA 把 Wi-Fi 看成 channel loss。
+- **路徑不對稱約 6 dB**：同樣的 SNR，B→A 要比 A→B 多約 6 dB 的 TX gain。
+
+### Link adaptation
+
+| 項目 | 內容 |
+|---|---|
+| 介面 | `LinkAdaptation`（TX：`on_sent`、`on_feedback`、`decide`、`snapshot`）與 `FeedbackReporter`（RX）兩個 Protocol，不需要繼承 |
+| 載入 | `--link-adaptation fixed\|olla\|arf\|package.module:Class\|path/file.py:Class`、`--link-adaptation-arg K=V`；reporter 一樣 |
+| Feedback | 附在下一個 burst 的 CONTROL subframe（有 version 欄位）；沒有 data 時送 control-only burst（MCS 8）；data 的 MCS 高於 9 時每 100 ms 有一份走 MCS ≤ 9 |
+| 預設演算法 `olla` | LTE 式的 inner loop（filtered SNR + offset 對照 threshold 表）與 outer loop（每個收到的 subframe +0.00505 dB、每個遺失的 −0.5 dB，平衡在 1% 遺失） |
+| Ladder | MCS 8、9、10、12、13、15、16、17。MCS 14 被拿掉：與 MCS 15 一樣 3 bit/symbol，多需要 1 dB。MCS 11 沒有量 |
+| Threshold | `configs/la/thresholds_pluto_v5.yaml`，GUI 燈號與 LA 共用（8.8 的實測值） |
+
+注意：`node_app` 的 `--link-adaptation` 預設目前是 `fixed`（固定在 `--mcs-index`），要 LA 必須給
+`--link-adaptation olla`。
+
+**Review 修的 7 個 bug**（每個都有先失敗後通過的測試；數字來自假的 link，不是硬體）：
+
+1. Peer 重新啟動後 report 序號從 0 開始，LA 會忽略它約 11 分鐘 → 加 session id，重設基準。
+2. CONTROL frame 壞掉的自己的 burst 進了 DATA 的遺失計數（一次約 20 000 個）→ 由 SIG 的 scrambler seed
+   範圍（node 1：1–63、node 2：64–127）在 decode 之前丟掉。
+3. 自訂 LA 丟例外時 TX worker busy-spin、什麼都沒送 → guard 後繼續送，退讓 50 ms。
+4. Feedback handler 的例外讓 RX 丟掉整個 chunk → 當作 ACCEPT 並計數。
+5. 自己 TX 洩漏的 preamble SNR 進了給 peer 的 report → 只回報被接受的 peer burst。
+6. OLLA 的 per-report clamp 只截掉壞的 report，遺失的平衡點從 1% 跑到約 4%（每份 report 16 個 subframe）
+   或 9%（40 個）→ 整份 report 依大小縮放，好壞一樣，平衡點回到 1%。
+7. Reporter 只回報最後一個 chunk 的 clipping／backlog flag → 整個窗取 OR。
+
+### 第一次 smoke：被 RX acquisition 的 CPU 擋住
+
+MCS 8、每方向 100 datagram/s × 900 B、20 秒：
+
+| | 修正前（node 1／2 都 −20 dB） | RX 修正後（node 1 −20、node 2 −14 dB） |
+|---|---|---|
+| A→B 遺失（SNR） | 10.8%（9.9 dB） | **0%**（9.6 dB） |
+| B→A 遺失（SNR） | 43.1%（3.0 dB） | 5.1%（8.4 dB，MCS 8 的邊緣） |
+| RX overflow，node 1／2 | 55／25 | **0／0** |
+| 延遲 p50 | 約 290 ms | 約 62 ms |
+| CPU，每個 node | 約 1.3 core | 約 0.9 core |
+
+修正前每個 engine 在 load 之前就約 1 core：Pluto 的 LO 洩漏是 DC，DC 或 CW 讓 acquisition 在每個
+offset 都進入 coherent 檢查。只收不發時 RX 的接收執行緒就用 0.88 core 而 overflow。修法見 8.8 的
+「修正 1」（`7006eb6`）。A→B 兩次的 gain 與 SNR 相同，所以 10.8% → 0 是這個修正的效果；B→A 第二次
+把 node 2 的 gain 提高 6 dB，差別主要是 SNR。
+
+### 固定 MCS，雙向（M2）
+
+**初步**：matrix 在寫這段時還在跑，下表是已完成的 run。900 B datagram，每方向 MCS 12 450/s
+（3.24 Mbit/s）、MCS 8 180/s（1.30 Mbit/s），60 秒，固定 MCS；node 2 的 TX gain 比 node 1 高 5–6 dB
+（路徑不對稱）。每點一次雙向、兩次單向（反方向只有 control burst）。
+
+| MCS | TX gain A／B | 方向 | 遺失 雙向／單向 | SNR | Goodput 雙向 | 延遲 p50 雙向／單向 |
+|---:|---|---|---:|---:|---:|---:|
+| 12 | −5／0 dB | A→B | 0／0 | 22.7 dB | 3.240 Mbit/s | 91／77 ms |
+| 12 | −5／0 dB | B→A | 0.86%／0.81% | 21.0 dB | 3.212 Mbit/s | 284／107 ms |
+| 12 | −12.5／−6.5 dB | A→B | 0.02%／0 | 16.4 dB | 3.239 Mbit/s | 235／79 ms |
+| 12 | −12.5／−6.5 dB | B→A | 3.33%／3.51% | 15.7 dB | 3.132 Mbit/s | 585／85 ms |
+| 12 | −20／−14 dB | A→B | 24.7%／24.1% | 9.6 dB | 2.439 Mbit/s | 546／85 ms |
+| 12 | −20／−14 dB | B→A | 60.8%／60.0% | 8.7 dB | 1.272 Mbit/s | 637／96 ms |
+| 8 | −20／−14 dB | A→B | 10.5%／5.9% | 9.6 dB | 1.160 Mbit/s | 1766／1670 ms |
+| 8 | −20／−14 dB | B→A | 16.8%／（還在跑） | 8.4 dB | 1.079 Mbit/s | 1802／— ms |
+
+- **雙向沒有比單向多掉**：同一點的遺失與 SNR 在雜訊內相同，與「量不到自干擾」一致。RX overflow 每個
+  run ≤ 3 次。
+- **SNR 與 threshold 表一致**：MCS 12 要 14 dB；8.7–9.6 dB 時掉 24–61%。−20 dB 正是 LA 該降階的地方。
+- **2460 MHz（B→A）一直掉得比較多**，連 21 dB 也掉 0.8%，而且成串出現；2460 MHz 在 Wi-Fi channel 11，
+  可能是 Wi-Fi（沒有另外查）。
+- **雙向的延遲高 2–6 倍**，越接近邊緣越高。原因沒有查。
+- **MCS 8 在 180/s 送不完**：A→B 的 PHY subframe 幾乎沒掉，datagram 卻掉 6–11%、延遲 1.7–1.8 s，所以
+  是 TX 送不出去，不是空中。Node 只到 1.16–1.22 Mbit/s，`tx_app`（8.8 的第一輪）有 1.748。原因沒有查。
+- CPU：一個 node 同時收發 MCS 12 約 1.5 core；低 SNR 時接收端 2.1–2.7 core（解不出的 burst 跑滿 Turbo 的
+  iteration）。
+
+【待填：M2】
+
+### LA 跟著 gain 變化（M3）
+
+Node A 的 TX gain 依 `0:-5,30:-20,60:-5` 變化，90 秒；A→B 4 Mbit/s、B→A 1 Mbit/s。`olla` 與固定
+MCS 8／10／12／15 比較：MCS 軌跡、每個 step 之後的收斂時間、與最好的固定 MCS 的 goodput 比較。
+
+【待填：M3】
+
+### 雙向影像（M4）
+
+A→B webcam、B→A 測試畫面，H.264 750 kbit/s，同時 60 秒，LA 開。
+
+【待填：M4】
+
+### 這次沒有量到的
+
+- B210、N210、USRP-2901 跑 `node_app`（共用 context 只有 Pluto 有）。
+- LBT（單頻）與把 RX、TX 分成兩個子 process 的 layout：只有設計。ARQ 只有提案。
+- 自干擾每個 phase 只有 200 個 burst，只能說小於約 0.5 dB 的影響量不出來；自己的 duty 只到 0.7。
+- `…1e6e77` 在 duty 0.78 overflow 而 `…1ef9c6` 不會，原因沒有分開查。
+- Wi-Fi 造成的遺失沒有與 channel 的遺失分開。
+- 每點只跑一次、單一擺放位置。
+
+## 8.10 沒有實測過的東西
 
 誠實列出來，免得被誤認為已經驗證：
 

@@ -216,5 +216,6 @@ Cards 下方的 60 秒圖：主軸是 TX MCS index，副軸是 LA 用的 filtere
 **Link adaptation**（auto／fixed 切換、fixed 時的 MCS 選單、threshold 表、最近 20 個決定）、
 **Log**、**Hardware**（RX 的 Radio panel、TX gain、profile 的 TX 頻率、原始統計）。
 `--gain-profile` 在視窗模式也有效；`--stats-log` 每 0.5 s 一行，格式見 [7.9 節](07-reference.md#79-node_app雙向-node-的命令列)。
+LA 卡片與軌跡背後的演算法（內建 `olla`；`node_app` 的預設是 `fixed`）與怎麼換成自己的，見 [3.4 節](03-your-own-app.md#34-寫你自己的-link-adaptation-模組)。
 
 下一篇：[用 UDP 傳資料與傳影像](03-your-own-app.md)。

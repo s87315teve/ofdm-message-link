@@ -129,7 +129,8 @@ PSDU = │ delimiter │ frame 1 │ pad │ delimiter │ frame 2 │ pad │ �
 
 雙向的 `node_app` 一個 Pluto 一個 process，TX 與 RX 在**同一個** engine 子 process：一個 Pluto
 只能開一個 libiio context，兩個方向共用 `pluto.SharedPlutoContext`。Payload decode 預設 3 個
-process（兩個 node 在同一台 PC 時的 CPU 預算）。見 [7.9 節](07-reference.md#79-node_app雙向-node-的命令列)。
+process（兩個 node 在同一台 PC 時的 CPU 預算）。見 [7.9 節](07-reference.md#79-node_app雙向-node-的命令列)；
+架構、自干擾與 USB 的量測見 [`experiments/duplex_fdd/`](../experiments/duplex_fdd/README.md#22-node_app-架構)。
 
 為什麼用 process 而不是 thread：Python 的 interpreter lock 讓多個 thread 無法同時跑 Python 程式碼，
 decode 分到 thread 上幾乎不會變快；分到 process 才能真的用到多個 CPU 核心。
@@ -191,7 +192,8 @@ PHY library，在 `src/ofdm_link/`：
 
 - **TCP**：TCP 的 handshake 與 ACK 需要反向路徑，單向 link 做不起來。
 - **ARQ / TDD**：需要 MAC layer 來排程誰在什麼時候發射與重送，這裡沒有。雙向只有 FDD 的
-  `node_app`（兩個頻率，各自發射），語意仍是 UDP：掉了的 burst 不會重送。
+  `node_app`（兩個頻率，各自發射），語意仍是 UDP：掉了的 burst 不會重送。LTE RLC AM 式的 ARQ 只有
+  [提案](../experiments/duplex_fdd/README.md#5-arq-提案沒有實作)。
 - **完整的 channel model**：`--snr-db` 只加 AWGN，沒有 fading、CFO 或 sample clock offset。
   （`ofdm_link.radio.simulation` 有比較完整的模型，測試會用到，但 GUI 沒有接上它。）
 

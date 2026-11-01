@@ -348,12 +348,15 @@ Delimiter：
 | 33 | n_entries | u8 | ≤ 16 |
 | 34 | tlv_length | u16 | entries 後面 TLV 的 bytes |
 | 36 | entries | 6 B 各一 | seq_first u16、mcs u8、snr 0.25 dB u8（`0xFF` = 無）、ok u8、lost u8 |
-| … | TLVs | | type u8、len u8、value；0x80–0xFF 給自訂 reporter |
+| … | TLVs | | type u8、len u8、value；0x10 = reporter 的 session id（u32，peer 重新啟動時重設基準）；0x80–0xFF 給自訂 reporter |
 
 - 計數器是累計值，所以掉了幾份 feedback 也不會遺失資訊：TX 把收到的兩份相減。
 - 解碼端遇到任何格式錯誤都回傳 `None`，不會丟例外；body 比已知的長時，多出的部分被忽略。
 - 成本：LINK_HEADER 每個 burst 24 bytes（含 delimiter 與 padding）；4 個 entries 的 FEEDBACK
   是 84 bytes。
+- Data 的 MCS 高於 9 時，每 100 ms 至少有一份 feedback 走 MCS ≤ 9 的 burst，data 的 MCS 太高時
+  feedback 仍然到得了。
+- `pdu_type 3 STATUS` 保留給 ARQ，見[提案](../experiments/duplex_fdd/README.md#5-arq-提案沒有實作)。
 - Codec 在 [`ofdm_message_link/control.py`](../src/ofdm_message_link/control.py)，report 的資料結構在
   [`ofdm_message_link/la/api.py`](../src/ofdm_message_link/la/api.py)。
 
@@ -427,6 +430,10 @@ process 默默分流。
 
 Headless 收到 SIGTERM／SIGINT 或 `--duration` 到時：先停 TX（attenuator 回到最小輸出），再停 RX，
 刪除 ready file，exit 0；radio 啟動失敗時 exit 2，engine 子 process 中途結束時 exit 3。
+
+LA 演算法（預設演算法 `olla` 的參數、ladder）與怎麼寫自己的模組見
+[3.4 節](03-your-own-app.md#34-寫你自己的-link-adaptation-模組)；設計、自干擾與實機量測見
+[`experiments/duplex_fdd/`](../experiments/duplex_fdd/README.md) 與 [8.9 節](08-measurements.md#89-雙向-fdd兩個-node_apppluto--pluto24202460-mhz)。
 
 **USB 限制（M0，`experiments/duplex_fdd/results/usb/`）**：Pluto 同時以 5 MS/s 接收時，TX duty 到
 0.7 都沒有 overflow；要求 0.8 以上時 TX 只到 0.78，其中一個 Pluto 每分鐘 overflow 約 180–220 次。
