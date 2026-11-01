@@ -180,6 +180,9 @@ class NodeMonitor:
                     "egress_datagrams": rx["egress_datagrams"],
                     "own_bursts_heard": receiver.get("dropped_bursts", 0),
                     "control_frames": receiver.get("control_frames", 0),
+                    "own_seed_drops": receiver.get("own_seed_drops", 0),
+                    "sequence_resyncs": receiver.get("sequence_resyncs", 0),
+                    "control_handler_errors": receiver.get("control_handler_errors", 0),
                     "transport": transport,
                 },
                 "la": {
@@ -187,6 +190,9 @@ class NodeMonitor:
                     for key in (
                         "mode", "mcs_index", "reason", "snr_f_db", "offset_db", "snr_eff_db",
                         "feedback_age_s", "stale", "peer_loss_10s", "decisions",
+                        "feedback_ignored", "peer_rebaselines", "control_unsupported",
+                        "own_bursts_heard", "la_errors", "reporter_errors", "log_errors",
+                        "event_errors",
                     )
                 },
                 "feedback": {

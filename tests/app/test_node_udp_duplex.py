@@ -125,6 +125,11 @@ def test_two_engines_exchange_datagrams_and_feedback(tmp_path):
         assert line["feedback"]["sent"] > 0 and line["feedback"]["received"] > 0
         assert line["rx"]["own_bursts_heard"] == 0
         assert line["rx"]["control_frames"] > 0
+        # Over UDP a node never hears itself, and nothing in the LA path failed.
+        assert line["rx"]["own_seed_drops"] == 0
+        assert line["rx"]["control_handler_errors"] == 0
+        assert line["la"]["la_errors"] == 0 and line["la"]["reporter_errors"] == 0
+        assert line["la"]["control_unsupported"] == 0
         events = [
             json.loads(row)
             for row in (tmp_path / f"la_{node_id}.jsonl").read_text().splitlines()

@@ -33,6 +33,7 @@ from pathlib import Path
 from ofdm_link.phy.mcs_table import McsTableEntry, mcs_entry
 
 from . import log_limits, options
+from .link import node_seed_range
 
 DEFAULT_NODE_OVERLAY = "configs/profiles/duplex_fdd_2420_2460.yaml"
 NODE_IDS = (1, 2)
@@ -46,7 +47,7 @@ DEFAULT_LINK_ADAPTATION = "fixed"
 DEFAULT_REPORTER = "default"
 ISM_BAND_HZ = (2_400_000_000.0, 2_483_500_000.0)
 # Scrambler seeds per node: a free PHY-level direction id (design section 3.1).
-SEED_RANGES = {1: (1, 63), 2: (64, 127)}
+SEED_RANGES = {node_id: node_seed_range(node_id) for node_id in NODE_IDS}
 
 
 @dataclass(frozen=True, slots=True)

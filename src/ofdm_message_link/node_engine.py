@@ -403,6 +403,9 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
         la_log=la_log,
         sample_rate=float(profile.sample_rate),
         on_event=lambda kind, record: sink.put(kind, dict(record)),
+        # The node's own leakage is recognised by its scrambler seeds (node_app only:
+        # rx_app's peer is a tx_app that uses every seed).
+        own_seed_range=tuple(spec.seed_range),
     )
     controller.set_tx_gain(spec.tx_gain_db)
     counters = TxCounters()
@@ -418,7 +421,10 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
         policy=controller,
     )
     receiver = MessageReceiver(
-        profile, decode_workers=decode_workers, control_handler=controller
+        profile,
+        decode_workers=decode_workers,
+        control_handler=controller,
+        own_seed_range=tuple(spec.seed_range),
     )
     egress = EgressForwarder(*spec.egress)
     rx_worker = ReceiveWorker(receiver, sink, sink, egress=egress, observer=controller)
