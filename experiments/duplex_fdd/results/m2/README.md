@@ -66,9 +66,12 @@ section below.
   same node also runs its receiver, so it sends ~5 % slower. The TX queue then holds 70–230
   messages instead of ~13 (`tx.pending`), and the p50 latency is 91–637 ms instead of 77–107 ms.
   No datagram is lost to it at MCS 12.
-* **MCS 8 at 180/s is above what one Pluto sends.** The transmitter reaches airtime 0.67–0.70
-  without ever waiting for the duty cap (`duty_cap_waits` = 0). The push path is the limit, as
-  in M0, where TX duty topped out at 0.78. The send queue fills (`tx.pending` reaches 272), and
+* **MCS 8 at 180/s is above what one Pluto sends — because of a bug, since fixed.** The
+  4-ms minimum burst interval was counted from the end of the previous push (fixed in tx-v5
+  f3f84fc: start to start), so each ~8-ms MCS 8 burst was followed by 4 ms of idle air. All M2
+  runs used the old code. The MCS 12 points ran close to this limit too (66 data bursts/s of at
+  most ~80 with 8.5 ms + 4 ms per burst), which likely explains much of their duplex latency.
+  What was measured: the transmitter reaches airtime 0.67–0.70 without ever waiting for the duty cap (`duty_cap_waits` = 0). The send queue fills (`tx.pending` reaches 272), and
   6–11 % of the datagrams are dropped at the sender. That shows as loss ≫ air loss, with ~1.7 s
   of latency. Duplex sends about 5 % less than one way (1.13 vs 1.19 Mb/s A→B). These drops were
   not counted in `tx.ingress_dropped_queue_full`: the UDP ingress ignored a full queue. The
