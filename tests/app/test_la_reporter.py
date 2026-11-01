@@ -137,3 +137,11 @@ def test_bad_parameters():
         DefaultReporter(CONTEXT, period_ms=0)
     with pytest.raises(ValueError):
         DefaultReporter(CONTEXT, max_entries=-1)
+
+
+def test_every_report_carries_the_session_id_of_this_reporter():
+    first = DefaultReporter(CONTEXT)
+    second = DefaultReporter(CONTEXT)
+    assert first.session_id != second.session_id  # 2**-32 chance of a false failure
+    assert first.build(0.0).session_id == first.build(0.2).session_id == first.session_id
+    assert DefaultReporter(CONTEXT, session_id=5).build(0.0).session_id == 5

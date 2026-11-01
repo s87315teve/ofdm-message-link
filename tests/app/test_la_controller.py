@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
-from la_fakes import LADDER, report
+from la_fakes import LADDER, context, report
 
 from ofdm_link.phy.mcs_table import mcs_entry
 from ofdm_message_link.la.api import BurstReport, Decision, ReporterContext, RxHealth
@@ -16,6 +16,7 @@ from ofdm_message_link.la.controller import (
     DecodedControl,
     LinkController,
 )
+from ofdm_message_link.la.olla import OllaLinkAdaptation
 from ofdm_message_link.la.reporter import DefaultReporter
 
 HEALTH = RxHealth(0, 0, 0, clipping_seen=False, decode_backlog=False)
@@ -371,3 +372,43 @@ def test_default_codec_round_trip_when_the_link_layer_is_present():
     assert (received.data_ok_total, received.data_lost_total) == (40, 1)
     assert received.snr_mean_db == pytest.approx(16.0, abs=0.01)
     assert np.isclose(received.received_t_s, 0.0)
+
+
+# -- peer restart and stale agreement (review finding 1) ------------------------
+
+
+def test_an_ignored_report_does_not_refresh_the_feedback_age():
+    ctl, clock, _, _, codec, _, _ = _controller()
+    clock.t = 1.0
+    ctl.on_control(_peer_feedback(codec, 10, ok=400), CONTEXT)
+    clock.t = 1.4
+    ctl.on_control(_peer_feedback(codec, 9, ok=360), CONTEXT)  # a late copy
+    clock.t = 1.6
+    snap = ctl.snapshot()
+    assert snap["feedback_ignored"] == 1
+    assert snap["feedback_age_s"] == pytest.approx(0.6) and snap["stale"] is True
+
+
+def test_controller_uses_the_algorithms_stale_after():
+    la = OllaLinkAdaptation(context(), stale_after_s=2.0)
+    ctl, clock, _, _, codec, _, _ = _controller(la=la)
+    clock.t = 1.0
+    ctl.on_control(_peer_feedback(codec, 1), CONTEXT)
+    clock.t = 2.5
+    assert ctl.snapshot()["stale"] is False
+    clock.t = 3.1
+    assert ctl.snapshot()["stale"] is True
+
+
+def test_peer_loss_follows_a_restarted_peer():
+    ctl, clock, _, _, codec, _, _ = _controller()
+    clock.t = 1.0
+    ctl.on_control(_peer_feedback(codec, 5000, ok=200_000, session_id=1), CONTEXT)
+    for seq in range(0, 5):
+        clock.t += 0.02
+        ctl.on_control(
+            _peer_feedback(codec, seq, ok=30 * seq, lost=10 * seq, session_id=2), CONTEXT
+        )
+    snap = ctl.snapshot()
+    assert snap["peer_rebaselines"] == 1 and snap["feedback_ignored"] == 0
+    assert snap["peer_loss_10s"] == pytest.approx(0.25)

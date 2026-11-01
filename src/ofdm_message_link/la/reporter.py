@@ -14,11 +14,16 @@ When a report is due:
 Preambles of control-only bursts update the SNR statistics but never make a
 report due; otherwise two idle nodes would answer each other's feedback
 bursts forever.
+
+Every report carries a ``session_id`` drawn at random when the reporter is
+built, so the peer's link adaptation recognises a restart of this node at
+once instead of ignoring the restarted ``report_seq`` as old.
 """
 
 from __future__ import annotations
 
 import math
+import secrets
 from collections import deque
 from collections.abc import Sequence
 
@@ -60,6 +65,7 @@ class DefaultReporter:
         period_ms: float = 20.0,
         keepalive_ms: float = 200.0,
         max_entries: int = 8,
+        session_id: int | None = None,
     ) -> None:
         if period_ms <= 0 or keepalive_ms <= 0:
             raise ValueError("period_ms and keepalive_ms must be positive")
@@ -76,6 +82,9 @@ class DefaultReporter:
         self._last_report_t: float | None = None
         self._first_seen_t: float | None = None
         self._new_data = False
+        self.session_id = (
+            secrets.randbits(32) if session_id is None else int(session_id) & 0xFFFFFFFF
+        )
         self._seq = 0
         self._data_ok = 0
         self._data_lost = 0
@@ -162,6 +171,7 @@ class DefaultReporter:
             last_mcs_index=self._last_mcs,
             flags=flags,
             bursts=entries,
+            session_id=self.session_id,
         )
         self._seq = (self._seq + 1) % _U16
         self._last_report_t = now_s

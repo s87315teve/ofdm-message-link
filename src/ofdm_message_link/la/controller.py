@@ -34,10 +34,10 @@ from .api import (
     Decision,
     FeedbackReport,
     FeedbackReporter,
+    FeedbackTracker,
     LinkAdaptation,
     RxHealth,
     SentBurst,
-    counter_delta,
 )
 from .thresholds import rung_at_or_below
 
@@ -76,7 +76,8 @@ FLAG_LBT_MODE = 0x02
 FLAG_TX_QUEUE_NONEMPTY = 0x04
 
 STALE_AFTER_S = 0.5
-"""Feedback older than this counts as stale in the statistics."""
+"""Feedback older than this counts as stale in the statistics, unless the
+algorithm has its own ``stale_after_s`` (then that one, so both agree)."""
 ROBUST_FEEDBACK_S = 0.1
 """A report goes in a control-only burst at the control MCS if no burst at
 MCS <= ``ROBUST_MAX_MCS`` carried feedback for this long."""
@@ -198,12 +199,20 @@ class LinkController:
         self._last_robust_t: float | None = None
         self._stale = False
         self._peer_counts: deque[tuple[float, int, int]] = deque()
-        self._peer_base: tuple[int, int] | None = None
+        stale_after = getattr(la, "stale_after_s", STALE_AFTER_S)
+        self._stale_after_s = (
+            float(stale_after) if isinstance(stale_after, int | float) else STALE_AFTER_S
+        )
+        # The same acceptance rules as the built-in algorithms: a report the
+        # LA ignores as old does not refresh the feedback age either.
+        self._feedback = FeedbackTracker(rebaseline_after_s=self._stale_after_s)
         self._last_feedback_event_t: float | None = None
         self._counts = {
             "decisions": 0,
             "feedback_sent": 0,
             "feedback_received": 0,
+            "feedback_ignored": 0,
+            "peer_rebaselines": 0,
             "feedback_stale": 0,
             "control_bursts": 0,
             "own_bursts_heard": 0,
@@ -229,7 +238,9 @@ class LinkController:
                 self._on_event(kind, record)
 
     def _check_stale(self, now: float) -> None:
-        stale = self._last_feedback_t is None or now - self._last_feedback_t > STALE_AFTER_S
+        stale = (
+            self._last_feedback_t is None or now - self._last_feedback_t > self._stale_after_s
+        )
         if stale and not self._stale and self._last_feedback_t is not None:
             self._counts["feedback_stale"] += 1
         self._stale = stale
@@ -365,10 +376,21 @@ class LinkController:
             if decoded.feedback is not None:
                 now = self._clock()
                 report = replace(decoded.feedback, received_t_s=now)
-                self._last_feedback_t = now
-                self._check_stale(now)
                 self._counts["feedback_received"] += 1
-                self._note_peer_counts(report, now)
+                delta = self._feedback.update(report, now)
+                if delta is None:
+                    self._counts["feedback_ignored"] += 1
+                else:
+                    self._last_feedback_t = now
+                    self._check_stale(now)
+                    if delta.rebaselined is None:
+                        self._peer_counts.append((now, delta.ok, delta.lost))
+                    elif delta.rebaselined != "first":
+                        self._counts["peer_rebaselines"] += 1
+                    while (
+                        self._peer_counts and now - self._peer_counts[0][0] > PEER_LOSS_WINDOW_S
+                    ):
+                        self._peer_counts.popleft()
                 self._la.on_feedback(report)
                 notify = (
                     self._last_feedback_event_t is None
@@ -380,17 +402,6 @@ class LinkController:
                     events.append(("feedback", self._feedback_record(report, now)))
         self._emit(events, notify=notify)
         return ControlVerdict.ACCEPT
-
-    def _note_peer_counts(self, report: FeedbackReport, now: float) -> None:
-        totals = (report.data_ok_total, report.data_lost_total)
-        if self._peer_base is not None:
-            d_ok = counter_delta(totals[0], self._peer_base[0])
-            d_lost = counter_delta(totals[1], self._peer_base[1])
-            if d_ok < 1 << 31 and d_lost < 1 << 31:
-                self._peer_counts.append((now, d_ok, d_lost))
-        self._peer_base = totals
-        while self._peer_counts and now - self._peer_counts[0][0] > PEER_LOSS_WINDOW_S:
-            self._peer_counts.popleft()
 
     def _feedback_record(self, report: FeedbackReport, now: float) -> dict[str, Any]:
         snapshot = self._la.snapshot()

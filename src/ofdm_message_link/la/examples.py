@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .api import Decision, FeedbackReport, LaContext, SentBurst, counter_delta, is_newer_seq
+from .api import Decision, FeedbackReport, FeedbackTracker, LaContext, SentBurst
 
 
 class ArfLinkAdaptation:
@@ -44,23 +44,19 @@ class ArfLinkAdaptation:
         self.good_run = 0
         self.bad_run = 0
         self.probing = False  # True until the first data report after an up step
-        self.last_seq: int | None = None
-        self.last_totals: tuple[int, int] | None = None
+        # Ignores repeated reports and re-baselines the cumulative counters
+        # when the peer restarts.
+        self.feedback = FeedbackTracker()
         self.pending_reason = "init"
 
     def on_sent(self, burst: SentBurst) -> None:
         pass
 
     def on_feedback(self, report: FeedbackReport) -> None:
-        if self.last_seq is not None and not is_newer_seq(report.report_seq, self.last_seq):
-            return
-        self.last_seq = report.report_seq
-        totals = (report.data_ok_total, report.data_lost_total)
-        previous, self.last_totals = self.last_totals, totals
-        if previous is None:
-            return  # the first report only sets the baseline of the cumulative counters
-        ok = counter_delta(totals[0], previous[0])
-        lost = counter_delta(totals[1], previous[1])
+        delta = self.feedback.update(report)
+        if delta is None or delta.rebaselined is not None:
+            return  # a repeated report, or a (new) baseline of the counters
+        ok, lost = delta.ok, delta.lost
         if ok + lost == 0:
             return
         if lost:

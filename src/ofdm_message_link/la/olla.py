@@ -29,15 +29,13 @@ from ofdm_link.phy.mcs_table import McsTableEntry
 
 from .api import (
     Decision,
+    FeedbackDelta,
     FeedbackReport,
+    FeedbackTracker,
     LaContext,
     SentBurst,
-    counter_delta,
-    is_newer_seq,
 )
 from .thresholds import build_ladder, load_thresholds, rung_at_or_below
-
-_COUNTER_RESET = 1 << 31  # a larger u32 "increase" means the peer restarted
 
 
 class OllaLinkAdaptation:
@@ -112,10 +110,9 @@ class OllaLinkAdaptation:
         self._snr_eff: float | None = None
         self._up_cand: int | None = None
         self._up_count = 0
-        self._last_seq: int | None = None
-        self._base_ok: int | None = None
-        self._base_lost: int | None = None
-        self._base_overflow: int | None = None
+        # Duplicates, peer restarts (session id, feedback gap, counters going
+        # backwards) and the counter differences.
+        self._feedback = FeedbackTracker(rebaseline_after_s=self.stale_after_s)
         self._started_t: float | None = None
         self._last_feedback_t: float | None = None
         self._next_stale_t: float | None = None
@@ -125,6 +122,7 @@ class OllaLinkAdaptation:
         self._counts = {
             "reports": 0,
             "ignored_reports": 0,
+            "peer_rebaselines": 0,
             "overflow_skips": 0,
             "changes": 0,
             "subframes_ok": 0,
@@ -167,14 +165,16 @@ class OllaLinkAdaptation:
         pass
 
     def on_feedback(self, report: FeedbackReport) -> None:
-        if self._last_seq is not None and not is_newer_seq(report.report_seq, self._last_seq):
-            self._counts["ignored_reports"] += 1
-            return
-        self._last_seq = report.report_seq
-        self._counts["reports"] += 1
         t = report.received_t_s
         if t is None:
             t = self._now if self._now is not None else time.monotonic()
+        delta = self._feedback.update(report, t)
+        if delta is None:
+            self._counts["ignored_reports"] += 1
+            return
+        self._counts["reports"] += 1
+        if delta.rebaselined not in (None, "first"):
+            self._counts["peer_rebaselines"] += 1
         self._last_feedback_t = t
         self._next_stale_t = None
 
@@ -186,7 +186,7 @@ class OllaLinkAdaptation:
                 self._snr_f += weight * (float(report.snr_mean_db) - self._snr_f)
             self._snr_t = t
 
-        self._outer_update(report)
+        self._outer_update(delta)
 
         if self._snr_f is None:
             return
@@ -199,30 +199,20 @@ class OllaLinkAdaptation:
         self._up_cand = cand
         self._up_count = self._up_count + 1 if cand is not None else 0
 
-    def _outer_update(self, report: FeedbackReport) -> None:
-        overflow_changed = (
-            self._base_overflow is not None
-            and counter_delta(report.rx_overflow_total, self._base_overflow, bits=16) != 0
-        )
-        self._base_overflow = report.rx_overflow_total
-        if self._base_ok is None or self._base_lost is None:
-            self._base_ok, self._base_lost = report.data_ok_total, report.data_lost_total
-            return
-        d_ok = counter_delta(report.data_ok_total, self._base_ok)
-        d_lost = counter_delta(report.data_lost_total, self._base_lost)
-        self._base_ok, self._base_lost = report.data_ok_total, report.data_lost_total
-        if d_ok >= _COUNTER_RESET or d_lost >= _COUNTER_RESET:
-            return  # the peer's counters restarted: this report is the new baseline
+    def _outer_update(self, delta: FeedbackDelta) -> None:
+        if delta.rebaselined is not None:
+            return  # first report, or the peer restarted: only a new baseline
+        d_ok, d_lost = delta.ok, delta.lost
         self._counts["subframes_ok"] += d_ok
         self._counts["subframes_lost"] += d_lost
         if d_ok + d_lost == 0 or not self.outer_loop:
             return
-        if self.skip_outer_on_overflow and overflow_changed:
+        if self.skip_outer_on_overflow and delta.overflow_changed:
             self._counts["overflow_skips"] += 1
             return
-        delta = self.step_up_db * d_ok - self.step_down_db * d_lost
-        delta = min(max(delta, -self.max_report_down_db), self.max_report_up_db)
-        self._offset = min(max(self._offset + delta, self.offset_min_db), self.offset_max_db)
+        step = self.step_up_db * d_ok - self.step_down_db * d_lost
+        step = min(max(step, -self.max_report_down_db), self.max_report_up_db)
+        self._offset = min(max(self._offset + step, self.offset_min_db), self.offset_max_db)
 
     def decide(self, now_s: float) -> Decision:
         self._now = now_s

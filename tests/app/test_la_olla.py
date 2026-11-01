@@ -303,3 +303,61 @@ def test_bad_parameters_are_refused():
         OllaLinkAdaptation(context(), target_loss=0.0)
     with pytest.raises(ValueError):
         OllaLinkAdaptation(context(), offset_min_db=4.0, offset_max_db=3.0)
+
+
+# -- peer restart (review finding 1) ------------------------------------------
+
+
+def _run_then_restart(la, *, session_before=None, session_after=None, gap_s=0.02):
+    """100 s of reports, then the peer restarts: report_seq and counters from 0."""
+
+    t, ok = 0.0, 0
+    for seq in range(1, 5001):
+        t += 0.02
+        ok += 40
+        la.on_feedback(report(seq, t, snr=20.0, ok=ok, session_id=session_before))
+        la.decide(t)
+    t += gap_s
+    ok = 0
+    for seq in range(0, 50):  # 1 s after the restart
+        t += 0.02
+        ok += 20
+        la.on_feedback(report(seq, t, snr=12.0, ok=ok, lost=seq * 20,
+                              session_id=session_after))
+        la.decide(t)
+    return t
+
+
+def test_a_restarted_peer_with_a_new_session_is_followed_at_once():
+    la = OllaLinkAdaptation(context(initial=13))
+    _run_then_restart(la, session_before=0x1234, session_after=0x9876)
+    snap = la.snapshot()
+    assert snap["ignored_reports"] == 0 and snap["peer_rebaselines"] == 1
+    assert snap["snr_f_db"] == pytest.approx(12.0, abs=0.1)  # the new reports count
+    assert snap["offset_db"] < 0  # and their losses reach the outer loop
+    assert snap["reason"] != "stale"
+
+
+def test_a_restarted_peer_without_a_session_is_followed_after_a_feedback_gap():
+    la = OllaLinkAdaptation(context(initial=13))
+    _run_then_restart(la, gap_s=0.8)  # a process restart takes longer than stale_after
+    snap = la.snapshot()
+    assert snap["ignored_reports"] == 0 and snap["peer_rebaselines"] == 1
+    assert snap["offset_db"] < 0
+
+
+def test_a_restarted_peer_is_followed_when_its_counters_go_backwards():
+    la = OllaLinkAdaptation(context(initial=13))
+    _run_then_restart(la)  # no session id, no gap: only the counters tell
+    snap = la.snapshot()
+    assert snap["ignored_reports"] == 0 and snap["peer_rebaselines"] == 1
+    assert snap["offset_db"] < 0
+
+
+def test_a_late_copy_of_a_report_is_still_ignored():
+    la = OllaLinkAdaptation(context())
+    _feed(la, 100, 0.02, ok=4000, session_id=7)
+    _feed(la, 101, 0.04, ok=4040, session_id=7)
+    _feed(la, 99, 0.05, ok=3960, lost=0, session_id=7)  # counters behind, seq just behind
+    snap = la.snapshot()
+    assert snap["ignored_reports"] == 1 and snap["peer_rebaselines"] == 0
