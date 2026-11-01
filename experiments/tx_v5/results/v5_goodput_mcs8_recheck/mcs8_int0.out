@@ -1,0 +1,9 @@
+{"rate": 20.0, "loss": 0.0, "overflow_while_loaded": 0, "load_1min_at_start": 1.31, "passed": true}
+{"rate": 145.79999999999998, "loss": 0.0, "overflow_while_loaded": 0, "load_1min_at_start": 1.15, "passed": true}
+{"rate": 218.7, "loss": 0.0, "overflow_while_loaded": 0, "load_1min_at_start": 1.41, "passed": true}
+{"rate": 328.04999999999995, "loss": 0.21562849303932527, "overflow_while_loaded": 0, "load_1min_at_start": 1.79, "passed": false}
+{"rate": 273.4, "loss": 0.05779078273591807, "overflow_while_loaded": 0, "load_1min_at_start": 1.6, "passed": false}
+{"rate": 246.0, "loss": 0.001084010840108401, "overflow_while_loaded": 0, "load_1min_at_start": 1.47, "passed": false}
+{"rate": 232.3, "loss": 0.006170182235614866, "overflow_while_loaded": 0, "load_1min_at_start": 2.03, "passed": false}
+{"rate": 225.5, "loss": 0.01049519586104952, "overflow_while_loaded": 0, "load_1min_at_start": 1.58, "passed": false}
+{"max_rate": 218.7, "first_failing_rate": 225.5, "goodput_bps": 1574640.0}

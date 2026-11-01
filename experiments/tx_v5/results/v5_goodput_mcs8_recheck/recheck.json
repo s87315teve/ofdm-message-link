@@ -1,0 +1,284 @@
+{
+ "head": "f3f84fc",
+ "tx_gain_db": -15,
+ "size": 900,
+ "reference": {
+  "mcs8": {
+   "rate": 243,
+   "mbps": 1.748
+  },
+  "mcs10": {
+   "rate": 486,
+   "mbps": 3.496
+  }
+ },
+ "cases": {
+  "mcs8": {
+   "max_rate": 252.8,
+   "first_failing_rate": 259.7,
+   "mbps": 1.82016,
+   "n_runs": 8,
+   "max_overflow_while_loaded": 0,
+   "max_load_1min": 3.72,
+   "best_pass": {
+    "rate": 252.8,
+    "loss": 0.0,
+    "psdus_received": 3793,
+    "subframes_ok": 7584,
+    "latency_ms_p50": 474.295198,
+    "latency_ms_p99": 681.8507251599999,
+    "sender_max_behind_ms": 1.08140948577784,
+    "subframes_per_burst": 1.9994727128921699
+   },
+   "all_runs": [
+    {
+     "rate": 20.0,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 0.75,
+     "latency_ms_p50": 45.7175975,
+     "latency_ms_p99": 60.78238466,
+     "sf_per_burst": 1.0
+    },
+    {
+     "rate": 145.79999999999998,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.42,
+     "latency_ms_p50": 42.9813825,
+     "latency_ms_p99": 61.12528875999991,
+     "sf_per_burst": 1.002980967667966
+    },
+    {
+     "rate": 218.7,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.84,
+     "latency_ms_p50": 50.179078,
+     "latency_ms_p99": 90.05822039999957,
+     "sf_per_burst": 1.256896551724138
+    },
+    {
+     "rate": 328.04999999999995,
+     "loss": 0.21146224977136469,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.17,
+     "latency_ms_p50": 1123.8606650000002,
+     "latency_ms_p99": 1158.64682837,
+     "sf_per_burst": 1.999484668899768
+    },
+    {
+     "rate": 273.4,
+     "loss": 0.058034625701048524,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 3.72,
+     "latency_ms_p50": 1115.7244799999999,
+     "latency_ms_p99": 1158.0407882499999,
+     "sf_per_burst": 1.9994824016563146
+    },
+    {
+     "rate": 246.0,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 3.04,
+     "latency_ms_p50": 70.5337255,
+     "latency_ms_p99": 134.63179276,
+     "sf_per_burst": 1.9518645860883364
+    },
+    {
+     "rate": 259.7,
+     "loss": 0.003337183930175844,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.65,
+     "latency_ms_p50": 579.616661,
+     "latency_ms_p99": 1151.2594624399999,
+     "sf_per_burst": 1.9997424671645634
+    },
+    {
+     "rate": 252.8,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.23,
+     "latency_ms_p50": 474.295198,
+     "latency_ms_p99": 681.8507251599999,
+     "sf_per_burst": 1.9994727128921699
+    }
+   ]
+  },
+  "mcs10": {
+   "max_rate": 283.1,
+   "first_failing_rate": 291.59999999999997,
+   "mbps": 2.03832,
+   "n_runs": 7,
+   "max_overflow_while_loaded": 0,
+   "max_load_1min": 3.51,
+   "best_pass": {
+    "rate": 283.1,
+    "loss": 0.0,
+    "psdus_received": 6229,
+    "subframes_ok": 8493,
+    "latency_ms_p50": 46.213435,
+    "latency_ms_p99": 66.35259212,
+    "sender_max_behind_ms": 0.8799641509540379,
+    "subframes_per_burst": 1.363461229731899
+   },
+   "all_runs": [
+    {
+     "rate": 20.0,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.53,
+     "latency_ms_p50": 42.039394,
+     "latency_ms_p99": 54.1468423,
+     "sf_per_burst": 1.0
+    },
+    {
+     "rate": 291.59999999999997,
+     "loss": 0.00102880658436214,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.45,
+     "latency_ms_p50": 46.96218,
+     "latency_ms_p99": 69.15743694000001,
+     "sf_per_burst": 1.4177482154445165
+    },
+    {
+     "rate": 155.8,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.67,
+     "latency_ms_p50": 41.550321,
+     "latency_ms_p99": 57.499921749999984,
+     "sf_per_burst": 1.0004280821917808
+    },
+    {
+     "rate": 223.7,
+     "loss": 0.00014900908955446283,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.52,
+     "latency_ms_p50": 44.980411000000004,
+     "latency_ms_p99": 64.33173595999999,
+     "sf_per_burst": 1.0677912157861236
+    },
+    {
+     "rate": 257.6,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.84,
+     "latency_ms_p50": 45.7471405,
+     "latency_ms_p99": 66.27014662999999,
+     "sf_per_burst": 1.239057239057239
+    },
+    {
+     "rate": 274.6,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 3.5,
+     "latency_ms_p50": 46.5016665,
+     "latency_ms_p99": 68.84070530000001,
+     "sf_per_burst": 1.3302115291458099
+    },
+    {
+     "rate": 283.1,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 3.51,
+     "latency_ms_p50": 46.213435,
+     "latency_ms_p99": 66.35259212,
+     "sf_per_burst": 1.363461229731899
+    }
+   ]
+  },
+  "mcs8_interval0": {
+   "max_rate": 218.7,
+   "first_failing_rate": 225.5,
+   "mbps": 1.57464,
+   "n_runs": 8,
+   "max_overflow_while_loaded": 0,
+   "max_load_1min": 2.03,
+   "best_pass": {
+    "rate": 218.7,
+    "loss": 0.0,
+    "psdus_received": 5678,
+    "subframes_ok": 6561,
+    "latency_ms_p50": 48.57717,
+    "latency_ms_p99": 93.88353159999932,
+    "sender_max_behind_ms": 0.7513536256738007,
+    "subframes_per_burst": 1.1555125044029588
+   },
+   "all_runs": [
+    {
+     "rate": 20.0,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.31,
+     "latency_ms_p50": 45.6122965,
+     "latency_ms_p99": 55.49427039,
+     "sf_per_burst": 1.0
+    },
+    {
+     "rate": 145.79999999999998,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.15,
+     "latency_ms_p50": 43.061088,
+     "latency_ms_p99": 60.3699293799999,
+     "sf_per_burst": 1.0
+    },
+    {
+     "rate": 218.7,
+     "loss": 0.0,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.41,
+     "latency_ms_p50": 48.57717,
+     "latency_ms_p99": 93.88353159999932,
+     "sf_per_burst": 1.1555125044029588
+    },
+    {
+     "rate": 328.04999999999995,
+     "loss": 0.21562849303932527,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.79,
+     "latency_ms_p50": 1129.109399,
+     "latency_ms_p99": 1174.0758882,
+     "sf_per_burst": 1.999740932642487
+    },
+    {
+     "rate": 273.4,
+     "loss": 0.05779078273591807,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.6,
+     "latency_ms_p50": 1115.780425,
+     "latency_ms_p99": 1171.2663805,
+     "sf_per_burst": 1.9994825355756791
+    },
+    {
+     "rate": 246.0,
+     "loss": 0.001084010840108401,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.47,
+     "latency_ms_p50": 60.631187,
+     "latency_ms_p99": 107.90493371,
+     "sf_per_burst": 1.858799798285426
+    },
+    {
+     "rate": 232.3,
+     "loss": 0.006170182235614866,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 2.03,
+     "latency_ms_p50": 52.648909,
+     "latency_ms_p99": 106.624245,
+     "sf_per_burst": 1.4126045278400978
+    },
+    {
+     "rate": 225.5,
+     "loss": 0.01049519586104952,
+     "overflow_while_loaded": 0,
+     "load_1min_at_start": 1.58,
+     "latency_ms_p50": 50.318084,
+     "latency_ms_p99": 112.51130260999994,
+     "sf_per_burst": 1.250513730618345
+    }
+   ]
+  }
+ }
+}
