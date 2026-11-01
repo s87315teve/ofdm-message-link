@@ -423,7 +423,8 @@ window.GUIDE_CONTENT = (function () {
         { text: "選用：用其他程式當來源與目的地。", cmd: "python -m ofdm_message_link.udp_recv\npython -m ofdm_message_link.udp_send \"Hello\"" },
         { text: "選用：雙向 link。<code>node_app</code> 在一個 process 裡同時發送與接收。每個 node 用一個 terminal。Node 1 與 node 2 經過 UDP 交換 samples。",
           cmd: "python -m ofdm_message_link.node_app --node-id 1\npython -m ofdm_message_link.node_app --node-id 2" },
-        { text: "Node 1 從 UDP port 52211 收 bytes。Node 2 把這些 bytes 送到 UDP port 52222。反方向用 52221 與 52212。" }
+        { text: "Node 1 從 UDP port 52211 收 bytes。Node 2 把這些 bytes 送到 UDP port 52222。反方向用 52221 與 52212。" },
+        { text: "每個 node 用 <code>olla</code>（預設的 link adaptation）為每個 burst 選 MCS。<code>--link-adaptation fixed</code> 固定在 <code>--mcs-index</code>。第 5 個分頁說明 node 裡面的 blocks。" }
       ]
     },
     uhd: {
@@ -486,11 +487,410 @@ window.GUIDE_CONTENT = (function () {
     ["node_app.py、node_options.py", "（雙向 node）", "雙向 node 的 CLI、headless loop、control socket、stats line"],
     ["node_engine.py", "（雙向 node）", "一個 child process 同時執行 TX 與 RX，兩個方向共用一台 Pluto"],
     ["node_window.py", "（雙向 node）", "TX、RX 與 link adaptation 的 cards，以及 MCS trend"],
-    ["control.py、la/", "（雙向 node）", "Control 與 feedback 的 wire format、可以替換的 link adaptation"],
+    ["control.py", "（雙向 node）", "LCP：CONTROL frame 的 header 與 FEEDBACK body"],
+    ["la/", "（雙向 node）", "LinkController、可以替換的 LinkAdaptation（預設 olla）與 FeedbackReporter、threshold 表"],
     ["udp_send.py、udp_recv.py", "你的程式", "最小的 socket producer 與 consumer"],
     ["experiments/ota_udp_throughput/", "（量測工具）", "各 MCS 的 airtime 與 OTA UDP throughput sweep"],
-    ["experiments/tx_v5/", "（量測工具）", "Wire v5 的錄音、goodput 與 acquisition 門檻量測"]
+    ["experiments/tx_v5/", "（量測工具）", "Wire v5 的錄音、goodput 與 acquisition 門檻量測"],
+    ["experiments/duplex_fdd/", "（量測工具）", "雙向 node 的 USB、自干擾、固定 MCS、LA 與影像量測"]
   ];
 
-  return { MODULES: MODULES, TOUR: TOUR, RUN: RUN, SYMPTOMS: SYMPTOMS, FILES: FILES };
+  /* ---- 5. duplex node_app: the blocks of the second diagram ---- */
+  // A value that differs between the UDP simulation and a Pluto.  node_app
+  // refuses --transport uhd, so the USRP choice shows the Pluto text.
+  function ota(sim, hw) { return { sim: sim, uhd: hw, pluto: hw }; }
+
+  var NODE_MODULES = [
+    {
+      id: "n-parent", cls: "ext", row: "Process",
+      name: "node_app main process", sum: "Main process 顯示 window，或執行 headless loop。Radio、codec 與 LA 在 engine child process。",
+      blocks: [
+        {
+          name: "Window 或 headless",
+          does: ["沒有 <code>--headless</code> 時，main process 開一個 Qt window。Window 有 TX、RX、LA 三排 cards 與 60 秒的 MCS trend。",
+            "<code>--headless</code> 不開 window。它隱含 <code>--auto-start</code>。Pluto 也需要 <code>--serial</code>。",
+            "Main process 每 0.5 s 寫一行 stats：<code>tx</code>、<code>rx</code>、<code>la</code>、<code>feedback</code>、<code>cpu</code>。",
+            "Radio 沒有啟動時，headless 程式的 exit code 是 2。Engine child process 中途結束時，exit code 是 3。"],
+          input: "Engine child process 的 events", output: "Cards、trend、stats line",
+          code: ["<code>node_app.py</code>：<code>main</code>、<code>HeadlessNode</code>、<code>NodeMonitor</code>", "<code>node_window.py</code>：<code>NodeWindow</code>"],
+          opts: ["<code>--headless</code>、<code>--duration S</code>、<code>--stats-log PATH</code>、<code>--ready-file PATH</code>"],
+          gui: "Window 的標題是 <code>OFDM node 1</code>（或 2）。"
+        },
+        {
+          name: "Control socket",
+          does: ["Main process 在 localhost 開一個 UDP socket。一個 datagram 是一個 JSON request。每個 request 得到一個 JSON answer。",
+            "Commands：<code>set_gain</code>、<code>set_mcs</code>、<code>set_la</code>、<code>mark</code>、<code>stats</code>、<code>stop</code>。",
+            "Node 1 用 port 52213，node 2 用 port 52223。Socket 不設 <code>SO_REUSEADDR</code>。Port 已被佔用時，程式停止。",
+            "Window 模式也開這個 socket。"],
+          input: "JSON request", output: "JSON answer",
+          code: ["<code>node_app.py</code>：<code>ControlServer</code>、<code>control_handler</code>"],
+          opts: ["<code>--control-port P</code>（預設依 node；0 = 關閉）"],
+          gui: "—"
+        },
+        {
+          name: "Gain profile",
+          does: ["<code>--gain-profile</code> 依 ready 之後的秒數改變 TX gain，例如 <code>0:-5,30:-20,60:-5</code>。",
+            "Window 模式與 headless 都執行 gain profile。", "Main process 把每一步寫進 stats log。"],
+          input: "時間與 gain 的清單", output: "TX gain 的改變",
+          code: ["<code>node_options.py</code>：<code>parse_gain_profile</code>、<code>GainSchedule</code>"],
+          opts: ["<code>--gain-profile T:DB,...</code>、<code>--tx-gain</code>（預設 −89.75 dB）、<code>--rx-gain</code>（預設 15 dB）"],
+          gui: "<code>Hardware</code> tab：TX gain。"
+        }
+      ]
+    },
+    {
+      id: "n-tx-in", cls: "tx", row: "TX",
+      name: "Ingress", sum: "Node 從 UDP ingress port 與 <code>Send</code> tab 收 message。",
+      blocks: [{
+        name: "Ingress",
+        does: ["其他程式把 bytes 送到 ingress port。Node 1 用 52211，node 2 用 52221。", "你也可以在 <code>Send</code> tab 打字。",
+          "Ingress socket 不設 <code>SO_REUSEADDR</code>。另一個 process 已經使用這個 port 時，radio 不啟動。",
+          "Send queue 滿時，node 丟棄 datagram，並計數（<code>ingress_dropped_queue_full</code>）。"],
+        input: "UDP datagrams 或打字的文字", output: "一則 message",
+        code: ["<code>tx_app.py</code>：<code>IngressListener</code>、<code>TransmitWorker</code>", "<code>node_engine.py</code>：<code>_node_main</code>"],
+        opts: ["<code>--ingress-port</code>（預設依 node）"],
+        gui: "<code>Send</code> tab。<code>Queue</code> card 顯示 queue 裡的 message 數量。"
+      }]
+    },
+    {
+      id: "n-tx-link", cls: "tx", row: "TX",
+      name: "Link TX", sum: "Link layer 把 datagrams 放進一個 A-MPDU。每個 burst 的第一個 frame 是 CONTROL frame。",
+      blocks: [{
+        name: "Link TX",
+        does: ["這個 block 與 <code>tx_app</code> 的 Link 相同：fragment、sequence number、CRC-32、A-MPDU。",
+          "BurstPolicy 給它一個 CONTROL payload。這個 payload 變成 burst 的第一個 frame（<code>FrameKind.CONTROL</code>）。",
+          "CONTROL frame 用自己的 16-bit sequence counter。所以 DATA 的 sequence 保持連續。",
+          "CONTROL frame 算進 aggregation 的上限：subframes、bytes 與 airtime。",
+          "同一個 MCS 用在 aggregation 的規劃與 encode。所以 MCS 改變不會讓 burst 超過 airtime 上限。"],
+        input: "Datagrams 與一個 CONTROL payload", output: "一個 PSDU",
+        code: ["<code>link.py</code>：<code>MessageTransmitter.encode_datagrams(control_payloads=...)</code>", "<code>tx_app.py</code>：<code>TransmitWorker</code>、<code>ControlPlan</code>"],
+        opts: ["<code>--aggregation</code>、<code>--min-burst-interval-ms</code>、<code>--max-burst-airtime-ms</code>"],
+        gui: "<code>Airtime (2 s)</code> card。"
+      }]
+    },
+    {
+      id: "n-tx-phy", cls: "tx", row: "TX",
+      name: "PHY TX（v5）", sum: "PHY 與 <code>tx_app</code> 相同。只有 scrambler seed 的範圍不同。",
+      blocks: [{
+        name: "PHY TX",
+        does: ["這個 block 把 PSDU 變成一個 v5 burst：Turbo、rate matching、scrambler、QAM、OFDM、STF、LTF 與 SIG。",
+          "MCS 來自 LinkAdaptation。每個 data burst 可以用不同的 MCS。",
+          "Node 1 只用 scrambler seed 1–63。Node 2 只用 64–127。SIG 帶 seed，所以 RX 從 SIG 知道哪個 node 送了這個 burst。",
+          "<code>tx_app</code> 仍然用 1–127。"],
+        input: "PSDU 與 MCS", output: "Burst samples",
+        code: ["<code>link.py</code>：<code>node_seed_range</code>、<code>NODE_SEED_RANGES</code>", "<code>ofdm_link.phy.burst_v5</code>：<code>encode_burst_v5</code>"],
+        opts: ["<code>--node-id {1,2}</code>（決定 seed 範圍）"],
+        gui: "<code>TX MCS</code> card。"
+      }]
+    },
+    {
+      id: "n-tx-sink", cls: "tx", row: "TX",
+      name: "TX sink", sum: ota("UDP sink 把 burst 送到 peer。", "Pluto sink 推送 burst。Duty cap 保護 RX stream。"),
+      blocks: [{
+        name: "TX sink",
+        does: ota(["這個 block 縮放每個 burst，讓 peak 是 0.7。", "UDP sink 把 samples 送到 peer 的 sample port。Node 1 送到 52224，node 2 送到 52214。",
+          "UDP transport 沒有 duty cap。"],
+          ["這個 block 縮放每個 burst，讓 peak 是 0.7。然後它把 samples 推到 Pluto。",
+            "<code>DutyCappedSink</code> 讓 TX duty 不超過 0.7。一個 burst 最早在前一個 burst 開始之後 airtime ÷ 0.7 開始。",
+            "原因：Pluto 的 USB 2.0 同時帶 5 MS/s 的 RX stream。TX duty 超過大約 0.7 時，RX overflow（M0 量測）。",
+            "閒置的時間最多存 50 ms 的 credit。所以閒置之後的幾個 burst 不必等。"]),
+        input: "Burst samples", output: ota("UDP sample datagrams", "Pluto 的 TX buffer"),
+        code: ota(["<code>node_engine.py</code>：<code>UdpDuplexFactory</code>", "<code>transport.py</code>：<code>UdpSampleSink</code>"],
+          ["<code>node_engine.py</code>：<code>DutyCappedSink</code>、<code>PlutoDuplexFactory</code>", "<code>pluto.py</code>：<code>PlutoSampleSink</code>"]),
+        opts: ota(["<code>--udp-peer-port</code>、<code>--peak-amplitude</code>（預設 0.7）"],
+          ["<code>--tx-duty-cap D</code>（預設 0.7；1 = 沒有上限）", "<code>--peak-amplitude</code>（預設 0.7）、<code>--tx-gain</code>（預設 −89.75 dB）"]),
+        gui: "<code>Hardware</code> tab：TX gain 與原始統計。"
+      }]
+    },
+    {
+      id: "n-radio", cls: "sh", row: "Radio",
+      name: "Shared radio", sum: ota("兩個 UDP sample sockets 取代 radio。", "一個 Pluto context 同時帶 TX 與 RX。"),
+      blocks: [{
+        name: "Shared radio",
+        does: ota(["<code>--transport udp</code> 不需要 radio。這是預設的 transport。",
+          "每個 node 開兩個 UDP sample sockets：一個送到 peer 的 sample port，一個收自己的 sample port。",
+          "Node 1 收在 52214，node 2 收在 52224。所以兩個 node 在同一台 PC 上組成一條雙向 link。",
+          "<code>--snr-db</code> 在 RX 加 AWGN。"],
+          ["<code>node_app</code> 只驅動 Pluto。<code>--transport uhd</code> 會被拒絕。",
+            "一個 Pluto 只能開一個 libiio context。第二個 context 失敗（EBUSY）。所以一個 engine child process 同時執行 TX 與 RX。",
+            "<code>SharedPlutoContext</code> 把一個 context 借給 sink 與 source。Attribute 與 register 的呼叫經過一把 lock。Buffer 的 refill 與 push 不經過 lock。",
+            "Sample rate 只設一次。TX 與 RX 共用它。",
+            "Node 先啟動 TX，再啟動 RX。停止時也先停 TX。所以 context 關閉前，TX attenuator 已經回到最小輸出。",
+            "Node 1 的 TX LO 是 2.420 GHz，RX LO 是 2.460 GHz。Node 2 相反。"]),
+        input: "TX bursts", output: "RX sample stream",
+        code: ota(["<code>node_engine.py</code>：<code>UdpDuplexFactory</code>、<code>DuplexEndpoint</code>"],
+          ["<code>pluto.py</code>：<code>SharedPlutoContext</code>", "<code>node_engine.py</code>：<code>PlutoDuplexFactory</code>、<code>NodeWorker</code>"]),
+        opts: ota(["<code>--udp-listen-port</code>、<code>--udp-peer-port</code>、<code>--snr-db</code>"],
+          ["<code>--serial</code>、<code>--rx-kernel-buffers N</code>（預設 4）、<code>--rx-analog-bw HZ</code>", "<code>--enable-rf</code> 與 <code>--acknowledgement</code>（必要）"]),
+        gui: "<code>Hardware</code> tab：RX 的 Radio panel、TX gain 與 TX 頻率。"
+      }]
+    },
+    {
+      id: "n-ch", cls: "ch", row: "Channel",
+      name: "兩個方向", sum: "A → B 與 B → A 同時使用。FDD 讓兩個方向不互相等待。",
+      blocks: [
+        {
+          name: "A → B",
+          does: ota(["Node 1 把 samples 送到 UDP port 52224。Node 2 在這個 port 收。", "<code>--snr-db</code> 在 RX 加 AWGN。"],
+            ["Node 1 在 2.420 GHz 發送。Node 2 在 2.420 GHz 接收。",
+              "兩個頻率相隔 40 MHz。M1 量測沒有看到 self-interference。",
+              "2.420 GHz 在 Wi-Fi channel 1 裡。LA 把 Wi-Fi 看成 channel loss。",
+              "備用的 profile <code>duplex_fdd_2405_2475.yaml</code> 用 2.405 GHz 與 2.475 GHz。"]),
+          input: "Node 1 的 bursts", output: "Node 2 收到的 samples",
+          code: ["<code>configs/profiles/duplex_fdd_2420_2460.yaml</code>：<code>duplex.nodes</code>"],
+          opts: ["<code>--overlay</code>（預設這個 profile）、<code>--tx-freq</code>、<code>--rx-freq</code>"],
+          gui: "Node 2 的 RX cards。"
+        },
+        {
+          name: "B → A",
+          does: ota(["Node 2 把 samples 送到 UDP port 52214。Node 1 在這個 port 收。", "<code>--snr-db</code> 在 RX 加 AWGN。"],
+            ["Node 2 在 2.460 GHz 發送。Node 1 在 2.460 GHz 接收。",
+              "2.460 GHz 在 Wi-Fi channel 11 裡。",
+              "兩個方向的 path loss 可以不同。量測時，B → A 需要比 A → B 多大約 6 dB 的 TX gain。"]),
+          input: "Node 2 的 bursts", output: "Node 1 收到的 samples",
+          code: ["<code>configs/profiles/duplex_fdd_2420_2460.yaml</code>：<code>duplex.nodes</code>"],
+          opts: ["<code>--tx-freq</code>、<code>--rx-freq</code>"],
+          gui: "Node 1 的 RX cards。"
+        }
+      ]
+    },
+    {
+      id: "n-feedback", cls: "ctl", row: "Control",
+      name: "Feedback（CONTROL frame）", sum: "Feedback 附在每個 burst 的第一個 frame。Node 閒置時，它送一個 control-only burst。",
+      blocks: [
+        {
+          name: "位置",
+          does: ["每個 burst 的第一個 frame 是 CONTROL frame。它的 payload 是一個 LCP（Link Control PDU）。",
+            "Reporter 有 report 到期時，LCP 帶 FEEDBACK body。沒有時，LCP 只有 8-byte header（LINK_HEADER）。",
+            "Node 閒置而且 report 到期時，它送一個 control-only burst。這個 burst 只有 CONTROL frame，用 MCS 8。",
+            "Data 的 MCS 高於 9 時，每 100 ms 至少有一份 report 走 MCS 9 以下的 burst。所以 SNR 下降時，feedback 仍然到得了。"],
+          input: "FeedbackReport", output: "CONTROL frame",
+          code: ["<code>la/controller.py</code>：<code>control_plan</code>", "<code>tx_app.py</code>：<code>ControlPlan</code>"],
+          opts: ["<code>--control-mcs-index N</code>（預設 profile 的值，8）"],
+          gui: "<code>Feedback age</code> card。"
+        },
+        {
+          name: "LCP header",
+          does: ["Header 有 8 bytes：magic <code>0x4C43</code>、version 1、pdu_type、src_node、dst_node、flags、body_length。",
+            "pdu_type 1 是 LINK_HEADER，2 是 FEEDBACK，3 保留給 ARQ。",
+            "Version 不是 1 時，receiver 忽略整個 LCP，並計數（<code>control_unsupported</code>）。",
+            "src_node 等於自己的 node id 時，整個 burst 是自己 TX 的洩漏。Receiver 丟棄它。"],
+          input: "Header 欄位", output: "8 bytes",
+          code: ["<code>control.py</code>：<code>encode_lcp</code>、<code>decode_lcp</code>"],
+          opts: ["—"], gui: "—"
+        },
+        {
+          name: "FEEDBACK body",
+          does: ["固定部分有 36 bytes：report_seq、SNR（mean、p10、last）、累計的 DATA ok 與 lost、RX health 計數。",
+            "每個最近的 DATA burst 加 6 bytes，最多 16 個。",
+            "TLV 0x10 帶 reporter 的 session id。Peer 重新啟動時，LA 立即重設基準。",
+            "計數器是累計值。所以遺失幾份 report 不會遺失資訊。",
+            "有 4 個 entries 的 FEEDBACK frame 在 burst 裡佔 92 bytes。LINK_HEADER frame 佔 24 bytes。"],
+          input: "FeedbackReport", output: "LCP body",
+          code: ["<code>control.py</code>：<code>encode_feedback</code>、<code>decode_feedback</code>", "<code>la/api.py</code>：<code>FeedbackReport</code>"],
+          opts: ["—"], gui: "—"
+        }
+      ]
+    },
+    {
+      id: "n-rx-src", cls: "rx", row: "RX",
+      name: "RX source", sum: "RX source 提供連續的 sample stream。",
+      blocks: [{
+        name: "RX source",
+        does: ota(["UDP source 在自己的 sample port 收 samples：node 1 用 52214，node 2 用 52224。", "沒有 samples 時，它提供 zeros 或 AWGN。"],
+          ["Pluto source 經過 shared context 提供連續的 sample stream。", "RX gain 預設是 15 dB。"]),
+        input: "Samples", output: "連續的 sample stream",
+        code: ota(["<code>transport.py</code>：<code>UdpSampleSource</code>"], ["<code>pluto.py</code>：<code>PlutoSampleSource</code>"]),
+        opts: ota(["<code>--udp-listen-port</code>、<code>--snr-db</code>"], ["<code>--rx-gain</code>（預設 15 dB）、<code>--rx-kernel-buffers</code>"]),
+        gui: "<code>Live</code> tab：spectrum。"
+      }]
+    },
+    {
+      id: "n-rx-phy", cls: "rx", row: "RX",
+      name: "PHY RX（v5）", sum: "PHY 與 <code>rx_app</code> 相同。它也丟棄自己 TX 的洩漏。",
+      blocks: [
+        {
+          name: "Acquisition 與 decode",
+          does: ["這個 block 與 <code>rx_app</code> 的 PHY 相同：acquisition、SIG decode、equalizer、demapper、descrambler、Turbo decoder。",
+            "3 個 worker processes decode payload。<code>rx_app</code> 預設用 4 個。兩個 node 在同一台 PC 時，3 個符合 CPU 預算。",
+            "Receiver 量測每個 peer burst 的 preamble SNR。Reporter 收到這些 SNR。"],
+          input: "Sample stream", output: "PSDU bytes",
+          code: ["<code>link.py</code>：<code>MessageReceiver</code>", "<code>rx_app.py</code>：<code>ReceiveWorker</code>"],
+          opts: ["<code>--decode-workers N</code>（預設 3）"],
+          gui: "<code>Live</code> tab：constellation。<code>SNR (2 s)</code> card。"
+        },
+        {
+          name: "丟棄自己的洩漏",
+          does: ["自己的 RX 也收到一點自己的 TX。",
+            "SIG 的 scrambler seed 在自己的範圍時（node 1：1–63，node 2：64–127），receiver 在 payload decode 之前丟棄整個 burst。這樣省下 Turbo decode 的 CPU。",
+            "CONTROL frame 的 src_node 是第二道檢查。",
+            "被丟棄的 burst 不進 loss 計數。它的 SNR 也不進給 peer 的 report。"],
+          input: "SIG", output: "接受或丟棄",
+          code: ["<code>link.py</code>：<code>MessageReceiver(own_seed_range=...)</code>、<code>drain_peer_snr_db</code>"],
+          opts: ["<code>--node-id</code>"],
+          gui: "Stats line：<code>rx.own_seed_drops</code>、<code>rx.own_bursts_heard</code>。"
+        }
+      ]
+    },
+    {
+      id: "n-rx-link", cls: "rx", row: "RX",
+      name: "Link RX", sum: "Link layer 檢查 frames，把 CONTROL frame 交給 controller，然後組回 messages。",
+      blocks: [{
+        name: "Link RX",
+        does: ["這個 block 把 PSDU 分成 frames，並檢查 CRC-32。",
+          "CONTROL frame 不是 datagram。Receiver 把它交給 ControlHandler。",
+          "DATA frames 經過 reassembly 變成 messages。",
+          "Receiver 為每個 DATA burst 做一個 <code>BurstReport</code>：第一個 sequence、MCS、SNR、ok 與 lost subframes。",
+          "Sequence 跳超過 1024 時，receiver 等下一個 sequence 確認。這種跳號不算 loss。"],
+        input: "PSDU bytes", output: "Messages、CONTROL payloads、burst reports",
+        code: ["<code>link.py</code>：<code>MessageReceiver</code>、<code>ControlContext</code>、<code>ControlVerdict</code>", "<code>datagram.py</code>：<code>Reassembler</code>"],
+        opts: ["—"],
+        gui: "<code>Loss (10 s)</code> card 與 Link light。"
+      }]
+    },
+    {
+      id: "n-rx-out", cls: "rx", row: "RX",
+      name: "Egress", sum: "Node 把每一則完整的 message 送給其他程式。",
+      blocks: [{
+        name: "Egress",
+        does: ["Node 把每一則完整的 message 送到 egress port。Node 1 用 52212，node 2 用 52222。",
+          "<code>Log</code> tab 列出每一則 message。", "語意是 UDP：遺失的 message 不會重送。"],
+        input: "一則完整的 message", output: "UDP bytes",
+        code: ["<code>rx_app.py</code>：<code>EgressForwarder</code>"],
+        opts: ["<code>--egress-host</code>、<code>--egress-port</code>（預設依 node）"],
+        gui: "<code>Log</code> tab 與 <code>Rx goodput (2 s)</code> card。"
+      }]
+    },
+    {
+      id: "n-ctrl", cls: "ctl", row: "Control",
+      name: "LinkController", sum: "LinkController 把 link adaptation 接到 link layer。它實作三個 hooks。",
+      blocks: [
+        {
+          name: "LinkController",
+          does: ["每個 node 有一個 LinkController。它擁有 LinkAdaptation 與 FeedbackReporter。",
+            "它實作三個 hooks：BurstPolicy、ControlHandler 與 ReceiveObserver。",
+            "全部的呼叫在一把 lock 下執行。所以演算法與 reporter 不需要 thread-safe。",
+            "演算法、reporter 或 log 丟例外時，controller 計數（<code>la_errors</code>、<code>reporter_errors</code>），並用安全的預設值：目前的 MCS，沒有 report。TX 與 RX 繼續執行。",
+            "<code>set_mcs</code> 讓它進入 fixed mode。<code>set_la</code> 的 <code>auto</code> 把 MCS 交回演算法。"],
+          input: "Feedback 與 RX 量測", output: "MCS 與 CONTROL payload",
+          code: ["<code>la/controller.py</code>：<code>LinkController</code>"],
+          opts: ["<code>--la-log PATH</code>"],
+          gui: "<code>Link adaptation</code> tab：auto／fixed 與最近 20 個決定。"
+        },
+        {
+          name: "BurstPolicy",
+          does: ["TX worker 在每個 data burst 之前呼叫 BurstPolicy。",
+            "<code>entry_for_next_burst</code> 問 <code>LinkAdaptation.decide()</code>，然後回傳 MCS。",
+            "<code>control_plan</code> 決定 CONTROL payload：report 到期時是 FEEDBACK，否則是 LINK_HEADER。",
+            "Node 閒置時，<code>idle_wait_s</code> 告訴 TX worker 何時醒來。Worker 最多睡 reporter 的 period（20 ms）。",
+            "每個送出的 burst 經過 <code>on_sent</code> 交給 LinkAdaptation。"],
+          input: "LA 的決定、到期的 report", output: "MCS 與 CONTROL payload",
+          code: ["<code>tx_app.py</code>：<code>BurstPolicy</code>、<code>ControlPlan</code>", "<code>la/controller.py</code>：<code>entry_for_next_burst</code>、<code>control_plan</code>、<code>idle_wait_s</code>"],
+          opts: ["—"],
+          gui: "<code>TX MCS</code> card。"
+        },
+        {
+          name: "ControlHandler",
+          does: ["Receiver 把每個 CRC 正確的 CONTROL frame 交給 ControlHandler。",
+            "src_node 等於自己時，handler 回傳 <code>DROP_BURST</code>：整個 burst 是自己的洩漏。",
+            "dst_node 不是 0 也不是自己時，handler 忽略這個 frame。",
+            "FEEDBACK 經過 <code>FeedbackTracker</code>（重複、peer 重新啟動）之後，交給 <code>LinkAdaptation.on_feedback()</code>。",
+            "讀不懂的 LCP 不會讓 receiver 失敗。Handler 只計數。"],
+          input: "CONTROL payload", output: "ACCEPT 或 DROP_BURST；feedback 給 LA",
+          code: ["<code>link.py</code>：<code>ControlHandler</code>", "<code>la/controller.py</code>：<code>on_control</code>"],
+          opts: ["—"],
+          gui: "<code>Feedback age</code> card：小於 0.2 s 是綠色，小於 0.5 s 是黃色，其他是紅色。"
+        },
+        {
+          name: "ReceiveObserver",
+          does: ["RX worker 在每個 chunk 之後呼叫 ReceiveObserver。",
+            "Observer 把 peer preamble 的 SNR、DATA burst reports 與 RX health 交給 FeedbackReporter。",
+            "Receiver 已經丟棄自己的洩漏。所以它的 SNR 不進 report。",
+            "Chunk 只有 control-only bursts 時，observer 用 <code>control_only=True</code> 呼叫 <code>on_preambles</code>。"],
+          input: "一個 RX chunk 的結果", output: "Reporter 的輸入",
+          code: ["<code>rx_app.py</code>：<code>ReceiveObserver</code>", "<code>la/controller.py</code>：<code>on_receive</code>"],
+          opts: ["—"], gui: "—"
+        }
+      ]
+    },
+    {
+      id: "n-la", cls: "ctl", row: "Control",
+      name: "LinkAdaptation", sum: "LinkAdaptation 為每個 data burst 選 MCS。預設是 OLLA：inner loop 與 outer loop。",
+      blocks: [
+        {
+          name: "可以替換的模組",
+          does: ["LinkAdaptation 是一個 Protocol：<code>on_sent</code>、<code>on_feedback</code>、<code>decide</code>、<code>snapshot</code>。不需要 base class。",
+            "<code>--link-adaptation</code> 選擇模組：<code>olla</code>（預設）、<code>fixed</code>、<code>arf</code>、<code>package.module:Class</code> 或 <code>path/file.py:Class</code>。",
+            "<code>--link-adaptation-arg K=V</code> 把參數傳給 constructor。",
+            "Ladder 來自 <code>configs/la/thresholds_pluto_v5.yaml</code>：MCS 8、9、10、12、13、15、16、17。MCS 14 不在 ladder 上：它與 MCS 15 一樣是每個 symbol 3 bits，但是需要的 SNR 高 1 dB。"],
+          input: "Feedback reports", output: "<code>Decision(mcs_index, reason)</code>",
+          code: ["<code>la/api.py</code>：<code>LinkAdaptation</code>、<code>LaContext</code>、<code>Decision</code>", "<code>la/loader.py</code>：<code>build_link_adaptation</code>", "<code>la/thresholds.py</code>：<code>build_ladder</code>"],
+          opts: ["<code>--link-adaptation SPEC</code>（預設 olla）、<code>--link-adaptation-arg K=V</code>、<code>--mcs-index N</code>（起始的 MCS）"],
+          gui: "<code>Link adaptation</code> tab：threshold 表。"
+        },
+        {
+          name: "OLLA inner loop",
+          does: ["Inner loop 把 filtered peer SNR 加上 offset，得到 SNR_eff。",
+            "它選 threshold 不超過 SNR_eff 的最高 rung。",
+            "升階需要新 rung 的 threshold + 1 dB、連續 2 份帶新 SNR 的 report，而且距離上次改變至少 0.1 s。降階立即執行。",
+            "SNR filter 的時間常數是 0.1 s。連續 2 份新 report 比 filter 低 6 dB 以上時，filter 從 report 重新開始。"],
+          input: "Peer 的 SNR", output: "MCS",
+          code: ["<code>la/olla.py</code>：<code>OllaLinkAdaptation</code>"],
+          opts: ["<code>hysteresis_up_db=1.0</code>、<code>up_hold_reports=2</code>、<code>min_dwell_s=0.1</code>、<code>snr_tau_s=0.1</code>、<code>snr_drop_db=6</code>、<code>snr_drop_reports=2</code>"],
+          gui: "<code>SNR_eff / offset</code> card。60 秒 trend 的副軸是 filtered SNR。"
+        },
+        {
+          name: "OLLA outer loop",
+          does: ["Outer loop 依 peer 回報的 DATA subframes 改變 offset。",
+            "每個收到的 subframe 讓 offset 加 0.00505 dB。每個遺失的 subframe 讓 offset 減 0.5 dB。所以 offset 停止漂移時，loss 是 1%。",
+            "沒有 HARQ 救回遺失。所以 target 是 1%，不是 LTE 的 10%。",
+            "一份 report 的更新乘上一個只由 report 大小決定的 gain。一份典型大小、全部遺失的 report 讓 offset 減 2 dB。",
+            "Offset 限制在 −10 dB 到 +3 dB。RX overflow 計數改變的 report 不更新 offset。"],
+          input: "Peer 的 ok 與 lost subframes", output: "Offset",
+          code: ["<code>la/olla.py</code>：<code>_outer_update</code>"],
+          opts: ["<code>target_loss=0.01</code>、<code>step_down_db=0.5</code>、<code>max_report_down_db=2.0</code>、<code>offset_min_db=-10</code>、<code>offset_max_db=3</code>"],
+          gui: "<code>Peer-reported loss (10 s)</code> card。"
+        },
+        {
+          name: "Stale 與 fixed mode",
+          does: ["0.5 s 沒有收到 report 時，MCS 每 0.5 s 降一階，最低到 MCS 8。",
+            "Reports 一直來，但是沒有一份聽到 0.5 s 前送出的 burst 時，forward link 已經斷了。MCS 也每 0.5 s 降一階。",
+            "Fixed mode 時，OLLA 凍結 outer loop。回到 auto 時，它沿用原來的 offset。"],
+          input: "時間與 reports", output: "較慢的 MCS",
+          code: ["<code>la/olla.py</code>：<code>decide</code>、<code>on_mode</code>"],
+          opts: ["<code>stale_after_s=0.5</code>、<code>stale_step_s=0.5</code>、<code>fallback_mcs=8</code>"],
+          gui: "Trend 在 feedback stale 的時段塗紅。"
+        }
+      ]
+    },
+    {
+      id: "n-reporter", cls: "ctl", row: "Control",
+      name: "FeedbackReporter", sum: "FeedbackReporter 在 RX 端決定量什麼與何時回報。",
+      blocks: [
+        {
+          name: "可以替換的模組",
+          does: ["FeedbackReporter 是一個 Protocol：<code>on_preambles</code>、<code>on_burst</code>、<code>on_rx_health</code>、<code>due</code>、<code>next_due_s</code>、<code>build</code>。",
+            "自訂的 reporter 用非 0 的 <code>reporter_id</code>。額外的量測放在 type 0x80–0xFF 的 TLV。"],
+          input: "RX 量測", output: "<code>FeedbackReport</code>",
+          code: ["<code>la/api.py</code>：<code>FeedbackReporter</code>、<code>FeedbackReport</code>", "<code>la/loader.py</code>：<code>build_reporter</code>"],
+          opts: ["<code>--feedback-reporter SPEC</code>（預設 default）、<code>--feedback-reporter-arg K=V</code>"],
+          gui: "—"
+        },
+        {
+          name: "DefaultReporter",
+          does: ["它量測窗內 peer preamble 的 SNR：mean、10th percentile 與 last。",
+            "它累計 DATA ok 與 lost subframes，並記下最多 8 個最近的 DATA bursts。",
+            "Report 在三種情況到期：有新的 DATA burst，而且距離上一份 20 ms；有 PSDU 的 FCS 失敗，而且距離上一份 20 ms；距離上一份 200 ms（keepalive）。",
+            "Control-only burst 只更新 SNR。它不讓 report 到期。否則兩個閒置的 node 會一直互相回應。",
+            "每次啟動，它抽一個隨機的 32-bit session id。"],
+          input: "Preamble SNR、burst reports、RX health", output: "每 20 ms 到 200 ms 一份 report",
+          code: ["<code>la/reporter.py</code>：<code>DefaultReporter</code>"],
+          opts: ["<code>period_ms=20</code>、<code>keepalive_ms=200</code>、<code>max_entries=8</code>"],
+          gui: "Peer 的 <code>Feedback age</code> card。"
+        }
+      ]
+    }
+  ];
+
+  return { MODULES: MODULES, TOUR: TOUR, RUN: RUN, SYMPTOMS: SYMPTOMS, FILES: FILES, NODE_MODULES: NODE_MODULES };
 })();

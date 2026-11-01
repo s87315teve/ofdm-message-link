@@ -38,8 +38,18 @@ TX 和 RX 是**兩個各自啟動的 process**，彼此只透過 sample transpor
 另有一個**雙向**的 `node_app`：兩台 ADALM-Pluto 各跑一個，FDD（2420／2460 MHz）同時收發，每個方向仍是 UDP 語意
 （沒有 ARQ），並且預設用 `olla` link adaptation 依 peer 回報的 SNR 與遺失調 MCS。每個方向可同時載
 3.2 Mbit/s（MCS 12），同時傳兩路影像也實測過。用法見 [`docs/07-reference.md` 7.9](docs/07-reference.md#79-node_app雙向-node-的命令列)
-與 [`docs/03-your-own-app.md` 3.4](docs/03-your-own-app.md#34-寫你自己的-link-adaptation-模組)，設計與量測見
+與 [`docs/03-your-own-app.md` 3.4](docs/03-your-own-app.md#34-寫你自己的-link-adaptation-模組)，架構見
+[`docs/01-architecture.md` 1.7](docs/01-architecture.md#17-雙向-nodenode_app)，設計與量測見
 [`experiments/duplex_fdd/`](experiments/duplex_fdd/README.md)。
+
+![兩個 node_app：A→B 2.420 GHz、B→A 2.460 GHz；每個 node 裡一個共用的 Pluto context、TX 與 RX chain、LinkController（BurstPolicy、ControlHandler、ReceiveObserver）、LinkAdaptation（預設 olla）與 FeedbackReporter](docs/images/ofdm-message-link-duplex.png)
+
+不用 radio 也能在一台 PC 上跑雙向 link（`--transport udp` 是預設）：
+
+```bash
+python -m ofdm_message_link.node_app --node-id 1     # 終端機 1；送給它的 bytes 進 UDP 52211
+python -m ofdm_message_link.node_app --node-id 2     # 終端機 2；node 1 送來的從 UDP 52222 出去
+```
 
 ## 安裝
 
@@ -169,9 +179,9 @@ ffplay 的視窗會出現 webcam 的畫面。沒有 webcam 的話，把 `-f v4l2
 ```
 ofdm-message-link/
 ├── src/
-│   ├── ofdm_message_link/   應用程式：兩個視窗、datagram、sample transport、GUI
+│   ├── ofdm_message_link/   應用程式：兩個視窗、雙向 node_app、datagram、sample transport、GUI、la/（link adaptation）
 │   └── ofdm_link/           PHY library：FEC、OFDM、synchronization、equalization，以及 USRP 介面
-├── configs/                 設定檔：default.yaml 加上 profiles/ 裡的一個 profile
+├── configs/                 設定檔：default.yaml 加上 profiles/ 裡的一個 profile；la/ 是 SNR threshold 表
 ├── docs/                    上表的文件
 ├── guide/                   互動導覽（純 HTML/JS，不需要 server）
 ├── experiments/             量測腳本與報告

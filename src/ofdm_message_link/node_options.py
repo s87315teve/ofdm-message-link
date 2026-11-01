@@ -176,6 +176,28 @@ def _v5_index(value: str) -> int:
     return index
 
 
+# Help texts of the shared tx_app/rx_app options that mean something else here.
+_NODE_HELP = {
+    "--overlay": (
+        "configuration overlay, repeatable; it needs a duplex section "
+        f"(default: {DEFAULT_NODE_OVERLAY})"
+    ),
+    "--transport": (
+        "udp (default) is a radio-free duplex link through localhost sample ports; pluto "
+        "drives one ADALM-Pluto for both directions; uhd is refused"
+    ),
+    "--udp-port": "not used by node_app: the sample ports are --udp-listen-port/--udp-peer-port",
+    "--gain": "refused: a node has two gains, use --tx-gain and --rx-gain",
+}
+
+
+def _set_help(parser: argparse.ArgumentParser, helps: dict[str, str]) -> None:
+    for action in parser._actions:
+        for flag in action.option_strings:
+            if flag in helps:
+                action.help = helps[flag]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ofdm-message-node",
@@ -185,6 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     options.add_common_arguments(parser)
+    _set_help(parser, _NODE_HELP)
     node = parser.add_argument_group("node")
     node.add_argument("--node-id", type=int, choices=NODE_IDS, required=True,
                       help="which entry of duplex.nodes this process is; sets the ports")
@@ -229,7 +252,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="keyword argument for the LA class, repeatable")
     la.add_argument("--feedback-reporter", default=DEFAULT_REPORTER, metavar="SPEC",
                     help=f"RX-side measurement and reporting module (default: {DEFAULT_REPORTER})")
-    la.add_argument("--feedback-reporter-arg", action="append", default=[], metavar="K=V")
+    la.add_argument("--feedback-reporter-arg", action="append", default=[], metavar="K=V",
+                    help="keyword argument for the reporter class, repeatable")
     la.add_argument("--control-mcs-index", type=_v5_index, default=None, metavar="N",
                     help="MCS of control-only bursts (default: the profile's, else 8)")
     la.add_argument("--la-log", default=None, metavar="PATH",
@@ -238,11 +262,17 @@ def build_parser() -> argparse.ArgumentParser:
     files = parser.add_argument_group("logs and ports")
     files.add_argument("--stats-log", default=None, metavar="PATH",
                        help="append one JSON stats line every 0.5 s")
-    files.add_argument("--stats-log-max-mb", type=float, default=log_limits.DEFAULT_MAX_MB)
-    files.add_argument("--stats-log-backups", type=int, default=log_limits.DEFAULT_BACKUPS)
+    files.add_argument("--stats-log-max-mb", type=float, default=log_limits.DEFAULT_MAX_MB,
+                       metavar="MB",
+                       help=("rotate the stats log when it would pass this many MiB; 0 = no cap "
+                             f"(default: {log_limits.DEFAULT_MAX_MB:g})"))
+    files.add_argument("--stats-log-backups", type=int, default=log_limits.DEFAULT_BACKUPS,
+                       metavar="N",
+                       help=f"rotated stats logs to keep (default: {log_limits.DEFAULT_BACKUPS})")
     files.add_argument("--ingress-port", type=_port, default=None,
                        help="localhost UDP port with bytes to send (default: per node)")
-    files.add_argument("--egress-host", default="127.0.0.1")
+    files.add_argument("--egress-host", default="127.0.0.1",
+                       help="host received datagrams go to (default: 127.0.0.1)")
     files.add_argument("--egress-port", type=_port, default=None,
                        help="where received datagrams go (default: per node)")
     files.add_argument("--udp-peer-port", type=_port, default=None,

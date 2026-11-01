@@ -129,15 +129,54 @@ PSDU = │ delimiter │ frame 1 │ pad │ delimiter │ frame 2 │ pad │ �
   header（SIG）仍由單一 owner 依序處理，交付順序不變。一個 burst 由一個 worker 解，所以 burst 越長，
   交付越一陣一陣的；這是 aggregation 有 airtime 上限的原因之一。
 
-雙向的 `node_app` 一個 Pluto 一個 process，TX 與 RX 在**同一個** engine 子 process：一個 Pluto
-只能開一個 libiio context，兩個方向共用 `pluto.SharedPlutoContext`。Payload decode 預設 3 個
-process（兩個 node 在同一台 PC 時的 CPU 預算）。見 [7.9 節](07-reference.md#79-node_app雙向-node-的命令列)；
-架構、自干擾與 USB 的量測見 [`experiments/duplex_fdd/`](../experiments/duplex_fdd/README.md#22-node_app-架構)。
+雙向的 `node_app` 一個 Pluto 一個 process，TX 與 RX 在**同一個** engine 子 process，payload decode
+預設 3 個 process。見下一節。
 
 為什麼用 process 而不是 thread：Python 的 interpreter lock 讓多個 thread 無法同時跑 Python 程式碼，
 decode 分到 thread 上幾乎不會變快；分到 process 才能真的用到多個 CPU 核心。
 
-## 1.7 檔案對照
+## 1.7 雙向 node：`node_app`
+
+![兩個 node_app：上面的 lane 是 A→B（2.420 GHz），下面是 B→A（2.460 GHz）；每個 node 裡一個共用的 Pluto context、TX 與 RX chain、LinkController 的三個 hooks、LinkAdaptation 與 FeedbackReporter](images/ofdm-message-link-duplex.png)
+
+兩個 `node_app` process 組成一條雙向 link。Node 1（A）在 2420 MHz 發送、在 2460 MHz 接收；node 2（B）
+相反（FDD，[`configs/profiles/duplex_fdd_2420_2460.yaml`](../configs/profiles/duplex_fdd_2420_2460.yaml)）。
+圖的上面那條 lane 是 A→B，下面是 B→A；node 2 是 node 1 轉 180 度。互動版在
+[導覽的「雙向 node」分頁](https://s87315teve.github.io/ofdm-message-link/guide/#node)，每個 block 都可以點。
+
+- **一個 engine 子 process 跑兩個方向。** TX chain 與 RX chain 和單向 app 是同一份程式碼
+  （`TransmitWorker`、`ReceiveWorker`、v5 PHY、decode pool），只是 scrambler seed 分成兩半：node 1 用
+  1–63、node 2 用 64–127。一個 Pluto 只能開一個 libiio context（第二個回 EBUSY），所以 TX 與 RX
+  共用一個 `pluto.SharedPlutoContext`。TX 先開、先停。TX 經過 `DutyCappedSink`，duty 不超過 0.7：
+  再高的話，USB 2.0 帶不動同時進來的 5 MS/s RX stream。`--transport udp`（預設）時兩個 UDP sample
+  socket 取代 Pluto，一台 PC 上就有完整的雙向 link。
+- **`LinkController`**（`la/controller.py`）把 link adaptation 接到 link layer，實作三個 hook：
+  **BurstPolicy**（TX worker 每個 data burst 之前問它 MCS 與 CONTROL payload）、**ControlHandler**
+  （receiver 把每個收到的 CONTROL frame 交給它）、**ReceiveObserver**（RX worker 每個 chunk 之後把
+  peer 的 preamble SNR、DATA burst 的結果與 RX health 交給它）。所有呼叫在一把 lock 下；演算法丟例外時
+  計數並沿用目前的 MCS，TX 與 RX 不會停。
+- **`LinkAdaptation`**（TX 端，可以替換，預設 `olla`）為每個 data burst 選 MCS。Inner loop：filtered
+  peer SNR + offset 對照 threshold 表（`configs/la/thresholds_pluto_v5.yaml`），升階要多 1 dB 的
+  hysteresis。Outer loop：每個 peer 收到的 subframe offset +0.00505 dB、每個遺失的 −0.5 dB，平衡在
+  1% 遺失。0.5 s 沒有 feedback 時每 0.5 s 降一階。
+- **`FeedbackReporter`**（RX 端，可以替換，預設 `default`）量 peer burst 的 SNR 與累計的 ok／lost
+  subframe，決定何時回報：有新 data 時每 20 ms，否則每 200 ms 一次 keepalive。
+- **Feedback 怎麼回去。** 每個 burst 的第一個 frame 是 CONTROL frame，payload 是一個 LCP（v1）：report
+  到期時帶 FEEDBACK body，否則只有 8-byte header。沒有 data 但 report 到期時，node 送一個只有
+  CONTROL frame 的 control-only burst（MCS 8）。所以 A→B 的 feedback 搭 B→A 的 burst 回去，反過來也是。
+- **自己的洩漏。** 自己的 RX 也聽得到一點自己的 TX。SIG 的 seed 落在自己的範圍時，receiver 在 payload
+  decode 之前就丟掉整個 burst；CONTROL frame 的 `src_node` 是第二道檢查。
+- **Main process**（視窗或 `--headless`）：每 0.5 s 一行 stats log、localhost 的 JSON control socket、
+  `--gain-profile`。Ports 是 `52200 + 10·node_id` 加 1–4：node 1 用 52211（ingress）、52212（egress）、
+  52213（control）、52214（UDP sample），node 2 用 52221–52224。
+
+命令列見 [7.9 節](07-reference.md#79-node_app雙向-node-的命令列)，wire format 見
+[7.8 節](07-reference.md#78-雙向-link-的-control-與-feedback-wire-format)，視窗見
+[2.8 節](02-gui.md#28-雙向-node-的視窗node_app)，怎麼寫自己的 LA 見
+[3.4 節](03-your-own-app.md#34-寫你自己的-link-adaptation-模組)；設計、自干擾與 USB 的量測見
+[`experiments/duplex_fdd/`](../experiments/duplex_fdd/README.md#22-node_app-架構)。
+
+## 1.8 檔案對照
 
 應用程式，在 `src/ofdm_message_link/`：
 
@@ -148,7 +187,7 @@ decode 分到 thread 上幾乎不會變快；分到 process 才能真的用到�
 | `link.py` | bytes ⇄ burst 的兩半；sequence gap、EVM/SNR 量測、A-MPDU 的交付與計數 |
 | `aggregation.py` | 決定下一個 burst 放幾個 datagram（subframe、byte、airtime 三個上限） |
 | `transport.py` | UDP 與 UHD 兩種 sample transport、peak normalization、TX 定時發射 |
-| `pluto.py` | ADALM-Pluto：經 libiio 列舉、probe，以及 Pluto 的 sample sink／source |
+| `pluto.py` | ADALM-Pluto：經 libiio 列舉、probe，Pluto 的 sample sink／source，以及雙向 node 用的 `SharedPlutoContext` |
 | `engine.py` | 把 radio 路徑放進子 process |
 | `options.py` | 兩端共用的命令列參數、設定檔解析、RF 授權檢查 |
 | `devices.py` / `radio_panel.py` | 列舉與 probe radio、Radio panel |
@@ -157,9 +196,10 @@ decode 分到 thread 上幾乎不會變快；分到 process 才能真的用到�
 | `qt_runtime.py` / `window_layout.py` | Qt 啟動、Ctrl-C、`--geometry` 與影像 demo 視窗排列 |
 | `log_limits.py` | log 大小上限與輪替、清舊 run 目錄 |
 | `node_app.py` / `node_options.py` | 雙向 node：命令列、headless 迴圈、control socket、stats line |
-| `node_engine.py` | 雙向 node 的子 process：TX 與 RX 共用一個 radio、link controller |
+| `node_engine.py` | 雙向 node 的子 process：TX 與 RX 共用一個 radio、TX duty cap、link controller |
 | `node_window.py` | 雙向 node 的視窗：TX、RX、LA 三排 cards 與 MCS 軌跡 |
-| `control.py` / `la/` | Control／feedback wire format；可替換的 link adaptation |
+| `control.py` | CONTROL frame 的 payload（LCP）：header 與 FEEDBACK body |
+| `la/` | `LinkController`、可替換的 `LinkAdaptation`（`olla`、`fixed`、`arf`）與 `FeedbackReporter`、loader、threshold 表 |
 | `udp_send.py` / `udp_recv.py` | 最小的 socket 生產者／消費者範例 |
 
 PHY library，在 `src/ofdm_link/`：
@@ -190,7 +230,7 @@ PHY library，在 `src/ofdm_link/`：
 **建議的閱讀順序**：`link.py`（最短，看得到整條路徑）→ `phy/burst_v5.py` 的 `encode_burst_v5` 與
 `_decode_v5_acquired`（`phy/burst.py` 的 `decode_burst` 依 acquisition 的種類分派到這裡）→ 你有興趣的那一層。
 
-## 1.8 這個範例刻意不做的事
+## 1.9 這個範例刻意不做的事
 
 - **TCP**：TCP 的 handshake 與 ACK 需要反向路徑，單向 link 做不起來。
 - **ARQ / TDD**：需要 MAC layer 來排程誰在什麼時候發射與重送，這裡沒有。雙向只有 FDD 的

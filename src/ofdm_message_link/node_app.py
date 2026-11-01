@@ -3,8 +3,11 @@
 Two nodes make an FDD link: node 1 transmits on one frequency and listens on
 the other, node 2 the reverse (``configs/profiles/duplex_fdd_2420_2460.yaml``).
 Each node delivers what it receives to its egress port and sends what
-arrives on its ingress port; every burst carries a small CONTROL frame with
-feedback for the peer's link adaptation.  Semantics stay UDP: no ACK, no ARQ.
+arrives on its ingress port; every burst starts with a small CONTROL frame,
+which carries feedback for the peer's link adaptation whenever a report is
+due (an idle node sends it in a control-only burst).  The link adaptation
+defaults to OLLA (``--link-adaptation olla``).  Semantics stay UDP: no ACK,
+no ARQ.  Ports and the CLI: :mod:`.node_options`.
 
 GUI (default)::
 

@@ -10,6 +10,8 @@ egress, and :func:`~.engine._serve`.  What is new here:
   the sink and source in the child, on one
   :class:`~.pluto.SharedPlutoContext` (or as two UDP sample sockets, for a
   radio-free duplex link on one PC);
+* :class:`DutyCappedSink` keeps a Pluto's transmit duty at or below
+  ``--tx-duty-cap`` (default 0.7), so USB 2.0 still carries the receive stream;
 * :class:`NodeWorker` starts transmit first and receive second, and stops in
   the same order, so the TX attenuator is back at minimum output before the
   context goes away;

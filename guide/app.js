@@ -5,9 +5,10 @@
   var C = window.GUIDE_CONTENT;
   var FRAME_HEADER_BYTES = 7;
   var CRC_BYTES = 4;
-  var TAG_COLOR = { tx: "--tx-line", rx: "--rx-line", ch: "--ch-line", ext: "--ext-line", ctl: "--ctl-line", ins: "--ins-line" };
+  var TAG_COLOR = { tx: "--tx-line", rx: "--rx-line", ch: "--ch-line", ext: "--ext-line", ctl: "--ctl-line", ins: "--ins-line", sh: "--sh-line" };
 
-  var state = { transport: "sim", module: "tx-phy", block: 0, step: -1, timer: null, frag: 0 };
+  var state = { transport: "sim", module: "tx-phy", block: 0, step: -1, timer: null, frag: 0,
+    nodeModule: "n-ctrl", nodeBlock: 0 };
 
   function $(id) { return document.getElementById(id); }
   function el(tag, cls, html) {
@@ -21,7 +22,9 @@
     return value && typeof value === "object" && !Array.isArray(value) ? value[state.transport] : value;
   }
   function list(items) { return items.map(function (i) { return "<div>" + i + "</div>"; }).join(""); }
-  function moduleById(id) { return C.MODULES.filter(function (m) { return m.id === id; })[0]; }
+  function moduleById(id, modules) {
+    return (modules || C.MODULES).filter(function (m) { return m.id === id; })[0];
+  }
   function fmt(n) { return n.toLocaleString("en-US"); }
 
   /* ---------------- tabs ---------------- */
@@ -57,6 +60,7 @@
       renderDetail();
       renderRun();
       renderCode();
+      renderNode();
     });
   });
 
@@ -102,15 +106,15 @@
     });
   });
 
-  function renderDetail() {
-    var m = moduleById(state.module);
-    var blk = m.blocks[state.block];
+  // One detail card: module m, its block `index`; onPick(i) selects another block.
+  function renderDetailInto(box, m, index, onPick) {
+    var blk = m.blocks[index];
     var color = "var(" + TAG_COLOR[m.cls] + ")";
     var html = '<h2><span class="tag" style="color:' + color + ";border-color:" + color + '">' + (m.row || "Channel") + "</span>" + m.name + "</h2>" +
-      '<p class="sum">' + m.sum + "</p>";
+      '<p class="sum">' + pick(m.sum) + "</p>";
     if (m.blocks.length > 1) {
       html += '<div class="chain" role="group" aria-label="這個模組的 blocks">' + m.blocks.map(function (b, i) {
-        return (i ? '<span class="sep">→</span>' : "") + '<button type="button" data-block="' + i + '" aria-pressed="' + (i === state.block) + '">' + b.name + "</button>";
+        return (i ? '<span class="sep">→</span>' : "") + '<button type="button" data-block="' + i + '" aria-pressed="' + (i === index) + '">' + b.name + "</button>";
       }).join("") + "</div>";
     }
     html += '<div class="facts"><div class="does">' +
@@ -120,13 +124,16 @@
       "<dl><dt>程式位置</dt><dd>" + list(pick(blk.code)) + "</dd>" +
       "<dt>相關選項</dt><dd>" + list(pick(blk.opts)) + "</dd>" +
       "<dt>在 GUI 的位置</dt><dd>" + blk.gui + "</dd></dl></div>";
-    $("detail").innerHTML = html;
-    $("detail").querySelectorAll("[data-block]").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        state.block = Number(btn.getAttribute("data-block"));
-        renderFlow();
-        renderDetail();
-      });
+    box.innerHTML = html;
+    box.querySelectorAll("[data-block]").forEach(function (btn) {
+      btn.addEventListener("click", function () { onPick(Number(btn.getAttribute("data-block"))); });
+    });
+  }
+  function renderDetail() {
+    renderDetailInto($("detail"), moduleById(state.module), state.block, function (i) {
+      state.block = i;
+      renderFlow();
+      renderDetail();
     });
   }
 
@@ -403,6 +410,45 @@
     }
   })();
 
+  /* ---------------- duplex node ---------------- */
+  // Block ids in the node diagram -> [module id, block index] in NODE_MODULES.
+  // Node 1 and node 2 share the ids, so a click selects the block in both.
+  var NODE_BLOCKS = {
+    "n-parent": ["n-parent", 0], "n-tx-in": ["n-tx-in", 0], "n-tx-link": ["n-tx-link", 0], "n-tx-phy": ["n-tx-phy", 0],
+    "n-tx-sink": ["n-tx-sink", 0], "n-radio": ["n-radio", 0], "n-ab": ["n-ch", 0], "n-ba": ["n-ch", 1],
+    "n-feedback": ["n-feedback", 0], "n-rx-src": ["n-rx-src", 0], "n-rx-phy": ["n-rx-phy", 0], "n-rx-link": ["n-rx-link", 0],
+    "n-rx-out": ["n-rx-out", 0], "n-ctrl": ["n-ctrl", 0], "n-policy": ["n-ctrl", 1], "n-handler": ["n-ctrl", 2],
+    "n-observer": ["n-ctrl", 3], "n-la": ["n-la", 0], "n-reporter": ["n-reporter", 0]
+  };
+  var nodeChain = $("node-chain");
+  var nodeBlocks = Array.prototype.slice.call(nodeChain.querySelectorAll(".blk"));
+  function renderNode() {
+    nodeChain.setAttribute("data-mode", state.transport);
+    nodeBlocks.forEach(function (b) {
+      var ref = NODE_BLOCKS[b.getAttribute("data-id")];
+      var on = ref[0] === state.nodeModule && ref[1] === state.nodeBlock;
+      b.classList.toggle("selected", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+    renderDetailInto($("node-detail"), moduleById(state.nodeModule, C.NODE_MODULES), state.nodeBlock, function (i) {
+      state.nodeBlock = i;
+      renderNode();
+    });
+  }
+  function selectNodeBlock(ref) {
+    state.nodeModule = ref[0];
+    state.nodeBlock = ref[1];
+    renderNode();
+  }
+  nodeBlocks.forEach(function (b) {
+    var ref = NODE_BLOCKS[b.getAttribute("data-id")];
+    b.setAttribute("aria-label", moduleById(ref[0], C.NODE_MODULES).blocks[ref[1]].name);
+    b.addEventListener("click", function () { selectNodeBlock(ref); });
+    b.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectNodeBlock(ref); }
+    });
+  });
+
   /* ---------------- code structure ---------------- */
   function renderCode() {
     var names = { sim: ["UdpSampleSink", "UdpSampleSource"], uhd: ["UhdSampleSink", "UhdSampleSource"], pluto: ["PlutoSampleSink", "PlutoSampleSource"] }[state.transport];
@@ -461,8 +507,9 @@
   renderLab();
   renderRun();
   renderCode();
+  renderNode();
 
-  // index.html#lab and index.html#run open that view directly.
+  // index.html#lab, #code, #run and #node open that view directly.
   var linked = $("tab-" + location.hash.slice(1));
   if (linked) { selectTab(linked); }
 })();

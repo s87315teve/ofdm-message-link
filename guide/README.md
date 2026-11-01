@@ -6,9 +6,9 @@
 
 | 檔案 | 功能 |
 |---|---|
-| `index.html` | 頁面結構：四個分頁（工作流、Packet lab、程式結構、執行） |
+| `index.html` | 頁面結構：五個分頁（工作流、Packet lab、程式結構、執行、雙向 node）。兩張 block diagram 是 inline SVG |
 | `style.css` | 版面與顏色（light 與 dark） |
-| `content.js` | 全部的說明文字：模組、blocks、導覽步驟、指令、症狀、檔案對照 |
+| `content.js` | 全部的說明文字：模組、blocks、導覽步驟、指令、症狀、檔案對照，以及雙向 node 的模組（`NODE_MODULES`） |
 | `app.js` | 互動邏輯 |
 | `data.js` | 自動產生：每種 MCS 與每個 fragment 大小的 payload OFDM symbols |
 | `build_data.py` | 用這個範例的 encoder 產生 `data.js` |
@@ -19,10 +19,11 @@ PHY 改變後，請在 repository root 重新產生 `data.js`：
 python -m guide.build_data
 ```
 
-`index.html#lab`、`#code`、`#run` 可以直接開啟對應的分頁。
+`index.html#lab`、`#code`、`#run`、`#node` 可以直接開啟對應的分頁。
 
-導覽說明單向的 `tx_app` 與 `rx_app`。`執行` 分頁與檔案對照也列出雙向的 `node_app`；完整說明在
-`docs/07-reference.md` 的 7.8 節。
+前四個分頁說明單向的 `tx_app` 與 `rx_app`。`雙向 node` 分頁說明 `node_app`：兩個 node、共用的 Pluto、
+`LinkController` 的三個 hooks、link adaptation 與 feedback。`app.js` 的 `NODE_BLOCKS` 把這張圖的 blocks
+對應到 `NODE_MODULES`。完整說明在 `docs/07-reference.md` 的 7.8 與 7.9 節。
 
 ## 文字的寫法
 

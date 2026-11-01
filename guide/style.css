@@ -15,6 +15,7 @@
   --ext-fill: #f1f3f6; --ext-line: #7b8794;
   --ctl-fill: #fdebe1; --ctl-line: #c2410c;
   --ins-fill: #e6f4ea; --ins-line: #2f855a;
+  --sh-fill: #eef1f5;  --sh-line: #3f4c5a;
   --sel: #d97706;
 
   --good: #2f855a; --warn: #b7791f; --bad: #c53030; --idle: #7b8794;
@@ -36,6 +37,7 @@
     --ext-fill: #1b252a; --ext-line: #8b9aa3;
     --ctl-fill: #33190c; --ctl-line: #fb923c;
     --ins-fill: #15301f; --ins-line: #68d391;
+    --sh-fill: #1b252a;  --sh-line: #b8c4cc;
     --sel: #fbbf24;
 
     --good: #68d391; --warn: #f0b85a; --bad: #fc8181; --idle: #8b9aa3;
@@ -105,6 +107,8 @@ main { padding: 6px 0 24px; }
 .swatch.rx { background: var(--rx-fill); border-color: var(--rx-line); }
 .swatch.ch { background: var(--ch-fill); border-color: var(--ch-line); }
 .swatch.ins { background: var(--ins-fill); border-color: var(--ins-line); }
+.swatch.sh { background: var(--sh-fill); border-color: var(--sh-line); }
+.swatch.ctl { background: var(--surface); border-color: var(--ctl-line); }
 .scroller { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .scroller > svg { display: block; min-width: 1060px; width: 100%; height: auto; }
 svg text { fill: var(--ink); font-family: inherit; }
@@ -126,6 +130,11 @@ svg .t-ctl { font-size: 11.5px; fill: var(--ctl-line); font-weight: 600; }
 .blk.ext rect { fill: var(--ext-fill); stroke: var(--ext-line); stroke-dasharray: 5 4; }
 .blk.ctl rect { fill: var(--surface); stroke: var(--ctl-line); }
 .blk.ins rect { fill: var(--ins-fill); stroke: var(--ins-line); }
+.blk.sh rect { fill: var(--sh-fill); stroke: var(--sh-line); }
+.blk.hook rect { fill: var(--ctl-fill); }
+/* Duplex diagram: the LinkController frame and slightly smaller block titles. */
+.ctlframe { fill: none; stroke: var(--ctl-line); stroke-width: 1.2; stroke-dasharray: 3 3; opacity: .75; }
+#node-svg .blk .t-title { font-size: 12px; }
 .blk.selected rect { stroke: var(--sel); stroke-width: 3; }
 /* "Follow a message": the blocks of the current module stay bright. */
 .touring .blk:not(.active) { opacity: .35; }

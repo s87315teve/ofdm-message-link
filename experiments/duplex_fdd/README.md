@@ -34,7 +34,7 @@ A→B 是 node 1 發、node 2 收（2420 MHz），B→A 相反（2460 MHz）。
 | 7b | `module:Class` loader | **完成**。`fixed`／`olla`／`arf`、`package.module:Class`、`path/file.py:Class`；`--link-adaptation-arg K=V` 以 Python literal 解析；錯誤一行 `SystemExit` | 2.3 |
 | 7c | 可替換的 reporter | **完成**。`--feedback-reporter SPEC`，內建 `default` | 2.3 |
 | 7d | Feedback piggyback，有 version 欄位 | **完成**。每個 burst 的第一個 MPDU 是 CONTROL frame（LCP header 有 `version`，其他版本被忽略並計數） | 2.4 |
-| 7e | 閒置時送 control burst | **完成**。沒有 data 時送 control-only burst（MCS 8，約 0.48 ms） | 2.4 |
+| 7e | 閒置時送 control burst | **完成**。沒有 data 而 report 到期時送 control-only burst（MCS 8；4 個 entries 時 0.51 ms） | 2.4 |
 | 7f | 預設是兩個 loop 的 OLLA，target 1% | **完成**。`node_app` 的 `--link-adaptation` 預設是 `olla`（`node_options.DEFAULT_LINK_ADAPTATION`；inner loop + outer loop，`target_loss=0.01`），從 `--mcs-index` 開始；要固定 MCS 給 `--link-adaptation fixed`。**實測**：M3 在 gain step 下整個 run 3.19–3.23 Mbit/s，優於每個固定 MCS；−20 dB 那段遺失 3.5–4.1% 幾乎全是 step 後頭 1.5 秒的 burst（188–209 個 subframe），之後在 1% 的目標上；la-tune 之後（M3b）頭 1.5 秒降到 91–108 個、整段 2.27–2.40%，剩下的是 feedback 來回約 0.13 秒（4.4） | 2.3、4.4 |
 | 8 | 單元測試 | **完成**。LA、control wire、link hooks、node 的每一部分都有測試（6 節）；合併 `tx-v5` 時全部 1577 個測試通過（2 個已知的環境失敗） | 6 |
 | 9 | ARQ 只提案 | **完成**：LTE RLC AM 式的提案，沒有實作 | 5 |
@@ -150,6 +150,12 @@ TX gain −8 dB（A←B）／−14 dB（B←A）就有 14–15 dB SNR，還有 1
 
 ### 2.2 `node_app` 架構
 
+![兩個 node_app：上面的 lane 是 A→B（2.420 GHz），下面是 B→A（2.460 GHz）；每個 node 裡一個共用的 Pluto context、TX 與 RX chain、LinkController 的三個 hooks、LinkAdaptation 與 FeedbackReporter](../../docs/images/ofdm-message-link-duplex.png)
+
+上圖是兩個 node 的 block diagram（node 2 是 node 1 轉 180 度）；互動版在
+[導覽的「雙向 node」分頁](https://s87315teve.github.io/ofdm-message-link/guide/#node)，說明在
+[docs/01 1.7](../../docs/01-architecture.md#17-雙向-nodenode_app)。下面是一個 node 裡的 process 與 thread：
+
 ```
 node_app parent（視窗 或 headless）       node engine 子 process（_node_main，switch interval 2 ms）
   stats log、control socket、              SharedPlutoContext ─ PlutoSampleSource（refill thread）
@@ -257,7 +263,9 @@ thread 停下來。
 | `up_hold_reports`／`min_dwell_s` | 2／0.10 | |
 | `stale_after_s`／`stale_step_s`／`fallback_mcs` | 0.5／0.5／8 | |
 | `skip_outer_on_overflow` | True | |
-| `thresholds` | `configs/la/thresholds_pluto_v5.yaml` | 可以給另一個 YAML |
+| `initial_offset_db` | 0.0 | 起始的 offset，限制在 offset 的範圍內 |
+| `outer_loop` | True | False 時只有 inner loop（offset 固定） |
+| `thresholds` | `configs/la/thresholds_pluto_v5.yaml`（`LaContext` 的表） | 可以給另一個 YAML，ladder 由它重建 |
 
 **Ladder 與 threshold。** `configs/la/thresholds_pluto_v5.yaml` 是 GUI 燈號與 LA inner loop 共用的
 **唯一**一張表（wire v5 實測：遺失 < 1% 的 SNR + 1 dB，見 [tx_v5 4.1](../tx_v5/README.md#41-錄音每個-mcs-遺失--1-的最低-tx-gain實測)）。
@@ -274,9 +282,10 @@ Ladder 依 threshold 由低到高走，只留比前面每一個都快的 entry�
 **預設 reporter `la/reporter.DefaultReporter`**（`period_ms=20`、`keepalive_ms=200`、`max_entries=8`）：
 量測窗內所有 peer preamble 的 SNR（mean、p10、last）、累計的 DATA ok／lost、RX 的健康計數
 （clipping、decode backlog：窗內任何一個 chunk 有就設）、最近的 DATA bursts。Report **due** =
-（上次之後收到新的 peer DATA burst **而且**過了 20 ms）**或**過了 200 ms（keepalive，讓 peer 分得出
-安靜與斷線）。Peer 的 control-only burst 只更新 SNR，不會讓 report due，否則兩個閒置的 node 會
-互相觸發。每個 reporter 啟動時抽一個隨機的 32-bit session id。
+（上次之後收到新的 peer DATA burst，**或**有 PSDU 的 FCS 失敗（`4ced886`），**而且**過了 20 ms）**或**過了
+200 ms（keepalive，讓 peer 分得出安靜與斷線）；第一份 report 在第一個 DATA burst 時立即 due。Peer 的
+control-only burst 只更新 SNR，不會讓 report due，否則兩個閒置的 node 會互相觸發。每個 reporter 啟動時
+抽一個隨機的 32-bit session id（TLV 0x10，每份 report 都帶）。
 
 **換成你自己的**：寫一個有四個 method 的 class，`--link-adaptation my_la.py:MyClass
 --link-adaptation-arg k=v`。範例、規則（`decide` 要快、計數器是累計的、第一份 report 只當基準、
@@ -297,8 +306,10 @@ codec 在 [`control.py`](../../src/ofdm_message_link/control.py)。
   （u32），掉了幾份 feedback 也不會遺失資訊。TLV 0x10 是 reporter 的 session id（peer 重新啟動時
   立即重設基準）；0x80–0xFF 給自訂 reporter。比已知長的 body 照收、忽略尾巴，所以以後可以加欄位。
 - **成本**：LINK_HEADER 每個 burst 24 bytes（含 delimiter 與 padding；一個 900 B datagram 的 2.7%，
-  8 KB aggregate 的 0.3%）；4 個 entries 的 FEEDBACK 84 bytes。
-- **Control-only burst**：沒有 data 時，MCS 8、只有 CONTROL frame；FEEDBACK 帶 4 個 entries 時約 2400 samples（0.48 ms，預測）。
+  8 KB aggregate 的 0.3%）；內建 reporter 的 FEEDBACK（含 6 bytes 的 session id TLV）4 個 entries 92 bytes、
+  8 個 116 bytes（由 codec 算出）。
+- **Control-only burst**：沒有 data 而 report 到期時，MCS 8、只有 CONTROL frame；FEEDBACK 帶 4 個 entries 時
+  2560 samples（0.51 ms，由 codec 與 airtime 公式算出，沒有量）。沒有 data 也沒有 report 到期時不送。
 - **Robust copy**：data 的 MCS 高於 9 時，每 100 ms 至少有一份 feedback 走 MCS ≤ 9 的 burst，
   data 的 MCS 太高時 feedback 仍然到得了。
 - **自己的洩漏。** 兩個 node 用不同的 scrambler seed：node 1 用 1–63、node 2 用 64–127
@@ -809,6 +820,7 @@ Pluto 沒有 timestamp，給不了。
 | `run_matrix.sh` | M2（`fixed`）與 M3（`la`）的 matrix |
 | `video_duplex.sh`、`video_counts.py` | M4：雙向影像與 corrupt／error 的計數 |
 | `summarize_duplex.py` | 每個 run 的 `summary.json`、`summary.md`、PNG |
+| `run_table.py`、`segment_table.py` | 幾個 run 的每個方向一列（M2）；每段與每個 gain step 一列（M3） |
 | `cpu_multi.py`、`write_meta.py` | 每個 node 的 CPU 取樣；run 的 `meta.json` |
 | `results/usb/`、`results/usb_duty/` | M0（`usb_capacity.json`、`usb_summary.md`、`records.jsonl`、`meta.json`） |
 | `results/si/README.md`、`results/si/run1/` | M0／M1 的整理與決定；`si_summary.md`、`si_scan.json`、`records.jsonl` |
@@ -817,7 +829,7 @@ Pluto 沒有 timestamp，給不了。
 | `results/m3b/` | M3b：la-tune 之後的重跑（`README.md`、`step_metrics.json`、`m3b_olla_run1/`、`m3b_olla_ba_idle/`） |
 | `results/m3/`、`results/m4/` | M3（`olla` ×2、`olla` B→A 閒置、固定 8／10／12／15；`m3_prefix/` 是舊 burst 間隔的一次 run）、M4（`video_750k/`、`video_1300k/`） |
 
-程式（`src/ofdm_message_link/`）：`node_app.py`、`node_options.py`、`node_engine.py`、`node_window.py`、
+程式（`src/ofdm_message_link/`）：`node_app.py`、`node_options.py`、`node_engine.py`（含 `DutyCappedSink`）、`node_window.py`、
 `control.py`、`la/`（`api`、`loader`、`thresholds`、`fixed`、`olla`、`reporter`、`examples`、`controller`）、
 `pluto.py`（`SharedPlutoContext`）、`link.py`／`tx_app.py`／`rx_app.py`（hooks）；設定
 `configs/profiles/duplex_fdd_2420_2460.yaml`、`duplex_fdd_2405_2475.yaml`、`configs/la/thresholds_pluto_v5.yaml`。

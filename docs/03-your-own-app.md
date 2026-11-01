@@ -211,7 +211,9 @@ GUI 主程式結束後，偶爾會留下 `multiprocessing.forkserver` 子 proces
 
 雙向的 `node_app`（[7.9 節](07-reference.md#79-node_app雙向-node-的命令列)）依 peer 回報的
 feedback 為每個 data burst 選 MCS。選 MCS 的演算法與 RX 端的量測方式都是可替換的模組：
-不必改 `node_app`，在命令列指定 class 即可。
+不必改 `node_app`，在命令列指定 class 即可。兩個模組在 node 裡的位置見
+[1.7 節的架構圖](01-architecture.md#17-雙向-nodenode_app)：`LinkController` 擁有它們，並把它們接到 TX worker
+（BurstPolicy）、收到的 CONTROL frame（ControlHandler）與 RX worker（ReceiveObserver）。
 
 ### 兩個模組、一條資料流
 
@@ -256,7 +258,8 @@ Wire format 見 [7.8 節](07-reference.md#78-雙向-link-的-control-與-feedbac
 | `on_sent(burst: SentBurst)` | 每個 burst 送出後（含 control-only burst） | 無 |
 | `on_feedback(report: FeedbackReport)` | 收到 peer 的每份 feedback | 無 |
 | `decide(now_s: float)` | 每個 data burst 之前 | `Decision(mcs_index, reason, snr_eff_db, offset_db)` |
-| `snapshot()` | GUI 與 stats line 每 0.5 s | 可以轉成 JSON 的 dict |
+| `snapshot()` | Engine 每次回報 stats（GUI 與 stats line），以及每份 feedback 寫進 `--la-log` 時 | 可以轉成 JSON 的 dict |
+| `on_mode(mode)`（選用） | 操作員固定 MCS 時（`"fixed"`），交回演算法時（`"auto"`） | 無；內建演算法在 fixed mode 凍結學習 |
 
 建構時拿到的 `LaContext`：`ladder`（可用的 v5 entries，PHY rate 由低到高，dominated 的
 entry 已移除）、`thresholds_db`（MCS index → 1 % loss 需要的 preamble SNR，來自
@@ -346,7 +349,10 @@ PC 上經 UDP 交換 samples，`--la-log PATH` 會記下每個 decision 與 feed
 - Method 不會同時被呼叫（controller 持有一把 lock），不需要自己加 lock。時間都是
   `time.monotonic()` 的秒數。
 - 沒有 feedback（例如反方向的 SNR 太低）時，`on_feedback` 就不會被呼叫。演算法要自己決定
-  feedback 太舊時怎麼辦；`olla` 在 0.5 s 沒有 feedback 後每 0.5 s 降一階，最低到 MCS 8。
+  feedback 太舊時怎麼辦；`olla` 在 0.5 s 沒有 feedback 後每 0.5 s 降一階，最低到 MCS 8。Feedback 還在來、
+  但沒有一份聽到 0.5 s 前送出的 burst（forward link 斷了）時，`olla` 也一樣降階。
+- Fixed mode（GUI 或 control socket 的 `set_mcs`）時，controller 不呼叫 `decide`，但 feedback 照樣送到
+  `on_feedback`：它描述的是操作員選的 MCS。需要分辨時實作 `on_mode`。
 
 ### 內建範例：ARF
 
@@ -376,8 +382,11 @@ RX 端的 reporter 用同樣的方式寫與載入：`Class(context: ReporterCont
 | `due(now_s)` / `next_due_s(now_s)` | TX 準備下一個 burst 時 | 是否該回報；下一次何時該回報（閒置的 node 會在那時醒來送 control burst） |
 | `build(now_s)` | `due` 為真時 | 回傳 `FeedbackReport` 並結束這個量測窗 |
 
-只有 peer 的 DATA burst 會讓 report 變成 due；control-only burst 只更新 SNR 統計，否則兩個閒置
-的 node 會互相觸發 control burst。額外的量測放在 `FeedbackReport.extras`，用 type 0x80–0xFF 的
+內建 reporter 在收到 peer 的 DATA burst、或有 PSDU 的 FCS 失敗時，讓下一份 report 在 `period_ms`
+後到期；其他時候每 `keepalive_ms` 一份。Control-only burst 只更新 SNR 統計，不讓 report 到期，否則
+兩個閒置的 node 會互相觸發 control burst。閒置時，TX worker 只在 `next_due_s` 的時間到了才問 `due` 並送
+control-only burst（它最多睡 reporter 的 `period_s` 屬性，沒有這個屬性時 20 ms），所以 `next_due_s` 要與
+`due` 一致；回傳 `None` 表示閒置時不送 report。有 data 時，每個 burst 之前都會問 `due`。額外的量測放在 `FeedbackReport.extras`，用 type 0x80–0xFF 的
 TLV；不認得的 TLV 會被對方略過。內建的 `la/reporter.py` 的 `DefaultReporter`
 （`period_ms=20`、`keepalive_ms=200`、`max_entries=8`）是最直接的範本。
 

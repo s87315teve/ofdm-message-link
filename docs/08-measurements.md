@@ -473,7 +473,8 @@ TX gain。
 ## 8.9 雙向 FDD：兩個 `node_app`，Pluto ↔ Pluto，2420／2460 MHz
 
 `duplex-fdd` 分支加了雙向的 `node_app`：一台 Pluto 一個 process，同時在一個頻率發、在另一個頻率收
-（FDD）。每個 burst 的第一個 subframe 帶 feedback，讓對方的 link adaptation（LA）為每個 burst 選 MCS。
+（FDD）。每個 burst 的第一個 subframe 是 CONTROL frame，report 到期時帶 feedback，讓對方的 link adaptation（LA）為每個 burst 選 MCS。
+架構圖見 [1.7](01-architecture.md#17-雙向-nodenode_app)。
 語意仍是 UDP，沒有 ARQ（只有提案）。`tx_app` 與 `rx_app` 不變。
 
 設計、每個決定的依據、review 修的問題、ARQ 提案、所有腳本與原始數據見
@@ -522,7 +523,7 @@ TX 是 −89.75 dB，所以這是 USB 2.0 的頻寬，不是 RF；kernel buffers
 |---|---|
 | 介面 | `LinkAdaptation`（TX：`on_sent`、`on_feedback`、`decide`、`snapshot`）與 `FeedbackReporter`（RX）兩個 Protocol，不需要繼承 |
 | 載入 | `--link-adaptation fixed\|olla\|arf\|package.module:Class\|path/file.py:Class`、`--link-adaptation-arg K=V`；reporter 一樣 |
-| Feedback | 附在下一個 burst 的 CONTROL subframe（有 version 欄位）；沒有 data 時送 control-only burst（MCS 8）；data 的 MCS 高於 9 時每 100 ms 有一份走 MCS ≤ 9 |
+| Feedback | 附在下一個 burst 的 CONTROL subframe（有 version 欄位）；沒有 data 而 report 到期時送 control-only burst（MCS 8）；data 的 MCS 高於 9 時每 100 ms 有一份走 MCS ≤ 9 |
 | 預設演算法 `olla` | LTE 式的 inner loop（filtered SNR + offset 對照 threshold 表）與 outer loop（每個收到的 subframe +0.00505 dB、每個遺失的 −0.5 dB，平衡在 1% 遺失）；連續兩份新 report 比 filter 低 6 dB 以上時 SNR filter 重啟（`snr_drop_db` = 6、`snr_drop_reports` = 2，la-tune）；reporter 在 FCS 失敗增加時讓一份 report 到期 |
 | Ladder | MCS 8、9、10、12、13、15、16、17。MCS 14 被拿掉：與 MCS 15 一樣 3 bit/symbol，多需要 1 dB。MCS 11 沒有量 |
 | Threshold | `configs/la/thresholds_pluto_v5.yaml`，GUI 燈號與 LA 共用（8.8 的實測值） |

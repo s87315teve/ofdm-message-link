@@ -205,6 +205,13 @@ EOF
 標題是 `OFDM node 1`（或 2）。最上面是 demo banner 與一行 profile（node、TX／RX 頻率、sample rate、
 LA 演算法、ports），下面三排 cards：
 
+![node_app 的視窗：node 2，--transport udp，兩個方向都有 datagram；Link adaptation tab 顯示 olla 從 MCS 8 升到 16](images/ofdm-message-link-node.png)
+
+上圖是 `--transport udp` 的 node 2（node 1 headless，`--snr-db 20`），兩個方向都在送 datagram：`olla`
+從 MCS 8 升到 15、再到 16，feedback age 54 ms（綠色：小於 0.2 s）。Link light 用單向 RX 的同一套規則（2.2 節），
+但拿收到的 SNR 比的是這個 node **自己的 TX MCS**（LA 的決定），不是 peer 送來的 burst 的 MCS；燈號裡的
+「try MCS N」只查 threshold 表（可能建議 LA ladder 拿掉的 MCS 14），LA 不看它。
+
 | 排 | Cards |
 |---|---|
 | TX | TX light、Queue、Airtime（2 s）、Sent goodput |
@@ -215,7 +222,8 @@ Cards 下方的 60 秒圖：主軸是 TX MCS index，副軸是 LA 用的 filtere
 塗紅。Tabs：**Live**（RX spectrum、constellation、RX goodput）、**Send**（輸入訊息、batch）、
 **Link adaptation**（auto／fixed 切換、fixed 時的 MCS 選單、threshold 表、最近 20 個決定）、
 **Log**、**Hardware**（RX 的 Radio panel、TX gain、profile 的 TX 頻率、原始統計）。
-`--gain-profile` 在視窗模式也有效；`--stats-log` 每 0.5 s 一行，格式見 [7.9 節](07-reference.md#79-node_app雙向-node-的命令列)。
+`--gain-profile` 與 control socket（`--control-port`）在視窗模式也有效；`--stats-log` 每 0.5 s 一行，格式見 [7.9 節](07-reference.md#79-node_app雙向-node-的命令列)。
+架構圖見 [1.7 節](01-architecture.md#17-雙向-nodenode_app)。
 LA 卡片與軌跡背後的演算法（內建 `olla`，也是 `node_app` 的預設）與怎麼換成自己的，見 [3.4 節](03-your-own-app.md#34-寫你自己的-link-adaptation-模組)。
 
 下一篇：[用 UDP 傳資料與傳影像](03-your-own-app.md)。

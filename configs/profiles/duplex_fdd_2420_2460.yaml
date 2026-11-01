@@ -1,5 +1,6 @@
 # Bidirectional FDD link for node_app: two ADALM-Plutos, 5 MS/s, 2.4 GHz ISM.
-# Overlay after default.yaml (node_app's default overlay), e.g.
+# node_app overlays this file on default.yaml when no --overlay is given; to
+# name it explicitly:
 #   --overlay configs/profiles/duplex_fdd_2420_2460.yaml
 #
 # Node 1 ("A") transmits on 2420 MHz and receives on 2460 MHz; node 2 ("B")
@@ -8,6 +9,10 @@
 # 2460 MHz in channel 11 (2451-2473): Wi-Fi bursts show as channel loss.
 # The self-interference measurement behind this choice is in
 # experiments/duplex_fdd/results/si/README.md.
+#
+# duplex.control_mcs_index is the MCS of control-only bursts (feedback while
+# no data is queued); --control-mcs-index overrides it.  node_app picks the
+# entry of duplex.nodes with its --node-id (1 or 2).
 #
 # Like every profile, this does not arm a transmitter: each RF run still
 # needs --enable-rf and its explicit acknowledgement.  Keep the TX gain at or

@@ -61,6 +61,8 @@
 | [`usrp_ota_1p2ghz.yaml`](../configs/profiles/usrp_ota_1p2ghz.yaml) | 選用。1.2 GHz、5 MS/s。這個頻段配置給 GNSS，只在確定可以使用時才用 |
 | [`b210_ota_3p8ghz.yaml`](../configs/profiles/b210_ota_3p8ghz.yaml) | 選用。3.8 GHz、5 MS/s，gain 設定很高 |
 | [`b210_ota_3p8ghz_10msps.yaml`](../configs/profiles/b210_ota_3p8ghz_10msps.yaml) | 選用。同上但 10 MS/s |
+| [`duplex_fdd_2420_2460.yaml`](../configs/profiles/duplex_fdd_2420_2460.yaml) | `node_app` 的預設。兩台 Pluto、5 MS/s；node 1 TX 2420／RX 2460 MHz，node 2 相反 |
+| [`duplex_fdd_2405_2475.yaml`](../configs/profiles/duplex_fdd_2405_2475.yaml) | `node_app` 的備用：70 MHz 間距，2405／2475 MHz |
 
 這個專案實際讀取的區段：
 
@@ -70,6 +72,7 @@
 | `mac.aggregation` | v5 TX 的 aggregation 上限，見下 |
 | `radio` | `adapter`（`uhd` 才能用 `--transport uhd`）、預設 gain 與 antenna、clock source |
 | `acceleration` | `cpu_cores`：限制 NumPy 的 thread 數 |
+| `duplex` | 只有 `node_app` 讀（選用）：`mode`、`control_mcs_index`、`nodes`，見下 |
 
 `simulation` 區段是 PHY 測試用的 channel 模型參數。`node`、`network` 與 `mac` 的其他欄位是設定 schema
 要求的，但單向 link 沒有 IP 介面、TDD 或 ARQ，所以用不到它們的值。
@@ -101,6 +104,14 @@
 | `max_psdu_bytes` | 16384 | SIG 可以宣告的最大 PSDU（19–65535） |
 | `turbo_max_iterations` | 8 | Turbo iteration 上限（2、4、6、8） |
 | `fft_backoff_samples` | 3 | 每個 v5 FFT window 提早進入 cyclic prefix 幾個 sample（0–8） |
+
+`duplex`（只有 `node_app` 讀；`tx_app` 與 `rx_app` 忽略它）：
+
+| Key | 預設 | 說明 |
+|---|---|---|
+| `mode` | 必填 | `fdd`：每個 node 有自己的 TX 頻率，兩個頻率至少相隔一個 sample rate。`lbt`（同一個頻率）只有設定 schema 與 `duplex.lbt` 的參數，`node_app` 沒有實作 listen-before-talk（M1 量到不需要） |
+| `control_mcs_index` | 8 | Control-only burst 的 MCS（8–17）；`--control-mcs-index` 會蓋過它 |
+| `nodes` | 必填 | 剛好兩個 `{node_id, tx_frequency, rx_frequency}`；id 不能相同，一個 node 的 `tx_frequency` 必須是另一個的 `rx_frequency`。Schema 接受 id 1–254，`node_app --node-id` 只接受 1 與 2 |
 
 `mac.aggregation`（只影響 TX；命令列的 aggregation 選項會蓋過它）：
 
@@ -313,9 +324,11 @@ Delimiter：
 
 **位置。** Node 的每個 v5 burst 的第一個 MPDU 是一個 `FrameKind.CONTROL` frame：`mcs` = 該 burst
 的 modulation，`sequence` 來自一個**獨立的** 16-bit control counter，payload 是一個 Link Control PDU
-（LCP）。DATA frame 的 sequence 因此保持連續，舊版 `rx_app` 不會看到假的 gap，只把 CONTROL frame
-記在 `control_frames`。沒有 data 時，node 送一個只含 CONTROL frame 的 control-only burst（MCS 8）。
-兩個 node 用不同的 scrambler seed 範圍：node 1 用 1–63，node 2 用 64–127（`tx_app` 仍用 1–127）。
+（LCP）。Reporter 有 report 到期時 LCP 是 FEEDBACK，否則是只有 header 的 LINK_HEADER。DATA frame 的
+sequence 因此保持連續，舊版 `rx_app` 不會看到假的 gap，只把 CONTROL frame 記在 `control_frames`。
+沒有 data 而 report 到期時，node 送一個只含 CONTROL frame 的 control-only burst（`--control-mcs-index`，
+預設 MCS 8）；沒有 data 也沒有 report 時什麼都不送。兩個 node 用不同的 scrambler seed 範圍：node 1 用
+1–63，node 2 用 64–127（`tx_app` 仍用 1–127）；RX 由 SIG 的 seed 在 payload decode 之前丟掉自己 TX 的洩漏。
 
 **LCP header（8 bytes，big-endian）**
 
@@ -324,16 +337,16 @@ Delimiter：
 | 0 | magic | u16 | `0x4C43`（"LC"） |
 | 2 | version | u8 | 1；其他版本整個 LCP 被忽略 |
 | 3 | pdu_type | u8 | 1 LINK_HEADER、2 FEEDBACK、3 STATUS（保留給 ARQ）；不認得的 type 被忽略 |
-| 4 | src_node | u8 | 1–254；等於自己的 id 時，整個 PSDU 是自己 TX 的洩漏，丟棄 |
-| 5 | dst_node | u8 | 0 = 任何 node |
-| 6 | flags | u8 | b0 CONTROL_ONLY、b1 LBT_MODE、b2 TX_QUEUE_NONEMPTY |
+| 4 | src_node | u8 | 1–254；等於自己的 id 時，整個 PSDU 是自己 TX 的洩漏，丟棄（seed 範圍之外的第二道檢查） |
+| 5 | dst_node | u8 | 0 = 任何 node；node 送 peer 的 id。不是 0 也不是自己時，內容被忽略（`control_other_dst`） |
+| 6 | flags | u8 | b0 CONTROL_ONLY（control-only burst）、b1 LBT_MODE（保留，沒有使用）、b2 TX_QUEUE_NONEMPTY（有 data 的 burst） |
 | 7 | body_length | u8 | LINK_HEADER 為 0 |
 
 **FEEDBACK body v1（36 bytes 固定部分）**
 
 | Offset | 欄位 | 型別 | 說明 |
 |---:|---|---|---|
-| 0 | report_seq | u16 | 每份 report +1；TX 忽略不是較新的值 |
+| 0 | report_seq | u16 | 每份 report +1（mod 2^16）；TX 的 `FeedbackTracker` 忽略晚到或重複的 report，peer 重新啟動時重設基準 |
 | 2 | window_ms | u16 | SNR 統計的時間窗 |
 | 4 | age_ms | u16 | 時間窗結束到 encode 的時間（飽和） |
 | 6 | preambles | u16 | 時間窗內 peer 的所有 preamble |
@@ -347,22 +360,23 @@ Delimiter：
 | 32 | reporter_id | u8 | 0 = 內建 reporter |
 | 33 | n_entries | u8 | ≤ 16 |
 | 34 | tlv_length | u16 | entries 後面 TLV 的 bytes |
-| 36 | entries | 6 B 各一 | seq_first u16、mcs u8、snr 0.25 dB u8（`0xFF` = 無）、ok u8、lost u8 |
-| … | TLVs | | type u8、len u8、value；0x10 = reporter 的 session id（u32，peer 重新啟動時重設基準）；0x80–0xFF 給自訂 reporter |
+| 36 | entries | 6 B 各一 | seq_first u16、mcs u8（`0xFF` = 無）、snr u8（0.25 dB 一階，0–63.5 dB 飽和；`0xFF` = 無）、ok u8、lost u8（飽和在 255）；只留最近的 16 個 |
+| … | TLVs | | type u8、len u8、value。0x10 SESSION_ID：len 4、u32，reporter 啟動時隨機抽，encode 時永遠放第一個；peer 的 session id 改變時 TX 立即重設基準。0x80 以下保留給這個 codec，0x80–0xFF 給自訂 reporter；不認得的 TLV 放進 `extras` |
 
 - 計數器是累計值，所以掉了幾份 feedback 也不會遺失資訊：TX 把收到的兩份相減。
 - 解碼端遇到任何格式錯誤都回傳 `None`，不會丟例外；body 比已知的長時，多出的部分被忽略。
-- 成本：LINK_HEADER 每個 burst 24 bytes（含 delimiter 與 padding）；4 個 entries 的 FEEDBACK
-  是 84 bytes。
-- Data 的 MCS 高於 9 時，每 100 ms 至少有一份 feedback 走 MCS ≤ 9 的 burst，data 的 MCS 太高時
-  feedback 仍然到得了。
+- 成本（在 burst 裡，含 frame header、CRC、delimiter 與 padding）：LINK_HEADER 每個 burst 24 bytes；
+  內建 reporter 的 FEEDBACK（含 6-byte 的 session id TLV）沒有 entry 時 68 bytes、4 個 entries 92 bytes、
+  8 個（內建 reporter 的上限）116 bytes。4 個 entries 的 control-only burst 在 MCS 8 是 2 560 samples（0.51 ms）。
+- Data 的 MCS 高於 9 時，每 100 ms 至少有一份 feedback 走 MCS ≤ 9 的 burst（在 data burst 之前送一個
+  control-only burst），data 的 MCS 太高時 feedback 仍然到得了。
 - `pdu_type 3 STATUS` 保留給 ARQ，見[提案](../experiments/duplex_fdd/README.md#5-arq-提案沒有實作)。
 - Codec 在 [`ofdm_message_link/control.py`](../src/ofdm_message_link/control.py)，report 的資料結構在
   [`ofdm_message_link/la/api.py`](../src/ofdm_message_link/la/api.py)。
 
 ## 7.9 `node_app`：雙向 node 的命令列
 
-一個 Pluto 一個 process。Node 同時發送與接收（FDD）：node 1 在 2420 MHz 發、2460 MHz 收，node 2
+架構圖見 [1.7 節](01-architecture.md#17-雙向-nodenode_app)。一個 Pluto 一個 process。Node 同時發送與接收（FDD）：node 1 在 2420 MHz 發、2460 MHz 收，node 2
 相反（[`configs/profiles/duplex_fdd_2420_2460.yaml`](../configs/profiles/duplex_fdd_2420_2460.yaml)，
 備用 `duplex_fdd_2405_2475.yaml`）。一個 Pluto 只能開一個 libiio context（第二個回 EBUSY），所以 TX 與
 RX 共用一個 `pluto.SharedPlutoContext`，在同一個 engine 子 process 裡。
@@ -395,12 +409,16 @@ process 默默分流。
 | 選項 | 說明 |
 |---|---|
 | `--node-id {1,2}` | 必填；決定 profile 中的頻率、ports 與 scrambler seed 範圍（1–63／64–127） |
+| `--transport {udp,pluto}` | 預設 `udp`（不用 radio）；`uhd` 會被拒絕。`udp` 用 `--udp-host`（預設 127.0.0.1）與下面的 sample ports，`--udp-port` 對 `node_app` 沒有作用 |
 | `--overlay` | 預設 `configs/profiles/duplex_fdd_2420_2460.yaml`；必須有 `duplex` 段 |
+| `--serial` / `--auto-start` | `pluto`：選哪一台 Pluto；`--headless` 必須給 `--serial`，而且隱含 `--auto-start` |
 | `--tx-freq` / `--rx-freq` | 覆寫 profile 的頻率；信號邊緣離開 2400–2483.5 MHz 時警告 |
 | `--tx-gain` / `--rx-gain` | 預設 −89.75 / 15 dB。`--gain` 會被拒絕（node 有兩個 gain） |
 | `--rx-analog-bw HZ` | AD9361 RX analog filter，預設 = sample rate |
 | `--rx-kernel-buffers N` | libiio RX kernel buffers，預設 4 |
-| `--tx-duty-cap D` | `pluto`：TX duty 不超過 D，預設 0.7（USB 2.0 同時帶 5 MS/s RX 時的上限，見 M0）；1 = 不限 |
+| `--tx-duty-cap D` | `pluto`：TX duty 不超過 D（0.05–1），預設 0.7（USB 2.0 同時帶 5 MS/s RX 時的上限，見 M0）；1 = 不限。`udp` 沒有 duty cap |
+| `--peak-amplitude` | 每個 burst 縮放到這個 peak，預設 0.7 |
+| `--snr-db` | 只有 `udp`：在 RX 加 AWGN |
 | `--headless` | 不開視窗，隱含 `--auto-start`；`pluto` 需要 `--serial` |
 | `--duration S` | Ready 後 S 秒停止（headless） |
 | `--gain-profile "T:DB,..."` | 依 ready 後的秒數排程 TX gain，例如 `0:-5,30:-20,60:-5` |
@@ -410,13 +428,15 @@ process 默默分流。
 | `--feedback-reporter SPEC` / `--feedback-reporter-arg K=V` | RX 端量測與回報模組，預設 `default` |
 | `--mcs-index N` | 起始的 MCS（`fixed` 時是固定的 MCS），預設 8 |
 | `--control-mcs-index N` | Control-only burst 的 MCS，預設 profile 的值（8） |
-| `--decode-workers N` | 預設 3（兩個 node 在同一台 PC 時的 CPU 預算） |
-| `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`；control socket 的 `mark` 也寫入 |
+| `--decode-workers N` | 1–64，預設 3（兩個 node 在同一台 PC 時的 CPU 預算） |
+| `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
 | `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON |
 | `--ready-file PATH` | 兩個方向都在跑時建立，停止時刪除 |
 | `--ingress-port` / `--egress-host` / `--egress-port` | 覆寫依 node 的預設 |
 | `--udp-listen-port` / `--udp-peer-port` | `--transport udp` 的 sample ports，預設自己與 peer 的 base+4 |
 | `--enable-rf` / `--acknowledgement` | `--transport pluto` 必要，和 `tx_app` 相同 |
+| Aggregation | `--aggregation`、`--aggregation-max-subframes`、`--aggregation-max-wait-ms`、`--min-burst-interval-ms`、`--max-burst-airtime-ms`，與 `tx_app` 相同（7.1 節） |
+| 其他共用的選項 | `--config`、`--mcs`、`--frame-payload-bytes`、`--ui-fps`、`--log-lines`、`--geometry`、`--channel`、`--antenna`，與 7.1 節相同 |
 
 **Control socket**：每個 datagram 一個 JSON request，回一個 JSON answer。
 
@@ -428,8 +448,8 @@ process 默默分流。
 | `{"cmd":"mark","text":"phase 2"}` | 同時寫入 stats log 與 LA log |
 | `{"cmd":"stats"}` / `{"cmd":"stop"}` | 最近一行 stats／停止 |
 
-Headless 收到 SIGTERM／SIGINT 或 `--duration` 到時：先停 TX（attenuator 回到最小輸出），再停 RX，
-刪除 ready file，exit 0；radio 啟動失敗時 exit 2，engine 子 process 中途結束時 exit 3。
+Headless 收到 SIGTERM／SIGINT、`stop` 或 `--duration` 到時：先停 TX（attenuator 回到最小輸出），再停 RX，
+刪除 ready file，exit 0；radio 啟動失敗或 control port 已被佔用時 exit 2，engine 子 process 中途結束時 exit 3。
 
 LA 演算法（預設演算法 `olla` 的參數、ladder）與怎麼寫自己的模組見
 [3.4 節](03-your-own-app.md#34-寫你自己的-link-adaptation-模組)；設計、自干擾與實機量測見
