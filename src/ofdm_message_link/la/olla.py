@@ -5,14 +5,31 @@ rung whose threshold it clears, with hysteresis (going up needs the new
 rung's threshold + ``hysteresis_up_db`` for ``up_hold_reports`` reports in a
 row and ``min_dwell_s`` since the last change; going down is immediate).
 
-Outer loop (OLLA): the offset moves by ``+step_up_db`` per DATA subframe the
-peer received and ``-step_down_db`` per subframe it lost.  The offset stops
-drifting when ``step_up * ok = step_down * lost``, so the loss settles at
+Outer loop (OLLA): per DATA subframe, the offset moves by ``+step_up_db``
+for one the peer received and ``-step_down_db`` for one it lost, so it stops
+drifting when ``step_up * ok = step_down * lost``: the loss settles at
 ``step_up / (step_up + step_down)``, which the default
 ``step_up = step_down * t / (1 - t)`` makes the target ``t`` (1 %: there is
-no HARQ to recover losses, unlike LTE's 10 %).  A per-report clamp bounds
-the reaction to one report, because the subframes of one aggregate fail
-together.
+no HARQ to recover losses, unlike LTE's 10 %).
+
+The subframes of one aggregate fail together, so a report can lose dozens
+at once.  To bound the reaction to one report without biasing that
+equilibrium, a report's whole update is scaled by a gain that depends on
+the report size only, never on its outcome::
+
+    gain = min(1, n_cap / n_avg),   n_cap = max_report_down_db / step_down_db
+
+where ``n_avg`` is a running mean of the subframes per report.  A report of
+typical size whose every subframe was lost moves the offset by
+``-max_report_down_db`` at once (2 dB), and a lossless one by
+``+max_report_down_db * t / (1 - t)``; small reports (``n_avg <= n_cap``)
+get the plain per-subframe steps.  Scaling good and bad reports alike keeps
+the drift zero exactly at loss ``t``, also when whole windows are lost
+together.  (The earlier per-report clamp cut only the lossy reports and moved
+the equilibrium to about 4 % at 16 subframes per report and 9 % at 40.)
+A hard clamp of ``-2 * max_report_down_db`` / ``+max_report_up_db`` per
+report remains for outliers, such as a report that carries the losses of
+an outage; it does not bind for reports of typical size.
 
 The ladder offers discrete rates, so the realised loss reaches the target
 only where the SNR sits near a threshold.  Elsewhere the best rung loses
@@ -36,6 +53,9 @@ from .api import (
     SentBurst,
 )
 from .thresholds import build_ladder, load_thresholds, rung_at_or_below
+
+_N_AVG_WEIGHT = 0.1  # running mean of the report size: about the last 10 reports
+_OUTLIER_FACTOR = 2.0  # hard per-report clamp, in units of max_report_down_db
 
 
 class OllaLinkAdaptation:
@@ -113,6 +133,12 @@ class OllaLinkAdaptation:
         # Duplicates, peer restarts (session id, feedback gap, counters going
         # backwards) and the counter differences.
         self._feedback = FeedbackTracker(rebaseline_after_s=self.stale_after_s)
+        self._n_avg: float | None = None  # running mean of DATA subframes per report
+        self._n_cap = (
+            self.max_report_down_db / self.step_down_db
+            if self.step_down_db > 0 and self.max_report_down_db > 0
+            else math.inf
+        )
         self._started_t: float | None = None
         self._last_feedback_t: float | None = None
         self._next_stale_t: float | None = None
@@ -210,8 +236,13 @@ class OllaLinkAdaptation:
         if self.skip_outer_on_overflow and delta.overflow_changed:
             self._counts["overflow_skips"] += 1
             return
-        step = self.step_up_db * d_ok - self.step_down_db * d_lost
-        step = min(max(step, -self.max_report_down_db), self.max_report_up_db)
+        n = d_ok + d_lost
+        self._n_avg = n if self._n_avg is None else self._n_avg + _N_AVG_WEIGHT * (
+            n - self._n_avg
+        )
+        gain = min(1.0, self._n_cap / self._n_avg)
+        step = gain * (self.step_up_db * d_ok - self.step_down_db * d_lost)
+        step = min(max(step, -_OUTLIER_FACTOR * self.max_report_down_db), self.max_report_up_db)
         self._offset = min(max(self._offset + step, self.offset_min_db), self.offset_max_db)
 
     def decide(self, now_s: float) -> Decision:
@@ -264,6 +295,7 @@ class OllaLinkAdaptation:
             "offset_db": rounded(self._offset),
             "snr_eff_db": rounded(self._snr_eff),
             "up_count": self._up_count,
+            "subframes_per_report": rounded(self._n_avg),
             "ladder": [entry.index for entry in self._ladder],
             **self._counts,
         }
