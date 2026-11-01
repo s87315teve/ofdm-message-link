@@ -140,8 +140,18 @@ RX_KEYS = {
 }
 
 
-def build_series(stats: list[dict]) -> Series:
+def build_series(stats: list[dict], offset: float | None = None) -> Series:
+    """``offset`` (elapsed - monotonic of another node) puts the times on that node's axis.
+
+    Each node counts ``elapsed_s`` from its own ready, and the two nodes become ready at
+    different moments; the monotonic clock is shared.  A direction's receiver series must
+    be on the sender's axis, where the sender's gain steps are.
+    """
+
     recs = [r for r in stats if isinstance(get(r, "elapsed_s"), int | float)]
+    if offset is not None:
+        recs = [r for r in recs if isinstance(r.get("monotonic_s"), int | float)]
+        recs = [{**r, "elapsed_s": float(r["monotonic_s"]) + offset} for r in recs]
     recs.sort(key=lambda r: r["elapsed_s"])
     times = [float(r["elapsed_s"]) for r in recs]
     values: dict[str, list[float]] = {}
@@ -283,10 +293,12 @@ def analyse_direction(
     edges: list[float],
 ) -> dict | None:
     src, dst = DIRECTIONS[name]
-    rx, tx = build_series(stats.get(dst, [])), build_series(stats.get(src, []))
+    sender_offset = clock_offset(stats.get(src, []))
+    rx = build_series(stats.get(dst, []), offset=sender_offset)
+    tx = build_series(stats.get(src, []))
     if not rx or not tx:
         return None
-    events = la_events(la.get(src, []), clock_offset(stats.get(src, [])))
+    events = la_events(la.get(src, []), sender_offset)
     first_mcs = int(tx.v["tx_mcs"][0]) if tx.v["tx_mcs"] else None
     traj = mcs_trajectory(events["la"], first_mcs)
     la_changes = [e["t_el"] for e in events["la"]]

@@ -82,8 +82,8 @@
      "t0": 0.0,
      "t1": 30.0,
      "tx_gain_db": -5.0,
-     "goodput_mbps": 0.9276,
-     "datagram_loss": 0.7302861130495464,
+     "goodput_mbps": 0.98736,
+     "datagram_loss": 0.7129099790648988,
      "subframe_loss": 0.0,
      "subframes_bad": 0.0,
      "mcs_min": 0,
@@ -99,8 +99,8 @@
      "t0": 30.0,
      "t1": 60.0,
      "tx_gain_db": -20.0,
-     "goodput_mbps": 1.12296,
-     "datagram_loss": 0.7191476590636254,
+     "goodput_mbps": 1.12272,
+     "datagram_loss": 0.7192076830732292,
      "subframe_loss": 0.0,
      "subframes_bad": 0.0,
      "mcs_min": 8,
@@ -116,8 +116,8 @@
      "t0": 60.0,
      "t1": 101.00019194299239,
      "tx_gain_db": -5.0,
-     "goodput_mbps": 1.0169513366662764,
-     "datagram_loss": 0.6945675105485232,
+     "goodput_mbps": 0.973400321039746,
+     "datagram_loss": 0.7076476793248945,
      "subframe_loss": 0.0,
      "subframes_bad": 0.0,
      "mcs_min": 8,
@@ -165,57 +165,57 @@
     },
     {
      "t": 3.0,
-     "goodput_mbps": 0.0,
-     "loss": null
+     "goodput_mbps": 0.2016,
+     "loss": 0.0
     },
     {
      "t": 4.0,
-     "goodput_mbps": 0.0,
-     "loss": null
+     "goodput_mbps": 0.8712,
+     "loss": 0.0
     },
     {
      "t": 5.0,
-     "goodput_mbps": 0.7776,
+     "goodput_mbps": 1.2096,
      "loss": 0.0
     },
     {
      "t": 6.0,
-     "goodput_mbps": 0.8928,
-     "loss": 0.0
-    },
-    {
-     "t": 7.0,
-     "goodput_mbps": 1.2024,
-     "loss": 0.0
-    },
-    {
-     "t": 8.0,
-     "goodput_mbps": 1.1808,
-     "loss": 0.0
-    },
-    {
-     "t": 9.0,
      "goodput_mbps": 1.188,
      "loss": 0.0
     },
     {
+     "t": 7.0,
+     "goodput_mbps": 1.1736,
+     "loss": 0.0
+    },
+    {
+     "t": 8.0,
+     "goodput_mbps": 1.1952,
+     "loss": 0.0
+    },
+    {
+     "t": 9.0,
+     "goodput_mbps": 1.1736,
+     "loss": 0.0
+    },
+    {
      "t": 10.0,
-     "goodput_mbps": 1.1808,
+     "goodput_mbps": 0.8784,
      "loss": 0.0
     },
     {
      "t": 11.0,
-     "goodput_mbps": 0.8856,
+     "goodput_mbps": 1.1808,
      "loss": 0.0
     },
     {
      "t": 12.0,
-     "goodput_mbps": 1.152,
+     "goodput_mbps": 1.1448,
      "loss": 0.0
     },
     {
      "t": 13.0,
-     "goodput_mbps": 1.224,
+     "goodput_mbps": 1.2096,
      "loss": 0.0
     },
     {
@@ -225,22 +225,22 @@
     },
     {
      "t": 15.0,
-     "goodput_mbps": 1.1736,
+     "goodput_mbps": 0.8856,
      "loss": 0.0
     },
     {
      "t": 16.0,
-     "goodput_mbps": 0.8568,
+     "goodput_mbps": 1.1808,
      "loss": 0.0
     },
     {
      "t": 17.0,
-     "goodput_mbps": 1.2024,
+     "goodput_mbps": 1.188,
      "loss": 0.0
     },
     {
      "t": 18.0,
-     "goodput_mbps": 1.188,
+     "goodput_mbps": 1.2168,
      "loss": 0.0
     },
     {
@@ -250,72 +250,72 @@
     },
     {
      "t": 20.0,
-     "goodput_mbps": 1.1952,
+     "goodput_mbps": 0.8928,
      "loss": 0.0
     },
     {
      "t": 21.0,
-     "goodput_mbps": 1.1808,
+     "goodput_mbps": 1.1448,
      "loss": 0.0
     },
     {
      "t": 22.0,
-     "goodput_mbps": 0.8568,
+     "goodput_mbps": 1.188,
      "loss": 0.0
     },
     {
      "t": 23.0,
-     "goodput_mbps": 1.2024,
+     "goodput_mbps": 1.1952,
      "loss": 0.0
     },
     {
      "t": 24.0,
-     "goodput_mbps": 1.1736,
+     "goodput_mbps": 1.224,
      "loss": 0.0
     },
     {
      "t": 25.0,
-     "goodput_mbps": 1.1952,
+     "goodput_mbps": 0.9072,
      "loss": 0.0
     },
     {
      "t": 26.0,
-     "goodput_mbps": 1.2456,
+     "goodput_mbps": 1.1736,
      "loss": 0.0
     },
     {
      "t": 27.0,
-     "goodput_mbps": 0.8712,
+     "goodput_mbps": 1.224,
      "loss": 0.0
     },
     {
      "t": 28.0,
-     "goodput_mbps": 1.1952,
+     "goodput_mbps": 1.2384,
      "loss": 0.0
     },
     {
      "t": 29.0,
-     "goodput_mbps": 1.2528,
+     "goodput_mbps": 1.1808,
      "loss": 0.0
     },
     {
      "t": 30.0,
-     "goodput_mbps": 1.2024,
+     "goodput_mbps": 1.1952,
      "loss": 0.0
     },
     {
      "t": 31.0,
-     "goodput_mbps": 1.2168,
+     "goodput_mbps": 0.8712,
      "loss": 0.0
     },
     {
      "t": 32.0,
-     "goodput_mbps": 0.8424,
+     "goodput_mbps": 1.1952,
      "loss": 0.0
     },
     {
      "t": 33.0,
-     "goodput_mbps": 1.188,
+     "goodput_mbps": 1.1952,
      "loss": 0.0
     },
     {
@@ -325,107 +325,107 @@
     },
     {
      "t": 35.0,
-     "goodput_mbps": 1.2312,
+     "goodput_mbps": 1.2168,
      "loss": 0.0
     },
     {
      "t": 36.0,
-     "goodput_mbps": 1.152,
-     "loss": 0.0
-    },
-    {
-     "t": 37.0,
-     "goodput_mbps": 0.9288,
-     "loss": 0.0
-    },
-    {
-     "t": 38.0,
-     "goodput_mbps": 1.2024,
-     "loss": 0.0
-    },
-    {
-     "t": 39.0,
-     "goodput_mbps": 1.1808,
-     "loss": 0.0
-    },
-    {
-     "t": 40.0,
-     "goodput_mbps": 1.152,
-     "loss": 0.0
-    },
-    {
-     "t": 41.0,
-     "goodput_mbps": 1.1448,
-     "loss": 0.0
-    },
-    {
-     "t": 42.0,
-     "goodput_mbps": 1.1952,
-     "loss": 0.0
-    },
-    {
-     "t": 43.0,
-     "goodput_mbps": 0.864,
-     "loss": 0.0
-    },
-    {
-     "t": 44.0,
-     "goodput_mbps": 1.2096,
-     "loss": 0.0
-    },
-    {
-     "t": 45.0,
-     "goodput_mbps": 1.2312,
-     "loss": 0.0
-    },
-    {
-     "t": 46.0,
-     "goodput_mbps": 1.2024,
-     "loss": 0.0
-    },
-    {
-     "t": 47.0,
-     "goodput_mbps": 1.2024,
-     "loss": 0.0
-    },
-    {
-     "t": 48.0,
-     "goodput_mbps": 0.9072,
-     "loss": 0.0
-    },
-    {
-     "t": 49.0,
-     "goodput_mbps": 1.1448,
-     "loss": 0.0
-    },
-    {
-     "t": 50.0,
-     "goodput_mbps": 1.152,
-     "loss": 0.0
-    },
-    {
-     "t": 51.0,
-     "goodput_mbps": 1.1448,
-     "loss": 0.0
-    },
-    {
-     "t": 52.0,
-     "goodput_mbps": 1.2024,
-     "loss": 0.0
-    },
-    {
-     "t": 53.0,
      "goodput_mbps": 0.8856,
      "loss": 0.0
     },
     {
-     "t": 54.0,
+     "t": 37.0,
+     "goodput_mbps": 1.2096,
+     "loss": 0.0
+    },
+    {
+     "t": 38.0,
+     "goodput_mbps": 1.1664,
+     "loss": 0.0
+    },
+    {
+     "t": 39.0,
+     "goodput_mbps": 1.1448,
+     "loss": 0.0
+    },
+    {
+     "t": 40.0,
+     "goodput_mbps": 1.1808,
+     "loss": 0.0
+    },
+    {
+     "t": 41.0,
+     "goodput_mbps": 0.8712,
+     "loss": 0.0
+    },
+    {
+     "t": 42.0,
+     "goodput_mbps": 1.2024,
+     "loss": 0.0
+    },
+    {
+     "t": 43.0,
+     "goodput_mbps": 1.1952,
+     "loss": 0.0
+    },
+    {
+     "t": 44.0,
+     "goodput_mbps": 1.2168,
+     "loss": 0.0
+    },
+    {
+     "t": 45.0,
+     "goodput_mbps": 1.188,
+     "loss": 0.0
+    },
+    {
+     "t": 46.0,
+     "goodput_mbps": 1.224,
+     "loss": 0.0
+    },
+    {
+     "t": 47.0,
+     "goodput_mbps": 0.864,
+     "loss": 0.0
+    },
+    {
+     "t": 48.0,
+     "goodput_mbps": 1.1304,
+     "loss": 0.0
+    },
+    {
+     "t": 49.0,
      "goodput_mbps": 1.1736,
      "loss": 0.0
     },
     {
+     "t": 50.0,
+     "goodput_mbps": 1.1592,
+     "loss": 0.0
+    },
+    {
+     "t": 51.0,
+     "goodput_mbps": 1.188,
+     "loss": 0.0
+    },
+    {
+     "t": 52.0,
+     "goodput_mbps": 0.9144,
+     "loss": 0.0
+    },
+    {
+     "t": 53.0,
+     "goodput_mbps": 1.1664,
+     "loss": 0.0
+    },
+    {
+     "t": 54.0,
+     "goodput_mbps": 1.1808,
+     "loss": 0.0
+    },
+    {
      "t": 55.0,
-     "goodput_mbps": 1.1736,
+     "goodput_mbps": 1.1592,
      "loss": 0.0
     },
     {
@@ -435,42 +435,42 @@
     },
     {
      "t": 57.0,
-     "goodput_mbps": 1.1808,
+     "goodput_mbps": 0.8784,
      "loss": 0.0
     },
     {
      "t": 58.0,
-     "goodput_mbps": 0.864,
+     "goodput_mbps": 1.1808,
      "loss": 0.0
     },
     {
      "t": 59.0,
-     "goodput_mbps": 1.1664,
+     "goodput_mbps": 1.1808,
      "loss": 0.0
     },
     {
      "t": 60.0,
-     "goodput_mbps": 1.2024,
+     "goodput_mbps": 1.188,
      "loss": 0.0
     },
     {
      "t": 61.0,
-     "goodput_mbps": 1.1664,
+     "goodput_mbps": 1.2024,
      "loss": 0.0
     },
     {
      "t": 62.0,
-     "goodput_mbps": 1.1736,
+     "goodput_mbps": 0.8352,
      "loss": 0.0
     },
     {
      "t": 63.0,
-     "goodput_mbps": 0.8856,
+     "goodput_mbps": 1.152,
      "loss": 0.0
     },
     {
      "t": 64.0,
-     "goodput_mbps": 1.1304,
+     "goodput_mbps": 1.2024,
      "loss": 0.0
     },
     {
@@ -480,52 +480,52 @@
     },
     {
      "t": 66.0,
-     "goodput_mbps": 1.1952,
+     "goodput_mbps": 1.1808,
      "loss": 0.0
     },
     {
      "t": 67.0,
-     "goodput_mbps": 1.1952,
+     "goodput_mbps": 0.9,
      "loss": 0.0
     },
     {
      "t": 68.0,
-     "goodput_mbps": 0.8928,
+     "goodput_mbps": 1.1736,
      "loss": 0.0
     },
     {
      "t": 69.0,
-     "goodput_mbps": 1.188,
+     "goodput_mbps": 1.116,
      "loss": 0.0
     },
     {
      "t": 70.0,
-     "goodput_mbps": 1.1592,
+     "goodput_mbps": 1.1952,
      "loss": 0.0
     },
     {
      "t": 71.0,
-     "goodput_mbps": 1.1232,
+     "goodput_mbps": 1.1808,
      "loss": 0.0
     },
     {
      "t": 72.0,
-     "goodput_mbps": 1.2024,
+     "goodput_mbps": 0.8496,
      "loss": 0.0
     },
     {
      "t": 73.0,
-     "goodput_mbps": 1.1664,
+     "goodput_mbps": 1.1952,
      "loss": 0.0
     },
     {
      "t": 74.0,
-     "goodput_mbps": 0.8784,
+     "goodput_mbps": 1.2168,
      "loss": 0.0
     },
     {
      "t": 75.0,
-     "goodput_mbps": 1.2312,
+     "goodput_mbps": 1.2096,
      "loss": 0.0
     },
     {
@@ -535,67 +535,67 @@
     },
     {
      "t": 77.0,
-     "goodput_mbps": 1.224,
-     "loss": 0.0
-    },
-    {
-     "t": 78.0,
-     "goodput_mbps": 1.1592,
-     "loss": 0.0
-    },
-    {
-     "t": 79.0,
      "goodput_mbps": 0.8928,
      "loss": 0.0
     },
     {
-     "t": 80.0,
-     "goodput_mbps": 1.1808,
-     "loss": 0.0
-    },
-    {
-     "t": 81.0,
+     "t": 78.0,
      "goodput_mbps": 1.188,
      "loss": 0.0
     },
     {
-     "t": 82.0,
-     "goodput_mbps": 1.1736,
-     "loss": 0.0
-    },
-    {
-     "t": 83.0,
-     "goodput_mbps": 1.2024,
-     "loss": 0.0
-    },
-    {
-     "t": 84.0,
-     "goodput_mbps": 0.9,
-     "loss": 0.0
-    },
-    {
-     "t": 85.0,
-     "goodput_mbps": 1.1448,
-     "loss": 0.0
-    },
-    {
-     "t": 86.0,
-     "goodput_mbps": 1.1664,
-     "loss": 0.0
-    },
-    {
-     "t": 87.0,
-     "goodput_mbps": 1.2024,
-     "loss": 0.0
-    },
-    {
-     "t": 88.0,
+     "t": 79.0,
      "goodput_mbps": 1.2096,
      "loss": 0.0
     },
     {
+     "t": 80.0,
+     "goodput_mbps": 1.1448,
+     "loss": 0.0
+    },
+    {
+     "t": 81.0,
+     "goodput_mbps": 1.1808,
+     "loss": 0.0
+    },
+    {
+     "t": 82.0,
+     "goodput_mbps": 1.2096,
+     "loss": 0.0
+    },
+    {
+     "t": 83.0,
+     "goodput_mbps": 0.8568,
+     "loss": 0.0
+    },
+    {
+     "t": 84.0,
+     "goodput_mbps": 1.1592,
+     "loss": 0.0
+    },
+    {
+     "t": 85.0,
+     "goodput_mbps": 1.1952,
+     "loss": 0.0
+    },
+    {
+     "t": 86.0,
+     "goodput_mbps": 1.2096,
+     "loss": 0.0
+    },
+    {
+     "t": 87.0,
+     "goodput_mbps": 1.1736,
+     "loss": 0.0
+    },
+    {
+     "t": 88.0,
+     "goodput_mbps": 0.8784,
+     "loss": 0.0
+    },
+    {
      "t": 89.0,
-     "goodput_mbps": 0.864,
+     "goodput_mbps": 1.1664,
      "loss": 0.0
     },
     {
@@ -610,28 +610,28 @@
     },
     {
      "t": 92.0,
-     "goodput_mbps": 1.1664,
-     "loss": 0.0
-    },
-    {
-     "t": 93.0,
      "goodput_mbps": 1.1808,
      "loss": 0.0
     },
     {
+     "t": 93.0,
+     "goodput_mbps": 0.9216,
+     "loss": 0.0
+    },
+    {
      "t": 94.0,
-     "goodput_mbps": 1.2096,
+     "goodput_mbps": 1.2384,
      "loss": 0.0
     },
     {
      "t": 95.0,
-     "goodput_mbps": 0.9144,
+     "goodput_mbps": 0.5832,
      "loss": 0.0
     },
     {
      "t": 96.0,
-     "goodput_mbps": 1.2024,
-     "loss": 0.0
+     "goodput_mbps": 0.0,
+     "loss": null
     },
     {
      "t": 97.0,
@@ -23040,8 +23040,8 @@
      "t0": 0.0,
      "t1": 30.0,
      "tx_gain_db": -5.0,
-     "goodput_mbps": 0.85944,
-     "datagram_loss": 0.0,
+     "goodput_mbps": 0.8244,
+     "datagram_loss": 0.0020337013364323253,
      "subframe_loss": 0.0,
      "subframes_bad": 0.0,
      "mcs_min": 8,
@@ -23074,8 +23074,8 @@
      "t0": 60.0,
      "t1": 101.00019194299239,
      "tx_gain_db": -5.0,
-     "goodput_mbps": 0.8350204810651259,
-     "datagram_loss": 0.03117359413202936,
+     "goodput_mbps": 0.8606593854259057,
+     "datagram_loss": 0.0014262428687856765,
      "subframe_loss": 0.0,
      "subframes_bad": 0.0,
      "mcs_min": 8,
@@ -23113,72 +23113,72 @@
     },
     {
      "t": 4.0,
+     "goodput_mbps": 0.0,
+     "loss": null
+    },
+    {
+     "t": 5.0,
      "goodput_mbps": 0.72,
      "loss": 0.0
     },
     {
-     "t": 5.0,
+     "t": 6.0,
      "goodput_mbps": 0.864,
      "loss": 0.0
     },
     {
-     "t": 6.0,
-     "goodput_mbps": 1.0728,
-     "loss": 0.0
-    },
-    {
      "t": 7.0,
-     "goodput_mbps": 1.0368,
+     "goodput_mbps": 1.0728,
      "loss": 0.0
     },
     {
      "t": 8.0,
-     "goodput_mbps": 1.044,
-     "loss": 0.0
-    },
-    {
-     "t": 9.0,
-     "goodput_mbps": 1.0728,
-     "loss": 0.0
-    },
-    {
-     "t": 10.0,
-     "goodput_mbps": 1.0296,
-     "loss": 0.0
-    },
-    {
-     "t": 11.0,
-     "goodput_mbps": 0.7776,
-     "loss": 0.0
-    },
-    {
-     "t": 12.0,
-     "goodput_mbps": 1.08,
-     "loss": 0.0
-    },
-    {
-     "t": 13.0,
-     "goodput_mbps": 1.044,
-     "loss": 0.0
-    },
-    {
-     "t": 14.0,
-     "goodput_mbps": 1.0584,
-     "loss": 0.0
-    },
-    {
-     "t": 15.0,
      "goodput_mbps": 1.0368,
      "loss": 0.0
     },
     {
+     "t": 9.0,
+     "goodput_mbps": 1.044,
+     "loss": 0.0
+    },
+    {
+     "t": 10.0,
+     "goodput_mbps": 1.0728,
+     "loss": 0.0
+    },
+    {
+     "t": 11.0,
+     "goodput_mbps": 1.0296,
+     "loss": 0.0
+    },
+    {
+     "t": 12.0,
+     "goodput_mbps": 0.7776,
+     "loss": 0.0
+    },
+    {
+     "t": 13.0,
+     "goodput_mbps": 1.08,
+     "loss": 0.0
+    },
+    {
+     "t": 14.0,
+     "goodput_mbps": 1.044,
+     "loss": 0.0
+    },
+    {
+     "t": 15.0,
+     "goodput_mbps": 1.0584,
+     "loss": 0.0
+    },
+    {
      "t": 16.0,
-     "goodput_mbps": 0.792,
+     "goodput_mbps": 1.0368,
      "loss": 0.0
     },
     {
      "t": 17.0,
-     "goodput_mbps": 1.0512,
+     "goodput_mbps": 0.792,
      "loss": 0.0
     },
     {
@@ -23193,92 +23193,92 @@
     },
     {
      "t": 20.0,
-     "goodput_mbps": 1.0584,
+     "goodput_mbps": 1.0512,
      "loss": 0.0
     },
     {
      "t": 21.0,
-     "goodput_mbps": 0.7848,
+     "goodput_mbps": 1.0584,
      "loss": 0.0
     },
     {
      "t": 22.0,
-     "goodput_mbps": 1.0656,
-     "loss": 0.0
-    },
-    {
-     "t": 23.0,
-     "goodput_mbps": 1.0512,
-     "loss": 0.0
-    },
-    {
-     "t": 24.0,
-     "goodput_mbps": 1.044,
-     "loss": 0.0
-    },
-    {
-     "t": 25.0,
-     "goodput_mbps": 1.0584,
-     "loss": 0.0
-    },
-    {
-     "t": 26.0,
      "goodput_mbps": 0.7848,
      "loss": 0.0
     },
     {
-     "t": 27.0,
-     "goodput_mbps": 1.0368,
-     "loss": 0.0
-    },
-    {
-     "t": 28.0,
+     "t": 23.0,
      "goodput_mbps": 1.0656,
      "loss": 0.0
     },
     {
-     "t": 29.0,
+     "t": 24.0,
      "goodput_mbps": 1.0512,
      "loss": 0.0
     },
     {
-     "t": 30.0,
-     "goodput_mbps": 1.0656,
-     "loss": 0.0
-    },
-    {
-     "t": 31.0,
-     "goodput_mbps": 0.7776,
-     "loss": 0.0
-    },
-    {
-     "t": 32.0,
-     "goodput_mbps": 1.0512,
-     "loss": 0.0
-    },
-    {
-     "t": 33.0,
-     "goodput_mbps": 1.0584,
-     "loss": 0.0
-    },
-    {
-     "t": 34.0,
+     "t": 25.0,
      "goodput_mbps": 1.044,
      "loss": 0.0
     },
     {
-     "t": 35.0,
+     "t": 26.0,
      "goodput_mbps": 1.0584,
+     "loss": 0.0
+    },
+    {
+     "t": 27.0,
+     "goodput_mbps": 0.7848,
+     "loss": 0.0
+    },
+    {
+     "t": 28.0,
+     "goodput_mbps": 1.0368,
+     "loss": 0.0
+    },
+    {
+     "t": 29.0,
+     "goodput_mbps": 1.0656,
+     "loss": 0.0
+    },
+    {
+     "t": 30.0,
+     "goodput_mbps": 1.0512,
+     "loss": 0.0
+    },
+    {
+     "t": 31.0,
+     "goodput_mbps": 1.0656,
+     "loss": 0.0
+    },
+    {
+     "t": 32.0,
+     "goodput_mbps": 0.7776,
+     "loss": 0.0
+    },
+    {
+     "t": 33.0,
+     "goodput_mbps": 1.0512,
+     "loss": 0.0
+    },
+    {
+     "t": 34.0,
+     "goodput_mbps": 1.0584,
+     "loss": 0.0
+    },
+    {
+     "t": 35.0,
+     "goodput_mbps": 1.044,
      "loss": 0.0
     },
     {
      "t": 36.0,
-     "goodput_mbps": 0.7992,
+     "goodput_mbps": 1.0584,
      "loss": 0.0
     },
     {
      "t": 37.0,
-     "goodput_mbps": 1.0584,
+     "goodput_mbps": 0.7992,
      "loss": 0.0
     },
     {
@@ -23288,22 +23288,22 @@
     },
     {
      "t": 39.0,
-     "goodput_mbps": 1.044,
+     "goodput_mbps": 1.0584,
      "loss": 0.0
     },
     {
      "t": 40.0,
-     "goodput_mbps": 1.0512,
+     "goodput_mbps": 1.044,
      "loss": 0.0
     },
     {
      "t": 41.0,
-     "goodput_mbps": 0.8064,
+     "goodput_mbps": 1.0512,
      "loss": 0.0
     },
     {
      "t": 42.0,
-     "goodput_mbps": 1.0512,
+     "goodput_mbps": 0.8064,
      "loss": 0.0
     },
     {
@@ -23313,117 +23313,117 @@
     },
     {
      "t": 44.0,
-     "goodput_mbps": 1.044,
+     "goodput_mbps": 1.0512,
      "loss": 0.0
     },
     {
      "t": 45.0,
-     "goodput_mbps": 1.0584,
+     "goodput_mbps": 1.044,
      "loss": 0.0
     },
     {
      "t": 46.0,
-     "goodput_mbps": 0.7848,
-     "loss": 0.0
-    },
-    {
-     "t": 47.0,
-     "goodput_mbps": 1.0512,
-     "loss": 0.0
-    },
-    {
-     "t": 48.0,
-     "goodput_mbps": 1.0728,
-     "loss": 0.0
-    },
-    {
-     "t": 49.0,
-     "goodput_mbps": 1.0368,
-     "loss": 0.0
-    },
-    {
-     "t": 50.0,
-     "goodput_mbps": 1.0728,
-     "loss": 0.0
-    },
-    {
-     "t": 51.0,
-     "goodput_mbps": 0.7776,
-     "loss": 0.0
-    },
-    {
-     "t": 52.0,
-     "goodput_mbps": 1.0728,
-     "loss": 0.0
-    },
-    {
-     "t": 53.0,
-     "goodput_mbps": 1.044,
-     "loss": 0.0
-    },
-    {
-     "t": 54.0,
-     "goodput_mbps": 1.0368,
-     "loss": 0.0
-    },
-    {
-     "t": 55.0,
-     "goodput_mbps": 1.0512,
-     "loss": 0.0
-    },
-    {
-     "t": 56.0,
-     "goodput_mbps": 0.8064,
-     "loss": 0.0
-    },
-    {
-     "t": 57.0,
-     "goodput_mbps": 1.0368,
-     "loss": 0.0
-    },
-    {
-     "t": 58.0,
-     "goodput_mbps": 1.08,
-     "loss": 0.0
-    },
-    {
-     "t": 59.0,
-     "goodput_mbps": 1.0512,
-     "loss": 0.0
-    },
-    {
-     "t": 60.0,
-     "goodput_mbps": 1.044,
-     "loss": 0.0
-    },
-    {
-     "t": 61.0,
-     "goodput_mbps": 0.7704,
-     "loss": 0.0
-    },
-    {
-     "t": 62.0,
-     "goodput_mbps": 1.0944,
-     "loss": 0.0
-    },
-    {
-     "t": 63.0,
-     "goodput_mbps": 1.0512,
-     "loss": 0.0
-    },
-    {
-     "t": 64.0,
      "goodput_mbps": 1.0584,
      "loss": 0.0
     },
     {
-     "t": 65.0,
+     "t": 47.0,
      "goodput_mbps": 0.7848,
      "loss": 0.0
     },
     {
-     "t": 66.0,
+     "t": 48.0,
      "goodput_mbps": 1.0512,
+     "loss": 0.0
+    },
+    {
+     "t": 49.0,
+     "goodput_mbps": 1.0728,
+     "loss": 0.0
+    },
+    {
+     "t": 50.0,
+     "goodput_mbps": 1.0368,
+     "loss": 0.0
+    },
+    {
+     "t": 51.0,
+     "goodput_mbps": 1.0728,
+     "loss": 0.0
+    },
+    {
+     "t": 52.0,
+     "goodput_mbps": 0.7776,
+     "loss": 0.0
+    },
+    {
+     "t": 53.0,
+     "goodput_mbps": 1.0728,
+     "loss": 0.0
+    },
+    {
+     "t": 54.0,
+     "goodput_mbps": 1.044,
+     "loss": 0.0
+    },
+    {
+     "t": 55.0,
+     "goodput_mbps": 1.0368,
+     "loss": 0.0
+    },
+    {
+     "t": 56.0,
+     "goodput_mbps": 1.0512,
+     "loss": 0.0
+    },
+    {
+     "t": 57.0,
+     "goodput_mbps": 0.8064,
+     "loss": 0.0
+    },
+    {
+     "t": 58.0,
+     "goodput_mbps": 1.0368,
+     "loss": 0.0
+    },
+    {
+     "t": 59.0,
+     "goodput_mbps": 1.08,
+     "loss": 0.0
+    },
+    {
+     "t": 60.0,
+     "goodput_mbps": 1.0512,
+     "loss": 0.0
+    },
+    {
+     "t": 61.0,
+     "goodput_mbps": 1.044,
+     "loss": 0.0
+    },
+    {
+     "t": 62.0,
+     "goodput_mbps": 0.7704,
+     "loss": 0.0
+    },
+    {
+     "t": 63.0,
+     "goodput_mbps": 1.0944,
+     "loss": 0.0
+    },
+    {
+     "t": 64.0,
+     "goodput_mbps": 1.0512,
+     "loss": 0.0
+    },
+    {
+     "t": 65.0,
+     "goodput_mbps": 1.0584,
+     "loss": 0.0
+    },
+    {
+     "t": 66.0,
+     "goodput_mbps": 0.7848,
      "loss": 0.0
     },
     {
@@ -23433,143 +23433,143 @@
     },
     {
      "t": 68.0,
-     "goodput_mbps": 1.0584,
+     "goodput_mbps": 1.0512,
      "loss": 0.0
     },
     {
      "t": 69.0,
-     "goodput_mbps": 1.0512,
+     "goodput_mbps": 1.0584,
      "loss": 0.0
     },
     {
      "t": 70.0,
-     "goodput_mbps": 1.044,
+     "goodput_mbps": 1.0512,
      "loss": 0.0
     },
     {
      "t": 71.0,
-     "goodput_mbps": 0.7848,
+     "goodput_mbps": 1.044,
      "loss": 0.0
     },
     {
      "t": 72.0,
-     "goodput_mbps": 1.0656,
+     "goodput_mbps": 0.7848,
      "loss": 0.0
     },
     {
      "t": 73.0,
-     "goodput_mbps": 1.044,
+     "goodput_mbps": 1.0656,
      "loss": 0.0
     },
     {
      "t": 74.0,
-     "goodput_mbps": 1.0584,
+     "goodput_mbps": 1.044,
      "loss": 0.0
     },
     {
      "t": 75.0,
-     "goodput_mbps": 1.0512,
+     "goodput_mbps": 1.0584,
      "loss": 0.0
     },
     {
      "t": 76.0,
-     "goodput_mbps": 0.7848,
-     "loss": 0.0
-    },
-    {
-     "t": 77.0,
-     "goodput_mbps": 1.0224,
-     "loss": 0.0
-    },
-    {
-     "t": 78.0,
-     "goodput_mbps": 1.0656,
-     "loss": 0.0
-    },
-    {
-     "t": 79.0,
-     "goodput_mbps": 1.0728,
-     "loss": 0.0
-    },
-    {
-     "t": 80.0,
      "goodput_mbps": 1.0512,
      "loss": 0.0
     },
     {
-     "t": 81.0,
+     "t": 77.0,
      "goodput_mbps": 0.7848,
      "loss": 0.0
     },
     {
-     "t": 82.0,
-     "goodput_mbps": 1.044,
+     "t": 78.0,
+     "goodput_mbps": 1.0224,
      "loss": 0.0
     },
     {
-     "t": 83.0,
+     "t": 79.0,
      "goodput_mbps": 1.0656,
      "loss": 0.0
     },
     {
-     "t": 84.0,
-     "goodput_mbps": 1.0368,
-     "loss": 0.0
-    },
-    {
-     "t": 85.0,
-     "goodput_mbps": 1.0584,
-     "loss": 0.0
-    },
-    {
-     "t": 86.0,
-     "goodput_mbps": 0.7776,
-     "loss": 0.0
-    },
-    {
-     "t": 87.0,
-     "goodput_mbps": 1.0584,
-     "loss": 0.0
-    },
-    {
-     "t": 88.0,
-     "goodput_mbps": 1.0368,
-     "loss": 0.0
-    },
-    {
-     "t": 89.0,
-     "goodput_mbps": 1.0584,
-     "loss": 0.0
-    },
-    {
-     "t": 90.0,
-     "goodput_mbps": 1.044,
-     "loss": 0.0
-    },
-    {
-     "t": 91.0,
-     "goodput_mbps": 1.0584,
-     "loss": 0.0
-    },
-    {
-     "t": 92.0,
-     "goodput_mbps": 0.7848,
-     "loss": 0.0
-    },
-    {
-     "t": 93.0,
+     "t": 80.0,
      "goodput_mbps": 1.0728,
      "loss": 0.0
     },
     {
+     "t": 81.0,
+     "goodput_mbps": 1.0512,
+     "loss": 0.0
+    },
+    {
+     "t": 82.0,
+     "goodput_mbps": 0.7848,
+     "loss": 0.0
+    },
+    {
+     "t": 83.0,
+     "goodput_mbps": 1.044,
+     "loss": 0.0
+    },
+    {
+     "t": 84.0,
+     "goodput_mbps": 1.0656,
+     "loss": 0.0
+    },
+    {
+     "t": 85.0,
+     "goodput_mbps": 1.0368,
+     "loss": 0.0
+    },
+    {
+     "t": 86.0,
+     "goodput_mbps": 1.0584,
+     "loss": 0.0
+    },
+    {
+     "t": 87.0,
+     "goodput_mbps": 0.7776,
+     "loss": 0.0
+    },
+    {
+     "t": 88.0,
+     "goodput_mbps": 1.0584,
+     "loss": 0.0
+    },
+    {
+     "t": 89.0,
+     "goodput_mbps": 1.0368,
+     "loss": 0.0
+    },
+    {
+     "t": 90.0,
+     "goodput_mbps": 1.0584,
+     "loss": 0.0
+    },
+    {
+     "t": 91.0,
+     "goodput_mbps": 1.044,
+     "loss": 0.0
+    },
+    {
+     "t": 92.0,
+     "goodput_mbps": 1.0584,
+     "loss": 0.0
+    },
+    {
+     "t": 93.0,
+     "goodput_mbps": 0.7848,
+     "loss": 0.0
+    },
+    {
      "t": 94.0,
-     "goodput_mbps": 0.2952,
+     "goodput_mbps": 1.0728,
      "loss": 0.0
     },
     {
      "t": 95.0,
-     "goodput_mbps": 0.0,
-     "loss": null
+     "goodput_mbps": 0.2952,
+     "loss": 0.0
     },
     {
      "t": 96.0,

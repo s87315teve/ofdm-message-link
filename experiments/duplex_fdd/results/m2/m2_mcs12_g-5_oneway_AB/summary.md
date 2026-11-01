@@ -1,4 +1,4 @@
-# Duplex run experiments/duplex_fdd/results/m2/m2_mcs12_g-5_oneway_AB
+# Duplex run m2/m2_mcs12_g-5_oneway_AB
 
 - duration 70.5 s, git 16af5b940b, LA {'1': 'fixed', '2': 'fixed'}, MCS {'1': 12, '2': 12}, gain profile {'1': None, '2': None}, workers 3
 - loadavg at start: 3.87 2.99 2.75 2/2618 637015
@@ -9,9 +9,9 @@ udp_load: sent 27000, delivered 27000, lost 0 (0.00%), corrupt 0, goodput 3.240 
 
 | segment (s) | TX gain | goodput Mb/s | dgram loss | subframe loss | MCS min/med/max/final | MCS changes | SNR dB | offset dB |
 |---|---|---|---|---|---|---|---|---|
-| 0-30 | -5.0 | 2.657 | 4.92% | 0.00% | 8/10.0/12/12 | 1 | 22.8 | - |
-| 30-60 | -5.0 | 3.245 | 0.00% | 0.00% | 12/12.0/12/12 | 0 | 22.8 | - |
-| 60-71 | -5.0 | 1.652 | 0.00% | 0.00% | 12/12.0/12/12 | 0 | 22.9 | - |
+| 0-30 | -5.0 | 2.829 | 0.00% | 0.00% | 8/10.0/12/12 | 1 | 22.8 | - |
+| 30-60 | -5.0 | 3.243 | 0.00% | 0.00% | 12/12.0/12/12 | 0 | 22.8 | - |
+| 60-71 | -5.0 | 1.166 | 8.94% | 0.00% | 12/12.0/12/12 | 0 | 22.9 | - |
 | all | - | 2.757 | 0.00% | 0.00% | 8/10.0/12/12 | 1 | 22.8 | - |
 
 ## BA: node2 -> node1

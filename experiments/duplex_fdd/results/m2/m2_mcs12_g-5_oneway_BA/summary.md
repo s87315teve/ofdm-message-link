@@ -1,4 +1,4 @@
-# Duplex run experiments/duplex_fdd/results/m2/m2_mcs12_g-5_oneway_BA
+# Duplex run m2/m2_mcs12_g-5_oneway_BA
 
 - duration 71.0 s, git 16af5b940b, LA {'1': 'fixed', '2': 'fixed'}, MCS {'1': 12, '2': 12}, gain profile {'1': None, '2': None}, workers 3
 - loadavg at start: 3.70 3.12 2.82 3/2634 645708
@@ -18,9 +18,9 @@ udp_load: sent 27000, delivered 26782, lost 218 (0.81%), corrupt 0, goodput 3.21
 
 | segment (s) | TX gain | goodput Mb/s | dgram loss | subframe loss | MCS min/med/max/final | MCS changes | SNR dB | offset dB |
 |---|---|---|---|---|---|---|---|---|
-| 0-30 | 0.0 | 2.747 | 0.00% | 1.11% | 8/10.0/12/12 | 1 | 21.3 | - |
-| 30-60 | 0.0 | 3.209 | 0.09% | 0.65% | 12/12.0/12/12 | 0 | 21.1 | - |
-| 60-71 | 0.0 | 1.287 | 18.62% | 0.10% | 12/12.0/12/12 | 0 | 21.2 | - |
+| 0-30 | 0.0 | 2.692 | 0.00% | 1.14% | 8/10.0/12/12 | 1 | 21.3 | - |
+| 30-60 | 0.0 | 3.205 | 0.22% | 0.65% | 12/12.0/12/12 | 0 | 21.1 | - |
+| 60-71 | 0.0 | 1.448 | 8.44% | 0.09% | 12/12.0/12/12 | 0 | 21.2 | - |
 | all | - | 2.716 | 0.81% | 0.81% | 8/10.0/12/12 | 1 | 21.2 | - |
 
 ## RX overflow (events; start-up = first 3 s)

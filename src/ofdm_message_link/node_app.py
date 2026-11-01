@@ -194,7 +194,8 @@ class NodeMonitor:
                         "own_bursts_heard", "la_errors", "reporter_errors", "log_errors",
                         "event_errors",
                     )
-                },
+                }
+                | {"algorithm": la.get("algorithm")},
                 "feedback": {
                     "sent": la.get("feedback_sent"),
                     "received": la.get("feedback_received"),

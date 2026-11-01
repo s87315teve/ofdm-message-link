@@ -1,4 +1,4 @@
-# Duplex run experiments/duplex_fdd/results/m2/smoke2
+# Duplex run m2/smoke2
 
 - duration 30.5 s, git 16af5b940b, LA {'1': 'fixed', '2': 'fixed'}, MCS {'1': 8, '2': 8}, gain profile {'1': None, '2': None}, workers 3
 - loadavg at start: 1.00 2.36 2.56 2/2614 622561
