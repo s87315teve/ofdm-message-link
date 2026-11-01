@@ -12,7 +12,11 @@
   reports and receiver health to the reporter.
 
 All calls are serialised under one lock, so algorithms and reporters need not
-be thread-safe.  The wire codec is ``ofdm_message_link.control``; it is
+be thread-safe.  An exception from the algorithm, the reporter, the LA log
+or ``on_event`` never escapes into the transmit or receive thread: it is
+counted (``la_errors``, ``reporter_errors``, ``log_errors``,
+``event_errors``; the last one in ``last_error``) and a safe default is used
+(the current MCS, no report).  The wire codec is ``ofdm_message_link.control``; it is
 reached through :class:`ControlCodec` so tests can replace it.
 """
 
@@ -224,23 +228,47 @@ class LinkController:
             "control_undecodable": 0,
             "control_other_dst": 0,
             "invalid_decisions": 0,
+            "la_errors": 0,
+            "reporter_errors": 0,
+            "log_errors": 0,
+            "event_errors": 0,
         }
+        self._last_error: str | None = None
 
     # -- helpers ------------------------------------------------------------
+
+    def _failed(self, counter: str, what: str, error: BaseException) -> None:
+        self._counts[counter] += 1
+        self._last_error = f"{what}: {type(error).__name__}: {error}"
+
+    def _guard(self, counter: str, what: str, fallback, method, *args, **kwargs):
+        """Call a plug-in method; on an exception count it and return ``fallback``."""
+
+        try:
+            return method(*args, **kwargs)
+        except Exception as error:
+            self._failed(counter, what, error)
+            return fallback
 
     def _emit(self, events: list[tuple[str, dict[str, Any]]], notify: bool = True) -> None:
         """Write events to the LA log; pass "la" and (if ``notify``) "feedback" on."""
 
         for kind, record in events:
             if self._la_log is not None:
-                line = json.dumps({"event": kind, **record}) + "\n"
-                with self._log_lock:  # TX and RX threads both log; keep lines whole
-                    self._la_log.write(line)
-                    self._la_log.flush()
+                try:
+                    line = json.dumps({"event": kind, **record}, default=str) + "\n"
+                    with self._log_lock:  # TX and RX threads both log; keep lines whole
+                        self._la_log.write(line)
+                        self._la_log.flush()
+                except Exception as error:  # a full disk must not stop the link
+                    self._failed("log_errors", "la_log", error)
             if self._on_event is not None and (
                 kind == "la" or (kind == "feedback" and notify)
             ):
-                self._on_event(kind, record)
+                try:
+                    self._on_event(kind, record)
+                except Exception as error:
+                    self._failed("event_errors", "on_event", error)
 
     def _check_stale(self, now: float) -> None:
         stale = (
@@ -286,8 +314,15 @@ class LinkController:
                 decision = Decision(self._fixed_entry.index, reason="fixed")
                 entry = self._fixed_entry
             else:
-                decision = self._la.decide(now)
-                entry = self._entry_for(decision, events)
+                decision = self._guard("la_errors", "decide", None, self._la.decide, now)
+                if isinstance(decision, Decision):
+                    entry = self._entry_for(decision, events)
+                else:  # the algorithm failed: keep the current MCS
+                    if decision is not None:
+                        self._failed("la_errors", "decide",
+                                     TypeError(f"returned {type(decision).__name__}"))
+                    entry = self._entry if self._entry is not None else self._control_entry
+                    decision = Decision(entry.index, reason="error")
             self._decision = decision
             self._change_to(entry, now, decision, events)
         self._emit(events)
@@ -296,7 +331,13 @@ class LinkController:
     def control_plan(self, now: float, *, idle: bool) -> ControlPlan:
         events: list[tuple[str, dict[str, Any]]] = []
         with self._lock:
-            if not self._reporter.due(now):
+            due = self._guard("reporter_errors", "due", False, self._reporter.due, now)
+            report = (
+                self._guard("reporter_errors", "build", None, self._reporter.build, now)
+                if due
+                else None
+            )
+            if report is None:
                 if idle:
                     return ControlPlan()
                 payload = self._codec.encode_link_header(
@@ -311,11 +352,14 @@ class LinkController:
                 not idle and data_entry.index > ROBUST_MAX_MCS and robust_overdue
             )
             control_only = idle or standalone
-            report = self._reporter.build(now)
             flags = FLAG_CONTROL_ONLY if control_only else FLAG_TX_QUEUE_NONEMPTY
-            payload = self._codec.encode_feedback(
-                report, src_node=self.node_id, dst_node=self.peer_id, flags=flags
-            )
+            try:
+                payload = self._codec.encode_feedback(
+                    report, src_node=self.node_id, dst_node=self.peer_id, flags=flags
+                )
+            except Exception as error:  # e.g. a custom reporter's TLVs do not fit
+                self._failed("reporter_errors", "encode_feedback", error)
+                return ControlPlan()
             carrier = self._control_entry if control_only else data_entry
             if carrier.index <= ROBUST_MAX_MCS:
                 self._last_robust_t = now
@@ -333,8 +377,9 @@ class LinkController:
 
     def idle_wait_s(self, now: float) -> float | None:
         with self._lock:
-            due_at = self._reporter.next_due_s(now)
-        return None if due_at is None else max(0.0, due_at - now)
+            due_at = self._guard("reporter_errors", "next_due_s", None,
+                                 self._reporter.next_due_s, now)
+        return None if due_at is None else max(0.0, float(due_at) - now)
 
     def on_sent(self, burst: Any, now: float) -> None:
         sequences = tuple(getattr(burst, "sequences", ()) or ())
@@ -357,7 +402,7 @@ class LinkController:
             )
             if record.control_only:
                 self._counts["control_bursts"] += 1
-            self._la.on_sent(record)
+            self._guard("la_errors", "on_sent", None, self._la.on_sent, record)
 
     # -- ControlHandler ---------------------------------------------------------
 
@@ -396,7 +441,7 @@ class LinkController:
                         self._peer_counts and now - self._peer_counts[0][0] > PEER_LOSS_WINDOW_S
                     ):
                         self._peer_counts.popleft()
-                self._la.on_feedback(report)
+                self._guard("la_errors", "on_feedback", None, self._la.on_feedback, report)
                 notify = (
                     self._last_feedback_event_t is None
                     or now - self._last_feedback_event_t >= FEEDBACK_EVENT_MIN_S
@@ -408,8 +453,12 @@ class LinkController:
         self._emit(events, notify=notify)
         return ControlVerdict.ACCEPT
 
+    def _la_snapshot(self) -> Mapping[str, Any]:
+        snapshot = self._guard("la_errors", "snapshot", {}, self._la.snapshot)
+        return snapshot if isinstance(snapshot, Mapping) else {}
+
     def _feedback_record(self, report: FeedbackReport, now: float) -> dict[str, Any]:
-        snapshot = self._la.snapshot()
+        snapshot = self._la_snapshot()
         return {
             "t": now, "seq": report.report_seq, "snr_mean_db": report.snr_mean_db,
             "ok": report.data_ok_total, "lost": report.data_lost_total,
@@ -428,12 +477,15 @@ class LinkController:
         health: RxHealth,
     ) -> None:
         with self._lock:
+            reporter = self._reporter
             if snrs:
                 # A chunk with preambles but no DATA burst held control-only bursts.
-                self._reporter.on_preambles(now, snrs, control_only=not bursts)
+                self._guard("reporter_errors", "on_preambles", None, reporter.on_preambles,
+                            now, snrs, control_only=not bursts)
             for burst in bursts:
-                self._reporter.on_burst(burst)
-            self._reporter.on_rx_health(now, health)
+                self._guard("reporter_errors", "on_burst", None, reporter.on_burst, burst)
+            self._guard("reporter_errors", "on_rx_health", None, reporter.on_rx_health,
+                        now, health)
 
     # -- operator controls ----------------------------------------------------------
 
@@ -481,7 +533,7 @@ class LinkController:
         with self._lock:
             now = self._clock()
             self._check_stale(now)
-            la_state = dict(self._la.snapshot())
+            la_state = dict(self._la_snapshot())
             ok = sum(row[1] for row in self._peer_counts if now - row[0] <= PEER_LOSS_WINDOW_S)
             lost = sum(row[2] for row in self._peer_counts if now - row[0] <= PEER_LOSS_WINDOW_S)
             decision = self._decision
@@ -498,6 +550,7 @@ class LinkController:
                 "stale": self._stale,
                 "peer_loss_10s": lost / (ok + lost) if ok + lost else None,
                 "algorithm": la_state,
+                "last_error": self._last_error,
                 **self._counts,
             }
 

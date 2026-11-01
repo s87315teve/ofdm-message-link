@@ -412,3 +412,60 @@ def test_peer_loss_follows_a_restarted_peer():
     snap = ctl.snapshot()
     assert snap["peer_rebaselines"] == 1 and snap["feedback_ignored"] == 0
     assert snap["peer_loss_10s"] == pytest.approx(0.25)
+
+
+# -- plug-in failures stay inside the controller (review finding 4) -------------
+
+
+class _BrokenLa(FakeLa):
+    def on_feedback(self, report):
+        raise ZeroDivisionError("on_feedback bug")
+
+    def decide(self, now_s):
+        raise RuntimeError("decide bug")
+
+    def on_sent(self, burst):
+        raise RuntimeError("on_sent bug")
+
+    def snapshot(self):
+        raise RuntimeError("snapshot bug")
+
+
+class _BrokenReporter(FakeReporter):
+    def on_preambles(self, now_s, snr_db, *, control_only):
+        raise RuntimeError("reporter bug")
+
+    def build(self, now_s):
+        raise RuntimeError("build bug")
+
+
+class _BrokenLog:
+    def write(self, line):
+        raise OSError("disk full")
+
+    def flush(self):
+        pass
+
+
+def test_algorithm_reporter_log_and_event_failures_never_escape():
+    def bad_event(kind, record):
+        raise RuntimeError("gui gone")
+
+    reporter = _BrokenReporter()
+    ctl, clock, _, _, codec, _, _ = _controller(
+        la=_BrokenLa(), reporter=reporter, la_log=_BrokenLog(), on_event=bad_event
+    )
+    clock.t = 1.0
+    assert ctl.on_control(_peer_feedback(codec, 1), CONTEXT) is ControlVerdict.ACCEPT
+    assert ctl.entry_for_next_burst(1.0) == mcs_entry(8)  # no MCS yet: the control entry
+    ctl.on_sent(_Burst(sequences=(0,), datagrams=(b"x",), sample_count=100, mcs_index=8), 1.0)
+    reporter.is_due = True
+    plan = ctl.control_plan(1.0, idle=False)
+    assert len(plan.payloads) == 1 and not plan.standalone  # a LINK_HEADER instead
+    assert ctl.control_plan(1.0, idle=True).payloads == ()
+    ctl.on_receive(1.0, snrs=(15.0,), bursts=(), health=HEALTH)
+    snap = ctl.snapshot()
+    assert snap["la_errors"] >= 4 and snap["reporter_errors"] == 3
+    assert snap["log_errors"] >= 1 and snap["event_errors"] >= 1
+    assert snap["last_error"]
+    assert snap["algorithm"] == {}

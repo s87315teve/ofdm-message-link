@@ -445,3 +445,19 @@ def test_burst_report_loss_is_bounded_and_seed_ranges_are_validated(profile):
         node_seed_range(3)
     with pytest.raises(ValueError):
         MessageReceiver(profile, own_seed_range=(0, 63))
+
+
+def test_a_raising_control_handler_costs_no_data(profile):
+    class Broken(_Handler):
+        def on_control(self, payload, context):
+            raise ZeroDivisionError("handler bug")
+
+    peer = MessageTransmitter(profile, seed_range=(64, 127))
+    bursts = [
+        peer.encode_datagrams(peer.fragment_message(b"hello from peer"),
+                              control_payloads=[link_header(2, 1)])
+    ]
+    receiver = MessageReceiver(profile, control_handler=Broken())
+    delivered = _feed(receiver, _awgn(_stream(bursts), SNR_DB, seed=12))
+    assert [m.message.payload for m in delivered] == [b"hello from peer"]
+    assert receiver.stats.control_handler_errors == 1

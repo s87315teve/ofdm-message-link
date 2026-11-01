@@ -577,6 +577,9 @@ class ReceiveStats:
     # after an implausible jump (see DUPLEX_MAX_SEQUENCE_GAP).
     own_seed_drops: int = 0
     sequence_resyncs: int = 0
+    # Exceptions raised by the control handler; the frame is then accepted
+    # and the rest of the burst delivered as if there were no handler.
+    control_handler_errors: int = 0
 
     @property
     def expected_bursts(self) -> int:
@@ -744,7 +747,11 @@ class ControlVerdict(enum.Enum):
 
 
 class ControlHandler(Protocol):
-    """Receives the payload of every CRC-valid CONTROL frame, on the RX thread."""
+    """Receives the payload of every CRC-valid CONTROL frame, on the RX thread.
+
+    An exception is counted in ``ReceiveStats.control_handler_errors`` and
+    treated as ACCEPT, so the rest of the burst is still delivered.
+    """
 
     def on_control(self, payload: bytes, context: ControlContext) -> ControlVerdict: ...
 
@@ -1081,15 +1088,22 @@ class MessageReceiver:
         self._stats = replace(self._stats, control_frames=self._stats.control_frames + 1)
         if self._control_handler is None:
             return ControlVerdict.ACCEPT
-        verdict = self._control_handler.on_control(
-            frame.payload,
-            ControlContext(
-                t_s=self._clock(),
-                mcs_index=context.mcs_index,
-                link_snr_db=self._snr_at(context.burst_start),
-                control_sequence=frame.sequence,
-            ),
-        )
+        try:
+            verdict = self._control_handler.on_control(
+                frame.payload,
+                ControlContext(
+                    t_s=self._clock(),
+                    mcs_index=context.mcs_index,
+                    link_snr_db=self._snr_at(context.burst_start),
+                    control_sequence=frame.sequence,
+                ),
+            )
+        except Exception:
+            # A handler bug must not cost the DATA subframes behind it.
+            self._stats = replace(
+                self._stats, control_handler_errors=self._stats.control_handler_errors + 1
+            )
+            return ControlVerdict.ACCEPT
         return verdict if isinstance(verdict, ControlVerdict) else ControlVerdict.ACCEPT
 
     def _report_burst(
