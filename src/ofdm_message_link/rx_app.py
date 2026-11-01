@@ -27,6 +27,7 @@ import threading
 import time
 from collections import Counter, deque
 from dataclasses import asdict
+from typing import Protocol
 
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -36,12 +37,34 @@ from ofdm_link.phy.mcs_table import McsTableEntry, McsTableError, describe_mcs_e
 from . import dashboard_widgets as widgets
 from . import log_limits, options, qt_runtime
 from .dashboard import RxDashboard, RxView, rx_light
+from .la.api import BurstReport, RxHealth
 from .link import MessageReceiver, RateMeter, ReceivedMessage
 from .plots import ConstellationPlot, PlotBuffers, SpectrumPlot, TrendPlot
 from .radio_panel import RadioPanel
 from .transport import DEFAULT_RX_RECV_FRAMES, set_transport_gain
 
 _LATENCY_HISTORY = 64
+# |I| or |Q| at or above this fraction of full scale counts as clipping: 1900
+# of the Pluto's 2048 LSB, i.e. within 0.6 dB of the ADC rails.
+CLIPPING_LEVEL = 1900.0 / 2048.0
+
+
+class ReceiveObserver(Protocol):
+    """Sees what each received chunk produced; called on the rx-worker thread.
+
+    ``snrs`` is the preamble SNR of every burst acquired in the chunk, decoded
+    or not; ``bursts`` the reports of the DATA bursts accepted.  Keep it cheap:
+    it runs between two chunks of a live radio.
+    """
+
+    def on_receive(
+        self,
+        now: float,
+        *,
+        snrs: tuple[float, ...],
+        bursts: tuple[BurstReport, ...],
+        health: RxHealth,
+    ) -> None: ...
 
 
 class _Bridge(QtCore.QObject):
@@ -64,8 +87,12 @@ class ReceiveWorker:
         plot_buffers: PlotBuffers | None = None,
         *,
         egress: EgressForwarder | None = None,
+        observer: ReceiveObserver | None = None,
     ) -> None:
         self._receiver = receiver
+        self._observer = observer
+        self._clipping_seen = False
+        self._backpressure_waits = 0
         # Forwarded from this thread, not the window's, so a busy event loop
         # never delays an application datagram.
         self._egress = egress
@@ -161,6 +188,54 @@ class ReceiveWorker:
                 if self._egress is not None:
                     self._egress.forward(message.message.payload)
                 self._bridge.message.emit(message)
+            if self._observer is not None:
+                try:
+                    self._notify_observer(source, chunk, snrs)
+                except Exception as error:  # surfaced in the window, never silent
+                    self._bridge.failed.emit(f"observer {type(error).__name__}: {error}")
+
+    def _notify_observer(self, source, chunk, snrs: tuple[float, ...]) -> None:
+        assert self._observer is not None
+        values = np.asarray(chunk)
+        # Per chunk, like decode_backlog; the reporter ORs it over a window.
+        self._clipping_seen = bool(values.size) and (
+            max(float(np.max(np.abs(values.real))), float(np.max(np.abs(values.imag))))
+            >= CLIPPING_LEVEL
+        )
+        self._observer.on_receive(
+            time.monotonic(),
+            snrs=tuple(snrs),
+            bursts=self._receiver.drain_burst_reports(),
+            health=self._health(source),
+        )
+
+    def _health(self, source) -> RxHealth:
+        """Receiver health for the observer.
+
+        The totals are cumulative; ``clipping_seen`` and ``decode_backlog``
+        describe this chunk only.
+        """
+
+        snapshot = self._receiver.decoder_snapshot()
+        transport = source.snapshot() if hasattr(source, "snapshot") else {}
+        overflow = int(transport.get("rx_overflow_events", 0) or 0) + int(
+            transport.get("chunks_dropped_overflow", 0) or 0
+        )
+        backlog = False
+        pool = getattr(self._receiver, "decode_pool_snapshot", lambda: None)()
+        if pool is not None:
+            backlog = (
+                pool.backpressure_waits > self._backpressure_waits
+                or pool.in_flight >= pool.max_in_flight
+            )
+            self._backpressure_waits = pool.backpressure_waits
+        return RxHealth(
+            overflow_total=overflow,
+            header_fail_total=snapshot.header_decode_failure,
+            fcs_fail_total=snapshot.psdu_fcs_failures,
+            clipping_seen=self._clipping_seen,
+            decode_backlog=backlog,
+        )
 
     def stop(self) -> None:
         self._stop.set()

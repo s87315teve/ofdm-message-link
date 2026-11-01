@@ -26,6 +26,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -43,7 +44,13 @@ from . import options, qt_runtime
 from .aggregation import AggregationLimits
 from .dashboard import TxDashboard, TxView, tx_light
 from .datagram import Datagram
-from .link import FRAME_OVERHEAD_BYTES, MessageTransmitter, OutgoingBurst, RateMeter
+from .link import (
+    FRAME_OVERHEAD_BYTES,
+    MessageTransmitter,
+    OutgoingBurst,
+    RateMeter,
+    control_mpdu_length,
+)
 from .plots import PlotBuffers, SpectrumPlot, TrendPlot
 from .radio_panel import RadioPanel
 from .transport import set_transport_gain
@@ -97,6 +104,54 @@ class SentRecord:
     first_sequence: int
     mcs_index: int
     mcs_label: str
+    # Only with a BurstPolicy: CONTROL frames in the burst, and whether it
+    # carried nothing else (then source is "control" and the counts are 0).
+    control_subframes: int = 0
+    control_only: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ControlPlan:
+    """CONTROL payloads for the next burst.
+
+    ``standalone`` sends them in a control-only burst (at the policy's
+    control entry) before the next data burst instead of in front of it.
+    """
+
+    payloads: tuple[bytes, ...] = ()
+    standalone: bool = False
+
+
+class BurstPolicy(Protocol):
+    """Per-burst decisions a link layer makes for the transmit worker.
+
+    Called on the transmit thread only.  ``now`` is the worker's clock.
+    """
+
+    def entry_for_next_burst(self, now: float) -> McsTableEntry:
+        """The format of the next data burst (the link-adaptation decision)."""
+        ...
+
+    def control_plan(self, now: float, *, idle: bool) -> ControlPlan:
+        """CONTROL payloads for the next burst; ``idle``: no data is queued."""
+        ...
+
+    def control_entry(self) -> McsTableEntry:
+        """The format of control-only bursts."""
+        ...
+
+    def idle_wait_s(self, now: float) -> float | None:
+        """Seconds until an idle control burst is due; None if none is pending.
+
+        The idle worker sleeps at most this long (and at most 0.1 s); when it
+        wakes with no data and this is <= 0, it asks ``control_plan(idle=True)``
+        and sends any payloads as a control-only burst.
+        """
+        ...
+
+    def on_sent(self, burst: OutgoingBurst, now: float) -> None:
+        """Called after the transport accepted ``burst``."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +203,11 @@ class TransmitWorker:
     guard cost is shared.  ``max_wait_s > 0`` trades latency for fuller
     bursts by holding a burst that still has room for up to that long after
     its oldest message was submitted.
+
+    A ``policy`` (:class:`BurstPolicy`, used by ``node_app``) picks the
+    format of each data burst, puts its CONTROL payloads first in the burst,
+    and wakes the idle worker for control-only bursts.  Without one the
+    worker behaves exactly as it always has.
     """
 
     def __init__(
@@ -158,8 +218,10 @@ class TransmitWorker:
         *,
         aggregation: AggregationLimits | None = None,
         clock: Callable[[], float] = time.monotonic,
+        policy: BurstPolicy | None = None,
     ) -> None:
         self._transmitter = transmitter
+        self._policy = policy
         self._bridge = bridge
         self._plot_buffers = plot_buffers if plot_buffers is not None else PlotBuffers()
         self._limits = AggregationLimits() if aggregation is None else aggregation
@@ -242,18 +304,24 @@ class TransmitWorker:
                 if unsent is None:
                     if not pending:
                         try:
-                            first = self._queue.get(timeout=0.1)
+                            first = self._queue.get(timeout=self._idle_timeout())
                         except queue.Empty:
-                            continue
-                        self._admit(pending, first)
-                    self._fill(pending)
-                    unsent = self._encode_next(pending)
+                            unsent = self._encode_idle_control()
+                            if unsent is None:
+                                continue
+                        else:
+                            self._admit(pending, first)
+                    if unsent is None:
+                        self._fill(pending)
+                        unsent = self._encode_next(pending)
                 if not self._send_when_there_is_room(sink, unsent.burst.samples):
                     # The radio was stopped underneath us.  The burst keeps
                     # its sequence numbers and goes out first on the next one.
                     continue
                 self._plot_buffers.set_samples(unsent.burst.samples)
                 self._report(unsent)
+                if self._policy is not None:
+                    self._policy.on_sent(unsent.burst, self._clock())
             except Exception as error:  # surfaced in the window, never silent
                 self._bridge.failed.emit(f"{type(error).__name__}: {error}")
             unsent = None
@@ -302,19 +370,83 @@ class TransmitWorker:
             self._admit(pending, item)
 
     def _encode_next(self, pending: deque[_Pending]) -> _Encoded:
-        """Plan and encode the next burst from the head of ``pending``."""
+        """Plan and encode the next burst from the head of ``pending``.
 
-        entry = self._transmitter.active_mcs_entry
+        With a policy, one entry serves both the plan and the encode, and the
+        plan's CONTROL payloads count against the caps; a standalone plan
+        returns a control-only burst and leaves ``pending`` for the next one.
+        """
+
+        payloads: tuple[bytes, ...] = ()
+        if self._policy is None:
+            entry = self._transmitter.active_mcs_entry
+        else:
+            now = self._clock()
+            entry = self._policy.entry_for_next_burst(now)
+            plan = self._policy.control_plan(now, idle=False)
+            if plan.standalone and plan.payloads:
+                return self._encode_control(plan.payloads)
+            payloads = tuple(plan.payloads)
         datagrams = [piece.datagram for piece in pending]
-        take = self._transmitter.plan_burst(datagrams, self._limits, entry)
+        take = self._transmitter.plan_burst(
+            datagrams,
+            self._limits,
+            entry,
+            extra_mpdu_lengths=[control_mpdu_length(payload) for payload in payloads],
+        )
         pieces = tuple(pending.popleft() for _ in range(take))
         burst = self._transmitter.encode_datagrams(
-            [piece.datagram for piece in pieces], entry=entry
+            [piece.datagram for piece in pieces], entry=entry, control_payloads=payloads
         )
         return _Encoded(burst, pieces)
 
+    def _idle_timeout(self) -> float:
+        """How long the idle worker may wait for a message (0.1 s without a policy)."""
+
+        if self._policy is None:
+            return 0.1
+        wait = self._policy.idle_wait_s(self._clock())
+        # At least 1 ms, so a policy that stays due without a plan cannot spin.
+        return 0.1 if wait is None else min(0.1, max(0.001, float(wait)))
+
+    def _encode_idle_control(self) -> _Encoded | None:
+        """A control-only burst if the policy has one due while idle, else None."""
+
+        if self._policy is None:
+            return None
+        now = self._clock()
+        wait = self._policy.idle_wait_s(now)
+        if wait is None or wait > 0.0:
+            return None
+        plan = self._policy.control_plan(now, idle=True)
+        return self._encode_control(plan.payloads) if plan.payloads else None
+
+    def _encode_control(self, payloads: tuple[bytes, ...]) -> _Encoded:
+        assert self._policy is not None
+        burst = self._transmitter.encode_datagrams(
+            (), entry=self._policy.control_entry(), control_payloads=tuple(payloads)
+        )
+        return _Encoded(burst, ())
+
     def _report(self, sent: _Encoded) -> None:
         burst = sent.burst
+        if not sent.pieces:
+            self._bridge.sent.emit(
+                SentRecord(
+                    source="control",
+                    text="",
+                    byte_count=0,
+                    message_count=0,
+                    subframe_count=0,
+                    sample_count=burst.sample_count,
+                    first_sequence=burst.sequence,
+                    mcs_index=burst.mcs_index,
+                    mcs_label=describe_mcs_entry(mcs_entry(burst.mcs_index)),
+                    control_subframes=len(burst.control_sequences),
+                    control_only=True,
+                )
+            )
+            return
         first = sent.pieces[0].message
         self._bridge.sent.emit(
             SentRecord(
@@ -327,6 +459,7 @@ class TransmitWorker:
                 first_sequence=burst.sequence,
                 mcs_index=burst.mcs_index,
                 mcs_label=describe_mcs_entry(mcs_entry(burst.mcs_index)),
+                control_subframes=len(burst.control_sequences),
             )
         )
 
@@ -357,10 +490,17 @@ class TransmitWorker:
 
 
 class IngressListener:
-    """Accept application bytes over UDP and feed them to the transmitter."""
+    """Accept application bytes over UDP and feed them to the transmitter.
 
-    def __init__(self, host: str, port: int, submit) -> None:
+    ``reuse_address`` keeps ``SO_REUSEADDR``, as tx_app always had.  On Linux
+    that lets a second process bind the same UDP port and silently take its
+    traffic; ``reuse_address=False`` makes such a clash fail with
+    EADDRINUSE instead.
+    """
+
+    def __init__(self, host: str, port: int, submit, *, reuse_address: bool = True) -> None:
         self._address = (host, int(port))
+        self._reuse_address = bool(reuse_address)
         self._submit = submit
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -373,8 +513,14 @@ class IngressListener:
 
     def start(self) -> None:
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._socket.bind(self._address)
+        if self._reuse_address:
+            self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self._socket.bind(self._address)
+        except OSError:
+            self._socket.close()
+            self._socket = None
+            raise
         self._socket.settimeout(0.2)
         self._thread = threading.Thread(target=self._run, name="tx-ingress", daemon=True)
         self._thread.start()
