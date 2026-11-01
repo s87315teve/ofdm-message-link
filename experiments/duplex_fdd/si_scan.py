@@ -86,21 +86,33 @@ class Phase:
     duty: float = 0.0
 
 
-PHASES: tuple[Phase, ...] = (
-    Phase("a"),
-    Phase("c-mid", peer="mid"),
-    Phase("c-edge", peer="edge"),
-    Phase("b0", own="idle", own_gain_db=PLANNED_TX_GAIN_DB),
-    *(
-        Phase(f"b{index}", own="bursts", own_gain_db=gain, duty=0.9)
-        for index, gain in enumerate(OWN_GAINS_DB, start=1)
-    ),
-    Phase("b5", own="bursts", own_gain_db=PLANNED_TX_GAIN_DB, duty=0.3),
-    Phase("d-mid-m5", peer="mid", own="bursts", own_gain_db=-5.0, duty=0.9),
-    Phase("d-mid-0", peer="mid", own="bursts", own_gain_db=0.0, duty=0.9),
-    Phase("d-edge-m5", peer="edge", own="bursts", own_gain_db=-5.0, duty=0.9),
-    Phase("d-edge-0", peer="edge", own="bursts", own_gain_db=0.0, duty=0.9),
-)
+def build_phases(duty: float = 0.9) -> tuple[Phase, ...]:
+    """The phases of one combination; ``duty`` is the own-TX duty of b1-b4 and d-*.
+
+    The design asks for 0.9.  M0 measured that USB 2.0 does not carry a
+    5 MS/s RX stream plus TX pushes at 0.9 on every Pluto (TX reached 0.78,
+    one Pluto overflowed 180-220 times a minute), so a run can lower it to a
+    duty the bus sustains; the record of every phase keeps the duty used.
+    """
+
+    return (
+        Phase("a"),
+        Phase("c-mid", peer="mid"),
+        Phase("c-edge", peer="edge"),
+        Phase("b0", own="idle", own_gain_db=PLANNED_TX_GAIN_DB),
+        *(
+            Phase(f"b{index}", own="bursts", own_gain_db=gain, duty=duty)
+            for index, gain in enumerate(OWN_GAINS_DB, start=1)
+        ),
+        Phase("b5", own="bursts", own_gain_db=PLANNED_TX_GAIN_DB, duty=0.3),
+        Phase("d-mid-m5", peer="mid", own="bursts", own_gain_db=-5.0, duty=duty),
+        Phase("d-mid-0", peer="mid", own="bursts", own_gain_db=0.0, duty=duty),
+        Phase("d-edge-m5", peer="edge", own="bursts", own_gain_db=-5.0, duty=duty),
+        Phase("d-edge-0", peer="edge", own="bursts", own_gain_db=0.0, duty=duty),
+    )
+
+
+PHASES = build_phases()
 LBT_PHASES: tuple[Phase, ...] = (
     Phase("a"),
     Phase("lbt-own", own="bursts", own_gain_db=LBT_OWN_GAIN_DB, duty=LBT_DUTY),
@@ -139,10 +151,13 @@ def noise_floor(samples: np.ndarray, *, mask_bursts: bool) -> dict[str, object]:
         return {"blocks": 0}
     power = np.abs(np.fft.fft(blocks, axis=1, norm="ortho")) ** 2
     in_band = power[:, active].mean(axis=1)
-    keep = np.ones(blocks.shape[0], dtype=bool)
-    if mask_bursts:
-        keep = in_band <= np.median(in_band) * 10**0.3
+    # Blocks more than 3 dB above the median: peer bursts, and Wi-Fi bursts that
+    # come and go between two 2-s captures.  An own burst at duty >= 0.5 is on
+    # the air in the median block, so its noise stays in the quiet floor.
+    quiet = in_band <= np.median(in_band) * 10**0.3
+    keep = quiet if mask_bursts else np.ones(blocks.shape[0], dtype=bool)
     spectrum = power[keep].mean(axis=0)
+    quiet_spectrum = power[quiet].mean(axis=0)
     spectrum_db = [round(_db(float(value)), 2) for value in spectrum]
     data_db = np.asarray(spectrum_db)[active]
     guard_db = np.asarray(spectrum_db)[guard]
@@ -162,6 +177,9 @@ def noise_floor(samples: np.ndarray, *, mask_bursts: bool) -> dict[str, object]:
         "p_data_dbfs": round(_db(float(spectrum[active].mean())), 2),
         "p_guard_dbfs": round(_db(float(spectrum[guard].mean())), 2),
         "p_dc_dbfs": round(_db(float(spectrum[0])), 2),
+        "p_data_quiet_dbfs": round(_db(float(quiet_spectrum[active].mean())), 2),
+        "p_guard_quiet_dbfs": round(_db(float(quiet_spectrum[guard].mean())), 2),
+        "blocks_quiet": int(quiet.sum()),
         "spur_data_db": round(spur_data, 2),
         "spur_guard_db": round(spur_guard, 2),
         "spur_bin": int(np.argmax(np.where(np.arange(64) == 0, -1e9, spectrum_db))),
@@ -788,7 +806,7 @@ def _run_block_once(
                 "rx_gain_db": gain,
                 "rx_bw_hz": bandwidth,
             }
-            phases = LBT_PHASES if lbt else PHASES
+            phases = LBT_PHASES if lbt else build_phases(args.own_duty)
             for phase in phases:
                 record = run_phase(block, phase, waves, peer_gains, combo, args, out)
                 if phase.name in ("a", "b3", "lbt-own"):
@@ -826,39 +844,62 @@ def combo_metrics(phases: dict[str, dict]) -> dict[str, object]:
             value = value.get(key)
         return value
 
-    p_a, p_b3 = get("a", "noise", "p_data_dbfs"), get("b3", "noise", "p_data_dbfs")
+    raw_a, raw_b3 = get("a", "noise", "p_data_dbfs"), get("b3", "noise", "p_data_dbfs")
+    quiet_a = get("a", "noise", "p_data_quiet_dbfs")
+    quiet_b3 = get("b3", "noise", "p_data_quiet_dbfs")
+    # Both floors burst-masked, with the peer on: own TX at -5 dB vs closed.
+    masked_c, masked_d = (
+        get("c-mid", "noise", "p_data_dbfs"),
+        get("d-mid-m5", "noise", "p_data_dbfs"),
+    )
+    dn_masked = None if masked_c is None or masked_d is None else round(masked_d - masked_c, 2)
+    if quiet_a is not None and quiet_b3 is not None:
+        p_a, p_b3, dn_source = quiet_a, quiet_b3, "quiet b3 - quiet a"
+    else:
+        p_a, p_b3, dn_source = raw_a, raw_b3, "raw b3 - raw a"
     snr_c, snr_d = (
         get("c-mid", "peer_rx", "snr_median_db"),
         get("d-mid-m5", "peer_rx", "snr_median_db"),
     )
     loss_c, loss_d = get("c-edge", "peer_rx", "loss"), get("d-edge-m5", "peer_rx", "loss")
     ovf_a, ovf_b3 = get("a", "overflows_per_min"), get("b3", "overflows_per_min")
+    floor_key = "p_data_quiet_dbfs" if quiet_a is not None else "p_data_dbfs"
+
+    def rise(name):
+        value = get(name, "noise", floor_key)
+        return None if p_a is None or value is None else round(value - p_a, 2)
+
     slope = None
     gains, levels = [], []
     for index, gain in enumerate(OWN_GAINS_DB, start=1):
-        level = get(f"b{index}", "noise", "p_data_dbfs")
+        level = get(f"b{index}", "noise", floor_key)
         if level is not None:
             gains.append(gain)
             levels.append(level)
     if len(gains) >= 2:
         slope = round(float(np.polyfit(gains, levels, 1)[0]), 3)
+    dn = None if p_a is None or p_b3 is None else round(p_b3 - p_a, 2)
+    if quiet_a is None and dn_masked is not None:
+        # Records without the quiet floor: the raw a/b floors swing +-1 dB with
+        # Wi-Fi, so the verdict uses the masked d-mid - c-mid floors instead.
+        dn, dn_source = dn_masked, "masked d-mid-m5 - c-mid"
     return {
-        "dn_db": None if p_a is None or p_b3 is None else round(p_b3 - p_a, 2),
-        "dn_idle_db": None
-        if p_a is None or get("b0", "noise", "p_data_dbfs") is None
-        else round(get("b0", "noise", "p_data_dbfs") - p_a, 2),
-        "dn_0db_db": None
-        if p_a is None or get("b4", "noise", "p_data_dbfs") is None
-        else round(get("b4", "noise", "p_data_dbfs") - p_a, 2),
-        "dn_duty03_db": None
-        if p_a is None or get("b5", "noise", "p_data_dbfs") is None
-        else round(get("b5", "noise", "p_data_dbfs") - p_a, 2),
+        "dn_db": dn,
+        "dn_source": dn_source,
+        "dn_raw_db": None if raw_a is None or raw_b3 is None else round(raw_b3 - raw_a, 2),
+        "dn_masked_db": dn_masked,
+        "dn_idle_db": rise("b0"),
+        "dn_0db_db": rise("b4"),
+        "dn_duty03_db": rise("b5"),
         "noise_slope_db_per_db": slope,
+        "duty_b3": get("b3", "duty_achieved"),
+        "dn_per_burst_db": _per_burst(dn, get("b3", "duty_achieved")),
         "dsnr_db": None if snr_c is None or snr_d is None else round(snr_c - snr_d, 2),
         "dsnr_0db_db": None
         if snr_c is None or get("d-mid-0", "peer_rx", "snr_median_db") is None
         else round(snr_c - get("d-mid-0", "peer_rx", "snr_median_db"), 2),
         "dloss_pp": None if loss_c is None or loss_d is None else round((loss_d - loss_c) * 100, 2),
+        "loss_counts_c_d": [_lost(phases.get("c-edge")), _lost(phases.get("d-edge-m5"))],
         "clip": get("b3", "saturation", "clip_fraction"),
         "dovf_per_min": None if ovf_a is None or ovf_b3 is None else round(ovf_b3 - ovf_a, 3),
         "baseline_snr_db": snr_c,
@@ -869,6 +910,25 @@ def combo_metrics(phases: dict[str, dict]) -> dict[str, object]:
         "spur_data_b3_db": get("b3", "noise", "spur_data_db"),
         "rssi_b3_db": get("b3", "rssi_db"),
     }
+
+
+def _lost(record: dict | None) -> list[int] | None:
+    """[lost, sent] peer bursts of one phase, so a reader can judge a 0.5 pp difference."""
+
+    peer = None if record is None else record.get("peer_rx")
+    if not peer or "peer_sent" not in peer:
+        return None
+    return [peer["peer_sent"] - peer["peer_received"], peer["peer_sent"]]
+
+
+def _per_burst(dn_db: float | None, duty: float | None) -> float | None:
+    """The noise rise during an own burst, if the mean rise ``dn_db`` comes from bursts
+    on the air a fraction ``duty`` of the time."""
+
+    if dn_db is None or not duty:
+        return None
+    excess = (10 ** (dn_db / 10) - 1) / duty
+    return round(10 * math.log10(1 + excess), 2) if excess > -1 else None
 
 
 def verdict(metrics: dict, *, ignore_overflow: bool = False) -> str:
@@ -1089,7 +1149,8 @@ def summary_markdown(result: dict, meta: dict) -> str:
     lines.append(f"Decision (design §1.3, step {decision['step']}): `{json.dumps(decision)}`")
     lines.append("")
     lines.append(
-        "Criteria at own TX -5 dB, duty 0.9, both DUTs: PASS ΔN ≤ 1.0 dB, ΔSNR ≤ 1.0 dB, "
+        "Criteria at own TX -5 dB, the run's own duty (see duty b3), both DUTs: "
+        "PASS ΔN ≤ 1.0 dB, ΔSNR ≤ 1.0 dB, "
         "ΔLoss ≤ 0.5 pp, clip < 1e-6, ΔOvf ≤ 0.5/min; MARGINAL ΔSNR ≤ 3.0 dB, ΔLoss ≤ 2 pp, "
         "clip < 1e-4."
     )
@@ -1104,14 +1165,15 @@ def summary_markdown(result: dict, meta: dict) -> str:
         )
     lines += ["", "## Per combination", ""]
     lines.append(
-        "| combo | ΔN | ΔN idle | ΔN 0 dB | ΔN D0.3 | slope | ΔSNR | ΔSNR 0 dB | ΔLoss pp | clip "
-        "| ΔOvf/min | base SNR | occ. a | spur guard | verdict |"
+        "| combo | duty b3 | ΔN | ΔN/burst | ΔN idle | ΔN 0 dB | ΔN D0.3 | slope | ΔSNR "
+        "| ΔSNR 0 dB | ΔLoss pp | clip | ΔOvf/min | base SNR | occ. a | spur guard | verdict |"
     )
-    lines.append("|---|" + "---:|" * 13 + "---|")
+    lines.append("|---|" + "---:|" * 15 + "---|")
     for combo_id, entry in sorted(result["per_combo"].items()):
         m = entry["metrics"]
         lines.append(
-            f"| {combo_id} | {m['dn_db']} | {m['dn_idle_db']} | {m['dn_0db_db']} | "
+            f"| {combo_id} | {m['duty_b3']} | {m['dn_db']} | {m['dn_per_burst_db']} | "
+            f"{m['dn_idle_db']} | {m['dn_0db_db']} | "
             f"{m['dn_duty03_db']} | {m['noise_slope_db_per_db']} | {m['dsnr_db']} | "
             f"{m['dsnr_0db_db']} | {m['dloss_pp']} | {m['clip']} | {m['dovf_per_min']} | "
             f"{m['baseline_snr_db']} | {m['occupancy_a']} | {m['spur_guard_b3_db']} | "
@@ -1187,6 +1249,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="extra RX bandwidths at S=40, first gain (MHz; '' for none)",
     )
     run_parser.add_argument("--seconds", type=float, default=2.0)
+    run_parser.add_argument(
+        "--own-duty",
+        type=float,
+        default=0.9,
+        help="own-TX duty of phases b1-b4 and d-* (design: 0.9; lower it to what USB carries)",
+    )
     run_parser.add_argument("--rx-kernel-buffers", type=int, default=4)
     run_parser.add_argument(
         "--single-dut", action="store_true", help="do not repeat with the roles swapped"

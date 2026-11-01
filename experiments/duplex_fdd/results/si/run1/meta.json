@@ -1,0 +1,77 @@
+{
+ "argv": [
+  "experiments/duplex_fdd/si_scan.py",
+  "run",
+  "--dut",
+  "104473541196000419000c00f2ff1e6e77",
+  "--peer",
+  "10447354119600041b000b00f2ff1ef9c6",
+  "--out",
+  "experiments/duplex_fdd/results/si/run1",
+  "--own-duty",
+  "0.7",
+  "--enable-rf",
+  "--acknowledgement",
+  "I acknowledge that this process will transmit RF"
+ ],
+ "args": {
+  "command": "run",
+  "dut": "104473541196000419000c00f2ff1e6e77",
+  "peer": "10447354119600041b000b00f2ff1ef9c6",
+  "node_a": "104473541196000419000c00f2ff1e6e77",
+  "out": "experiments/duplex_fdd/results/si/run1",
+  "spacings": [
+   20000000.0,
+   40000000.0,
+   70000000.0
+  ],
+  "rx_gains": [
+   15.0,
+   30.0,
+   45.0
+  ],
+  "bw": 5000000.0,
+  "extra_bw": [
+   4000000.0,
+   8000000.0
+  ],
+  "seconds": 2.0,
+  "own_duty": 0.7,
+  "rx_kernel_buffers": 4,
+  "single_dut": false,
+  "lbt": true,
+  "keep_raw": false,
+  "dry_run": false,
+  "enable_rf": true,
+  "max_load": 4.0,
+  "transport": "pluto"
+ },
+ "git_revision": "7292870135ccf377a78977c463e3a370e62cba13",
+ "lsusb_t": "/:  Bus 04.Port 1: Dev 1, Class=root_hub, Driver=xhci_hcd/9p, 20000M/x2\n    |__ Port 9: Dev 2, If 0, Class=Hub, Driver=hub/4p, 5000M\n        |__ Port 1: Dev 3, If 0, Class=Hub, Driver=hub/4p, 5000M\n/:  Bus 03.Port 1: Dev 1, Class=root_hub, Driver=xhci_hcd/14p, 480M\n    |__ Port 2: Dev 2, If 0, Class=Vendor Specific Class, Driver=, 12M\n    |__ Port 2: Dev 2, If 2, Class=Human Interface Device, Driver=usbhid, 12M\n    |__ Port 3: Dev 12, If 0, Class=Communications, Driver=rndis_host, 480M\n    |__ Port 3: Dev 12, If 5, Class=Communications, Driver=, 480M\n    |__ Port 3: Dev 12, If 3, Class=Communications, Driver=cdc_acm, 480M\n    |__ Port 3: Dev 12, If 1, Class=CDC Data, Driver=rndis_host, 480M\n    |__ Port 3: Dev 12, If 4, Class=CDC Data, Driver=cdc_acm, 480M\n    |__ Port 3: Dev 12, If 2, Class=Mass Storage, Driver=usb-storage, 480M\n    |__ Port 5: Dev 3, If 2, Class=Audio, Driver=snd-usb-audio, 480M\n    |__ Port 5: Dev 3, If 0, Class=Video, Driver=uvcvideo, 480M\n    |__ Port 5: Dev 3, If 3, Class=Audio, Driver=snd-usb-audio, 480M\n    |__ Port 5: Dev 3, If 1, Class=Video, Driver=uvcvideo, 480M\n    |__ Port 10: Dev 4, If 0, Class=Hub, Driver=hub/4p, 480M\n        |__ Port 1: Dev 6, If 0, Class=Hub, Driver=hub/4p, 480M\n            |__ Port 3: Dev 8, If 3, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 3: Dev 8, If 1, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 3: Dev 8, If 2, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 3: Dev 8, If 0, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 4: Dev 9, If 5, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 4: Dev 9, If 3, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 4: Dev 9, If 1, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 4: Dev 9, If 4, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 4: Dev 9, If 2, Class=Human Interface Device, Driver=usbhid, 12M\n            |__ Port 4: Dev 9, If 0, Class=Human Interface Device, Driver=usbhid, 12M\n        |__ Port 4: Dev 10, If 1, Class=CDC Data, Driver=rndis_host, 480M\n        |__ Port 4: Dev 10, If 4, Class=CDC Data, Driver=cdc_acm, 480M\n        |__ Port 4: Dev 10, If 2, Class=Mass Storage, Driver=usb-storage, 480M\n        |__ Port 4: Dev 10, If 0, Class=Communications, Driver=rndis_host, 480M\n        |__ Port 4: Dev 10, If 5, Class=Communications, Driver=, 480M\n        |__ Port 4: Dev 10, If 3, Class=Communications, Driver=cdc_acm, 480M\n        |__ Port 2: Dev 7, If 0, Class=Wireless, Driver=btusb, 12M\n        |__ Port 2: Dev 7, If 1, Class=Wireless, Driver=btusb, 12M\n    |__ Port 14: Dev 5, If 2, Class=Wireless, Driver=, 480M\n    |__ Port 14: Dev 5, If 0, Class=Wireless, Driver=btusb, 480M\n    |__ Port 14: Dev 5, If 1, Class=Wireless, Driver=btusb, 480M\n/:  Bus 02.Port 1: Dev 1, Class=root_hub, Driver=xhci_hcd/1p, 20000M/x2\n/:  Bus 01.Port 1: Dev 1, Class=root_hub, Driver=xhci_hcd/1p, 480M\n",
+ "loadavg_at_start": [
+  0.8,
+  0.92,
+  1.39
+ ],
+ "cpu_count": 20,
+ "thread_env": {
+  "OMP_NUM_THREADS": "1",
+  "OPENBLAS_NUM_THREADS": "1",
+  "MKL_NUM_THREADS": "1"
+ },
+ "started_unix": 1793492551.0018678,
+ "started": "2026-11-01T08:22:31+0800",
+ "design": "duplex design \u00a71.2/\u00a71.3",
+ "loadavg_gate": [
+  0.8,
+  0.92,
+  1.39
+ ],
+ "own_burst_samples": 34240,
+ "own_burst_ms": 6.848,
+ "own_subframes": 8,
+ "peer_burst_samples": 19600,
+ "max_load1": 1.9,
+ "invalid_load": false,
+ "finished": "2026-11-01T08:42:17+0800"
+}
