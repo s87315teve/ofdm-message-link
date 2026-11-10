@@ -72,6 +72,10 @@ A→B 是 node 1 發、node 2 收（2420 MHz），B→A 相反（2460 MHz）。
   段 goodput 1.62–1.73 → 1.74／1.82 Mbit/s；整個 run A→B 3.23／3.27 Mbit/s（最好的固定階 MCS 12 是 2.92）；升階沒變。
   剩下的 step 後遺失是 feedback 來回約 0.13 秒（decode 延遲）。B→A 閒置（feedback 只靠 control burst）的行為相同；feedback 從不過時（最大 0.43 秒）。
   固定 15 時 node 2 overflow 42 次（decode workers 忙著解失敗的 burst）（4.4）。
+- **兩台 USRP B210 也能跑 `node_app`（`--transport uhd`，2026-11-10，實測）。** 一台 B210 一個 node：
+  RF A 發、RF B 收，TX LO 偏 8 MHz。MCS 12、每個方向 450/s × 900 B、180 秒同時雙向：A→B 遺失 1.77%、
+  B→A 2.30%，各 3.17–3.18 Mbit/s，p50／p99 延遲 96–98／128–130 ms，RX overflow 0（4.6）。第一次 run 遺失
+  25–30%：RX sink block 在 queue 滿時忙等 GIL，修正後（`6a063d9`）才是上面的數字。
 - **雙向影像（M4，實測）。** 60 秒、OLLA、TX −5 dB：750 與 1300 kbit/s 兩端都解出完整 60 秒（877–884 frame）。
   A→B corrupt 行 2／4、遺失 0.01–0.02%、MCS 17；B→A corrupt 行 96／155，來自 ch-11 的遺失下限，OLLA 在約 MCS 10
   （offset −3 到 −4.6 dB）。Engine 0.66–0.82 core，overflow 0–1 次。`video_duplex.sh` 的 consumer 卡住問題已修
@@ -740,6 +744,47 @@ Frame 數是消費端解出的（camera 60 秒約 14.7 fps，lavfi 15 fps）。D
   `--duration` 停止）。現在 consumer URL 有 `&timeout=5000000`（5 秒沒資料就結束），8 秒後還活著就 SIGKILL；1300 kbit/s
   的 run 用修好的腳本，自己結束。
 
+### 4.6 兩台 USRP B210（`--transport uhd`）
+
+**實測**，2026-11-10，`results/b210/`。A = `30FE782`（NI USRP-2901）= node 1，B = `3150380`（B210）= node 2，
+都在 USB 3，同一張桌上各接天線；UHD 4.11（`ofdm-message-link` conda env，`UHD_IMAGES_DIR=/usr/share/uhd/images`）。
+每個 node 一台 B210：TX 在 RF A（TX/RX port）、RX 在 RF B（TX/RX port），兩個單通道 UHD block 以 `serial=`
+指向同一台裝置（`node_engine.UhdDuplexFactory`）。頻率同 Pluto：node 1 TX 2420／RX 2460 MHz，node 2 相反，5 MS/s。
+TX 用 `tune_request(f, lo_off=8 MHz)` 把 LO 移到載波外、TX analog filter 25 MHz：不偏移時 TX 的 LO 洩漏落在對方
+RX 中心約 2.4 kHz，淹沒 acquisition（`--tx-lo-offset`、`--tx-analog-bw`）。B210 的 gain 是放大器 gain（TX 0–89.75 dB），
+與 Pluto 的衰減（−89.75–0 dB）尺度不同，`node_options` 依 `--transport` 檢查。兩個 node 都是 TX 68 dB、RX 30 dB、
+固定 MCS 12、3 個 decode workers；每個方向一個 `udp_load.py`，450/s × 900 B（3.24 Mbit/s），180 秒。
+
+```bash
+export UHD_IMAGES_DIR=/usr/share/uhd/images PYTHON=/home/steve/anaconda3/envs/ofdm-message-link/bin/python
+bash experiments/duplex_fdd/run_duplex.sh --enable-rf --transport uhd --out experiments/duplex_fdd/results/b210/m2_mcs12_450_180s \
+    --mcs 12 --la fixed --tx-gain 68 --rx-gain 30 --rate-ab 450 --rate-ba 450 --duration 180
+python experiments/duplex_fdd/summarize_duplex.py experiments/duplex_fdd/results/b210/m2_mcs12_450_180s
+```
+
+| Run | 方向 | Datagram 遺失 | Goodput Mbit/s | 延遲 p50／p99 ms | SNR dB（2 s，收端） | RX overflow | 丟掉的 samples | Engine／workers core |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `m2_mcs12_450_180s`（修正後） | A→B | 1.77%（1437／81000） | 3.18 | 96／128 | 17.3 | 0 | 0 | 0.91／0.97（node 2） |
+| | B→A | 2.30%（1860／81000） | 3.17 | 98／130 | 25.3 | 0 | 0 | 0.92／0.97（node 1） |
+| `m2_mcs12_450_180s_spin`（修正前） | A→B | 24.6% | 2.44 | 399／475 | 16.0 | 1570 | 1.68 億（約 18%） | 1.03／0.80 |
+| | B→A | 29.7% | 2.28 | 415／493 | 25.0 | 1801 | 2.00 億（約 21%） | 1.05／0.78 |
+
+Goodput 與延遲是 `udp_load.py` 量的（延遲含 TX 排隊，收發在同一台 PC）；SNR 是 `summarize_duplex.py` 整個 run 的
+中位數；overflow 與丟掉的 samples 是收端 `rx.transport.uhd_faults.rx_overflow`、`rx_samples_lost`。兩個 run 都沒有
+corrupt datagram、沒有 TX underflow 或 late。
+
+- **修正前的 run 掉 25–30%，原因是 RX 在 GIL 上忙等。** Engine 子 process 吃滿 1 core，RX 每秒約 10 次 overflow，
+  約 20% 的 samples 沒進 receiver。py-spy 取樣（node 1，35 秒）時間最多的是 `RxChunkSink.work` 裡 queue 滿時的
+  `return 0`：GNU Radio 在 input 還在時立刻再呼叫 `work`，`put_nowait` 失敗、再回 0，190 秒內 190 萬次，搶走要清 queue
+  的 receiver 的 GIL。`6a063d9` 改成最多等 5 ms 的 blocking put（等待時放開 GIL）：back-pressure 次數 190 萬 → 1600–1800，
+  overflow → 0，engine 1.03 → 0.91 core，延遲 p50 約 400 → 97 ms。這也是之前單向 B210 量測裡「中等負載時
+  300–360 ms 延遲」的可能原因（那時 back-pressure 538 萬次），沒有重量確認。
+- **兩個方向不對稱約 8 dB**（A→B 17 dB、B→A 25 dB，同樣 TX 68 dB）。之前單向量到 B 的 RF A 在 2420 MHz 收得比 RF B
+  弱約 13 dB，所以 RX 都放 RF B；剩下的差異（天線、擺放、2420 在 Wi-Fi channel 1）沒有分開。
+- **剩下的 1.8–2.3% 遺失**比 Pluto 的 M2（MCS 12：0%／0.86%）高；只跑一次，沒有分開 Wi-Fi、SNR 與 CPU 的部分。
+- 兩個 run 的 `meta.json` 是 `git_rev 3abca7e`、`git_dirty true`：程式是工作目錄裡的 `bdb468b`（UHD node）加上
+  （修正後的 run）`6a063d9`，commit 在 run 開始之後。
+
 ## 5. ARQ 提案（沒有實作）
 
 Owner 只要求提案。下面是 LTE RLC AM（TS 36.322）式的設計，以及它與這個 link 已有的 A-MPDU、feedback
@@ -827,6 +872,7 @@ Pluto 沒有 timestamp，給不了。
 | `results/m2/` | M2：`README.md`、`smoke/`、`smoke2/` 與 matrix 的 run 目錄（每個有 stats、LA log、load、CPU、meta） |
 | `step_metrics.py` | M3／M3b：每個 gain step 的遺失與到目標 MCS 的時間 |
 | `results/m3b/` | M3b：la-tune 之後的重跑（`README.md`、`step_metrics.json`、`m3b_olla_run1/`、`m3b_olla_ba_idle/`） |
+| `results/b210/` | 4.6：兩台 USRP B210 的雙向 run，`m2_mcs12_450_180s/`（RX queue 修正後）與 `m2_mcs12_450_180s_spin/`（修正前） |
 | `results/m3/`、`results/m4/` | M3（`olla` ×2、`olla` B→A 閒置、固定 8／10／12／15；`m3_prefix/` 是舊 burst 間隔的一次 run）、M4（`video_750k/`、`video_1300k/`） |
 
 程式（`src/ofdm_message_link/`）：`node_app.py`、`node_options.py`、`node_engine.py`（含 `DutyCappedSink`）、`node_window.py`、
@@ -838,14 +884,18 @@ Pluto 沒有 timestamp，給不了。
 link：12／16／21 dB 收斂、threshold 偏 ±3 dB、hysteresis、stale、u32 wrap、overflow、平衡點）、
 `test_la_reporter.py`、`test_la_examples.py`、`test_la_controller.py`、`test_thresholds.py`；wire 與 hooks
 `test_control_wire.py`、`test_link_control.py`、`test_tx_policy.py`（含 golden hash）、`test_rx_observer.py`；
-node `test_pluto_shared.py`、`test_node_options.py`、`test_config_duplex.py`、`test_node_engine.py`、
+node `test_pluto_shared.py`、`test_node_uhd.py`（B210 的 factory、gain 範圍、LO offset）、`test_node_options.py`、`test_config_duplex.py`、`test_node_engine.py`、
 `test_node_headless.py`、`test_node_udp_duplex.py`（兩個 engine 經 UDP，兩個方向逐 byte 正確、feedback
 兩個方向都有）、`test_node_window.py`；量測腳本 `test_duplex_experiments.py`、`test_summarize_duplex.py`。
 
 ## 7. 證據邊界
 
-- 只有 Pluto 對 Pluto、一個擺放位置、一天、一組頻率。B210、N210、USRP-2901 沒有跑 `node_app`
-  （`SharedPlutoContext` 只有 Pluto 有）。
+- M0–M4 只有 Pluto 對 Pluto、一個擺放位置、一天、一組頻率。B210 對 B210（其中一台是 USRP-2901）只有
+  4.6 的兩個固定 MCS 12 run（各一次、180 秒、一個擺放位置）；OLLA、gain step、影像沒有在 B210 上跑。N210 沒有跑
+  `node_app`。B210 的 gain 與 Pluto 的尺度不同，兩邊的數字不能直接對照。
+- B210 node 的 CPU：修正後 engine 0.91 core，離 1 core 的上限不遠；更高的 burst rate 或 sample rate 可能再碰到
+  GIL 的上限（設計稿的 `split` layout 仍沒有實作）。使用者不在 `usrp` group，UHD 拿不到 real-time priority；
+  usbfs 是 16 MB，兩個方向都設 `num_*_frames=1024` 會 LIBUSB_ERROR_NO_MEM。
 - M1 的遺失每個 phase 只有 200 個 burst（1 個 = 0.5 個百分點），只能說「量不到 SI」，不能排除小於
   約 0.5 dB 的影響；自己的 duty 是 0.7，不是設計的 0.9。
 - `…1e6e77` 在 duty 0.78 會 overflow、`…1ef9c6` 不會，原因（裝置或 port）沒有分開查；0.7 的上限是
