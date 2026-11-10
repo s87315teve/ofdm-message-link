@@ -182,6 +182,16 @@ def test_overflow_excludes_startup(summary):
     assert ov["startup"] == 3 and ov["loaded"] == 0 and ov["total"] == 3
 
 
+def test_overflow_reads_the_uhd_fault_counter_of_a_b210_node():
+    rows = []
+    for k, ovf in enumerate((0, 2, 5, 9)):
+        line = stats_line(2, k * 2.0)
+        line["rx"]["transport"] = {"transport": "uhd", "uhd_faults": {"rx_overflow": ovf}}
+        rows.append(line)
+    ov = sd.overflow_report(rows, 3.0)
+    assert ov == {"startup": 2.0, "loaded": 7.0, "total": 9.0}
+
+
 def test_markdown_renders(summary):
     text = sd.to_markdown(summary)
     assert "## AB: node1 -> node2" in text and "convergence s" in text

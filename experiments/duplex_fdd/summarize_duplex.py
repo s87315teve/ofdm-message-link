@@ -18,7 +18,8 @@ Definitions
     total comes from udp_load's byte-exact check (load_{AB,BA}.json).
   * convergence after a gain step: the first 1-s window after which every window up to
     the next step (or the end) has loss < 2 % and no MCS change within 2 s of its start.
-  * RX overflow: ``rx.transport.rx_overflow_events`` after the first ``startup_s`` s.
+  * RX overflow: ``rx.transport.rx_overflow_events`` (Pluto) or
+    ``rx.transport.uhd_faults.rx_overflow`` (B210) after the first ``startup_s`` s.
 """
 
 from __future__ import annotations
@@ -134,7 +135,8 @@ RX_KEYS = {
     "missing": "rx.receiver.missing_bursts",
     "sub_bad": "rx.receiver.subframes_bad",
     "egress": "rx.egress_datagrams",
-    "overflow": "rx.transport.rx_overflow_events",
+    # Pluto, then UHD (a B210 node): the first that is a number.
+    "overflow": ("rx.transport.rx_overflow_events", "rx.transport.uhd_faults.rx_overflow"),
     "ingress": "tx.ingress_datagrams",
     "tx_mcs": "tx.active_mcs",
 }
@@ -158,8 +160,9 @@ def build_series(stats: list[dict], offset: float | None = None) -> Series:
     for name, path in RX_KEYS.items():
         last = 0.0
         col = []
+        paths = path if isinstance(path, tuple) else (path,)
         for r in recs:
-            val = get(r, path)
+            val = next((v for v in (get(r, p) for p in paths) if isinstance(v, int | float)), None)
             if isinstance(val, int | float):
                 last = float(val)
             col.append(last)
