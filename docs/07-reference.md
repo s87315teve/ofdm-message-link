@@ -376,10 +376,12 @@ sequence 因此保持連續，舊版 `rx_app` 不會看到假的 gap，只把 CO
 
 ## 7.9 `node_app`：雙向 node 的命令列
 
-架構圖見 [1.7 節](01-architecture.md#17-雙向-nodenode_app)。一個 Pluto 一個 process。Node 同時發送與接收（FDD）：node 1 在 2420 MHz 發、2460 MHz 收，node 2
+架構圖見 [1.7 節](01-architecture.md#17-雙向-nodenode_app)。一個 Pluto（或一台 USRP B210）一個 process。Node 同時發送與接收（FDD）：node 1 在 2420 MHz 發、2460 MHz 收，node 2
 相反（[`configs/profiles/duplex_fdd_2420_2460.yaml`](../configs/profiles/duplex_fdd_2420_2460.yaml)，
 備用 `duplex_fdd_2405_2475.yaml`）。一個 Pluto 只能開一個 libiio context（第二個回 EBUSY），所以 TX 與
-RX 共用一個 `pluto.SharedPlutoContext`，在同一個 engine 子 process 裡。
+RX 共用一個 `pluto.SharedPlutoContext`，在同一個 engine 子 process 裡。B210（`--transport uhd`）用同一台
+裝置的兩個前端：TX 在一個（預設 RF A，TX/RX port），RX 在另一個（預設 RF B），各是一個 UHD block，
+以 `serial=` 選裝置（`node_engine.UhdDuplexFactory`）。
 
 ```bash
 # 視窗模式
@@ -390,6 +392,10 @@ python -m ofdm_message_link.node_app --node-id 1 --transport pluto --headless \
     --serial 104473541196000419000c00f2ff1e6e77 --tx-gain -5 --duration 90 \
     --gain-profile 0:-5,30:-20,60:-5 --link-adaptation olla \
     --stats-log node1_stats.jsonl --la-log la_1.jsonl --ready-file node1.ready \
+    --enable-rf --acknowledgement 'I acknowledge that this process will transmit RF'
+# USRP B210（gain 是 B210 的放大器 gain，不是 Pluto 的衰減）
+UHD_IMAGES_DIR=/usr/share/uhd/images python -m ofdm_message_link.node_app --node-id 1 \
+    --transport uhd --headless --serial 30FE782 --tx-gain 65 --rx-gain 30 --duration 120 \
     --enable-rf --acknowledgement 'I acknowledge that this process will transmit RF'
 # 不用 radio：兩個 node 在同一台 PC 上經 UDP 交換 samples
 python -m ofdm_message_link.node_app --node-id 1 --headless &
@@ -409,19 +415,21 @@ process 默默分流。
 | 選項 | 說明 |
 |---|---|
 | `--node-id {1,2}` | 必填；決定 profile 中的頻率、ports 與 scrambler seed 範圍（1–63／64–127） |
-| `--transport {udp,pluto}` | 預設 `udp`（不用 radio）；`uhd` 會被拒絕。`udp` 用 `--udp-host`（預設 127.0.0.1）與下面的 sample ports，`--udp-port` 對 `node_app` 沒有作用 |
+| `--transport {udp,pluto,uhd}` | 預設 `udp`（不用 radio）；`pluto` 一台 Pluto；`uhd` 一台 USRP B210（TX、RX 各用一個前端）。`udp` 用 `--udp-host`（預設 127.0.0.1）與下面的 sample ports，`--udp-port` 對 `node_app` 沒有作用 |
 | `--overlay` | 預設 `configs/profiles/duplex_fdd_2420_2460.yaml`；必須有 `duplex` 段 |
-| `--serial` / `--auto-start` | `pluto`：選哪一台 Pluto；`--headless` 必須給 `--serial`，而且隱含 `--auto-start` |
+| `--serial` / `--auto-start` | `pluto`／`uhd`：選哪一台 Pluto 或 USRP；`--headless` 必須給 `--serial`，而且隱含 `--auto-start` |
+| `--channel` / `--antenna` | `uhd`：RX 的前端（0 = RF A，1 = RF B，預設 1；TX 用另一個）與 RX port（`TX/RX` 預設，或 `RX2`）；TX 一律 `TX/RX` |
+| `--tx-lo-offset HZ` / `--tx-analog-bw HZ` | `uhd`：TX LO 離載波的距離（預設 8e6，`tune_request`；0 = 不偏移）與 TX analog filter（預設 25e6）。沒有偏移時 TX 的 LO 洩漏落在對方 RX 中心約 2.4 kHz，淹沒 acquisition。其他 transport 給這兩個會被拒絕 |
 | `--tx-freq` / `--rx-freq` | 覆寫 profile 的頻率；信號邊緣離開 2400–2483.5 MHz 時警告 |
-| `--tx-gain` / `--rx-gain` | 預設 −89.75 / 15 dB。`--gain` 會被拒絕（node 有兩個 gain） |
+| `--tx-gain` / `--rx-gain` | Pluto／udp：TX −89.75–0 dB（衰減），預設 −89.75 / 15 dB。B210（`uhd`）：TX 0–89.75 dB、RX 0–76 dB，預設 0 / 30 dB；兩種尺度不能互用。`--gain` 會被拒絕（node 有兩個 gain） |
 | `--rx-analog-bw HZ` | AD9361 RX analog filter，預設 = sample rate |
 | `--rx-kernel-buffers N` | libiio RX kernel buffers，預設 4 |
 | `--tx-duty-cap D` | `pluto`：TX duty 不超過 D（0.05–1），預設 0.7（USB 2.0 同時帶 5 MS/s RX 時的上限，見 M0）；1 = 不限。`udp` 沒有 duty cap |
 | `--peak-amplitude` | 每個 burst 縮放到這個 peak，預設 0.7 |
 | `--snr-db` | 只有 `udp`：在 RX 加 AWGN |
-| `--headless` | 不開視窗，隱含 `--auto-start`；`pluto` 需要 `--serial` |
+| `--headless` | 不開視窗，隱含 `--auto-start`；`pluto` 與 `uhd` 需要 `--serial` |
 | `--duration S` | Ready 後 S 秒停止（headless） |
-| `--gain-profile "T:DB,..."` | 依 ready 後的秒數排程 TX gain，例如 `0:-5,30:-20,60:-5` |
+| `--gain-profile "T:DB,..."` | 依 ready 後的秒數排程 TX gain，例如 `0:-5,30:-20,60:-5`；gain 依 `--transport` 的 TX 範圍檢查 |
 | `--control-port P` | localhost UDP JSON control socket，預設依 node；0 = 關閉 |
 | `--link-adaptation SPEC` | `olla`（預設，兩個 loop，從 `--mcs-index` 開始）、`fixed`（固定在 `--mcs-index`）、`arf`、`pkg.mod:Class`、`file.py:Class` |
 | `--link-adaptation-arg K=V` | LA class 的參數，可重複 |

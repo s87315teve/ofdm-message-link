@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# One bidirectional FDD run of the real node_app on two Plutos, with one paced,
-# byte-checked UDP load per direction (A = node 1, B = node 2).
+# One bidirectional FDD run of the real node_app on two Plutos (or two USRP B210s with
+# --transport uhd), with one paced, byte-checked UDP load per direction (A = node 1, B = node 2).
 #
 #   A -> B: udp_load -> node1 ingress -> RF -> node2 egress -> udp_load check
 #   B -> A: udp_load -> node2 ingress -> RF -> node1 egress -> udp_load check
@@ -22,6 +22,7 @@ ACK_TEXT='I acknowledge that this process will transmit RF'
 INGRESS_PORT=(0 52211 52221)   # index = node id
 EGRESS_PORT=(0 52212 52222)
 SERIAL=(0 104473541196000419000c00f2ff1e6e77 10447354119600041b000b00f2ff1ef9c6)
+UHD_SERIAL=(0 30FE782 3150380)   # --transport uhd: the two B210s on this bench
 UDP_LOAD=experiments/ota_udp_throughput/udp_load.py
 # -------------------------------------------------------------------------------------
 
@@ -33,15 +34,16 @@ usage: experiments/duplex_fdd/run_duplex.sh --enable-rf --out DIR [options]
   --enable-rf            required: both nodes key their transmitters
   --dry-run              print the commands and exit (no lock, gate or hardware)
   --overlay PATH         profile overlay (default configs/profiles/duplex_fdd_2420_2460.yaml)
-  --serial1 S --serial2 S   Pluto serials (defaults: the two on this bench)
+  --transport T          pluto (default) or uhd (two USRP B210s; B210 gains, see below)
+  --serial1 S --serial2 S   radio serials (defaults: the two Plutos or the two B210s on this bench)
   --rate-ab R  --rate-ba R  datagrams/s per direction (default 450 / 450; 0 = direction idle)
   --size N               datagram bytes (default 900)
   --duration S           load duration (default 60)
   --mcs N | --mcs1 N --mcs2 N            fixed/initial MCS (default 8)
   --la SPEC | --la1 SPEC --la2 SPEC      link adaptation (default fixed)
   --la-arg k=v           LA argument for both nodes, repeatable (--la1-arg / --la2-arg per node)
-  --tx-gain DB | --tx-gain1 DB --tx-gain2 DB   initial TX gain (default -20)
-  --rx-gain DB           RX gain both nodes (default 15)
+  --tx-gain DB | --tx-gain1 DB --tx-gain2 DB   initial TX gain (default -20; uhd 65)
+  --rx-gain DB           RX gain both nodes (default 15; uhd 30)
   --gain-profile P | --gain-profile1 P --gain-profile2 P   e.g. "0:-5,30:-20,60:-5" (s from ready)
   --decode-workers N     per node (default 3)
   --gate-load X          1-min loadavg must be below X before start (default 4)
@@ -55,7 +57,7 @@ usage: experiments/duplex_fdd/run_duplex.sh --enable-rf --out DIR [options]
 EOF2
 }
 
-ENABLE_RF=0 DRY=0 OUT=""
+ENABLE_RF=0 DRY=0 OUT="" TRANSPORT=pluto SER_GIVEN=(0 "" "") TXG_GIVEN=0 RXG_GIVEN=0
 OVERLAY=configs/profiles/duplex_fdd_2420_2460.yaml
 RATE_AB=450 RATE_BA=450 SIZE=900 DURATION=60
 MCS=(0 8 8) LA=(0 fixed fixed) TXG=(0 -20 -20) PROFILE=(0 "" "")
@@ -67,8 +69,9 @@ while [ $# -gt 0 ]; do
         --enable-rf) ENABLE_RF=1 ;;
         --dry-run) DRY=1 ;;
         --overlay) OVERLAY="$2"; shift ;;
-        --serial1) SERIAL[1]="$2"; shift ;;
-        --serial2) SERIAL[2]="$2"; shift ;;
+        --transport) TRANSPORT="$2"; shift ;;
+        --serial1) SER_GIVEN[1]="$2"; shift ;;
+        --serial2) SER_GIVEN[2]="$2"; shift ;;
         --rate-ab) RATE_AB="$2"; shift ;;
         --rate-ba) RATE_BA="$2"; shift ;;
         --size) SIZE="$2"; shift ;;
@@ -82,10 +85,10 @@ while [ $# -gt 0 ]; do
         --la-arg) LA_ARGS[1]+="$2"$'\n'; LA_ARGS[2]+="$2"$'\n'; shift ;;
         --la1-arg) LA_ARGS[1]+="$2"$'\n'; shift ;;
         --la2-arg) LA_ARGS[2]+="$2"$'\n'; shift ;;
-        --tx-gain) TXG[1]="$2"; TXG[2]="$2"; shift ;;
-        --tx-gain1) TXG[1]="$2"; shift ;;
-        --tx-gain2) TXG[2]="$2"; shift ;;
-        --rx-gain) RX_GAIN="$2"; shift ;;
+        --tx-gain) TXG[1]="$2"; TXG[2]="$2"; TXG_GIVEN=1; shift ;;
+        --tx-gain1) TXG[1]="$2"; TXG_GIVEN=1; shift ;;
+        --tx-gain2) TXG[2]="$2"; TXG_GIVEN=1; shift ;;
+        --rx-gain) RX_GAIN="$2"; RXG_GIVEN=1; shift ;;
         --gain-profile) PROFILE[1]="$2"; PROFILE[2]="$2"; shift ;;
         --gain-profile1) PROFILE[1]="$2"; shift ;;
         --gain-profile2) PROFILE[2]="$2"; shift ;;
@@ -103,6 +106,16 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ -n "$OUT" ] || { echo "--out is required" >&2; exit 2; }
+case "$TRANSPORT" in
+    pluto) ;;
+    uhd)   # B210 gains are amplifier gains (TX 0-89.75 dB), never the Pluto's attenuation
+        SERIAL=("${UHD_SERIAL[@]}")
+        if [ "$TXG_GIVEN" -eq 0 ]; then TXG=(0 65 65); fi
+        if [ "$RXG_GIVEN" -eq 0 ]; then RX_GAIN=30; fi
+        export UHD_IMAGES_DIR=${UHD_IMAGES_DIR:-/usr/share/uhd/images} ;;
+    *) echo "--transport must be pluto or uhd" >&2; exit 2 ;;
+esac
+for n in 1 2; do if [ -n "${SER_GIVEN[$n]}" ]; then SERIAL[n]="${SER_GIVEN[$n]}"; fi; done
 if [ "$ENABLE_RF" -ne 1 ] && [ "$DRY" -ne 1 ]; then
     echo "refusing to transmit: pass --enable-rf" >&2; exit 2
 fi
@@ -119,7 +132,7 @@ NODE_DURATION=$(( ${DURATION%.*} + 120 ))   # backstop only; the script stops th
 node_cmd() {  # node id -> prints the command, one word per line
     local n=$1 line
     printf '%s\n' "$PYTHON" -m "$NODE_MODULE" "$F_NODE_ID" "$n" "$F_OVERLAY" "$OVERLAY" \
-        "$F_TRANSPORT" pluto "$F_SERIAL" "${SERIAL[$n]}" "$F_HEADLESS" \
+        "$F_TRANSPORT" "$TRANSPORT" "$F_SERIAL" "${SERIAL[$n]}" "$F_HEADLESS" \
         "$F_READY" "$OUT/node$n.ready" "$F_STATS" "$OUT/node${n}_stats.jsonl" \
         "$F_LA_LOG" "$OUT/la_$n.jsonl" "$F_LA" "${LA[$n]}" "$F_MCS" "${MCS[$n]}" \
         "$F_WORKERS" "$WORKERS" "$F_TX_GAIN" "${TXG[$n]}" "$F_RX_GAIN" "$RX_GAIN" \
@@ -208,7 +221,7 @@ SAMPLER_PID=$!
 
 # meta.json before the load, so a killed run still has its description.
 OUT="$OUT" REPO="$REPO" LOAD_START="$LOAD_START" PID1="${NODE_PID[1]}" PID2="${NODE_PID[2]}" \
-SER1="${SERIAL[1]}" SER2="${SERIAL[2]}" OVERLAY="$OVERLAY" RATE_AB="$RATE_AB" RATE_BA="$RATE_BA" \
+TRANSPORT="$TRANSPORT" SER1="${SERIAL[1]}" SER2="${SERIAL[2]}" OVERLAY="$OVERLAY" RATE_AB="$RATE_AB" RATE_BA="$RATE_BA" \
 SIZE="$SIZE" DURATION="$DURATION" MCS1="${MCS[1]}" MCS2="${MCS[2]}" LA1="${LA[1]}" LA2="${LA[2]}" \
 LAARGS1="${LA_ARGS[1]}" LAARGS2="${LA_ARGS[2]}" TXG1="${TXG[1]}" TXG2="${TXG[2]}" RX_GAIN="$RX_GAIN" \
 PROF1="${PROFILE[1]}" PROF2="${PROFILE[2]}" WORKERS="$WORKERS" ARGV="$*" \

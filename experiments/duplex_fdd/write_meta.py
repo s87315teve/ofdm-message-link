@@ -22,6 +22,7 @@ def main() -> None:
     meta = {
         "git_rev": sh("git", "rev-parse", "HEAD"),
         "git_dirty": bool(sh("git", "status", "--porcelain")),
+        "transport": e.get("TRANSPORT", "pluto"),
         "serials": {n: e["SER" + n] for n in nodes},
         "overlay": e["OVERLAY"],
         "node_pids": {n: int(e["PID" + n]) for n in nodes},

@@ -19,7 +19,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from ofdm_link.phy.mcs_table import describe_mcs_entry, mcs_entry
 
 from . import dashboard_widgets as widgets
-from . import log_limits, node_options, options, qt_runtime
+from . import log_limits, node_engine, node_options, options, qt_runtime
 from .dashboard import SNR_THRESHOLD_DB
 from .node_app import (
     BANNER,
@@ -29,6 +29,7 @@ from .node_app import (
     control_handler,
     pluto_factory,
     udp_factory,
+    uhd_factory,
 )
 from .node_engine import NodeSpec, ProcessNodeWorker
 from .plots import ConstellationPlot, PlotBuffers, SpectrumPlot, TrendPlot
@@ -273,7 +274,7 @@ class NodeWindow(QtWidgets.QWidget):
         tx_row = QtWidgets.QHBoxLayout()
         tx_row.addWidget(QtWidgets.QLabel("TX gain (dB)"))
         self._tx_gain = QtWidgets.QDoubleSpinBox()
-        self._tx_gain.setRange(node_options.MIN_TX_GAIN_DB, node_options.MAX_TX_GAIN_DB)
+        self._tx_gain.setRange(*node_options.tx_gain_range(self._setup.resolved.transport))
         self._tx_gain.setSingleStep(0.25)
         self._tx_gain.setValue(self._tx_gain_db)
         self._tx_gain.editingFinished.connect(self._change_tx_gain)
@@ -321,10 +322,22 @@ class NodeWindow(QtWidgets.QWidget):
         rx_gain = self._panel.device_gain_db(selection.gain_db)
         tx_selection = replace(selection, center_frequency_hz=self._setup.tx_frequency,
                                gain_db=self._tx_gain_db, antenna="TX")
-        factory = pluto_factory(
-            self._args, self._setup, uri=selection.address, serial=selection.serial,
-            tx_gain_db=tx_selection.gain_db, rx_gain_db=rx_gain,
-        )
+        if self._setup.resolved.transport == "uhd":
+            try:
+                factory = uhd_factory(
+                    self._args, self._setup, serial=selection.serial,
+                    tx_gain_db=tx_selection.gain_db, rx_gain_db=rx_gain,
+                    rx_channel=selection.channel, rx_antenna=selection.antenna,
+                )
+            except (TypeError, ValueError) as error:
+                self._status.setText(f"radio did not start: {error}")
+                self._panel.set_running(False, f"{type(error).__name__}: {error}")
+                return
+        else:
+            factory = pluto_factory(
+                self._args, self._setup, uri=selection.address, serial=selection.serial,
+                tx_gain_db=tx_selection.gain_db, rx_gain_db=rx_gain,
+            )
         if self._attach(factory, selection.describe()):
             self._panel.set_running(True, f"node running on {selection.serial}")
 
@@ -524,7 +537,11 @@ def run_gui(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:
             backend=setup.resolved.transport,
             preferred_serial=args.serial,
             preferred_antenna=args.antenna,
-            preferred_channel=args.channel,
+            preferred_channel=(
+                node_engine.DEFAULT_UHD_RX_CHANNEL
+                if args.channel is None and setup.resolved.transport == "uhd"
+                else args.channel
+            ),
             preferred_gain_db=args.rx_gain,
             auto_start=args.auto_start,
         )

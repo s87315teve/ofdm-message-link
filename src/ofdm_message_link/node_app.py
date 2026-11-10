@@ -1,4 +1,4 @@
-"""Bidirectional demo node: one process per Pluto, transmitting and receiving at once.
+"""Bidirectional demo node: one process per Pluto or USRP B210, transmitting and receiving at once.
 
 Two nodes make an FDD link: node 1 transmits on one frequency and listens on
 the other, node 2 the reverse (``configs/profiles/duplex_fdd_2420_2460.yaml``).
@@ -20,6 +20,13 @@ Headless, for scripted measurements::
         --serial 1044... --tx-gain -5 --duration 90 --gain-profile 0:-5,30:-20,60:-5 \\
         --stats-log node1_stats.jsonl --la-log la_1.jsonl --ready-file node1.ready \\
         --link-adaptation olla --enable-rf --acknowledgement '...'
+
+On a USRP B210 (``--transport uhd``) the node transmits on RF A and receives
+on RF B of one device; its gains are the B210's (TX 0 to 89.75 dB)::
+
+    UHD_IMAGES_DIR=/usr/share/uhd/images python -m ofdm_message_link.node_app --node-id 1 \
+        --transport uhd --headless --serial 30FE782 --tx-gain 65 --rx-gain 30 \
+        --duration 120 --enable-rf --acknowledgement '...'
 
 Radio-free duplex on one PC: ``--transport udp`` on both nodes (each sends
 its samples to the other's sample port).
@@ -51,7 +58,16 @@ from typing import Any
 
 from . import log_limits, node_options, options
 from .dashboard import RxDashboard, TxDashboard
-from .node_engine import NodeSpec, PlutoDuplexFactory, ProcessNodeWorker, UdpDuplexFactory
+from .node_engine import (
+    DEFAULT_UHD_RX_CHANNEL,
+    DEFAULT_UHD_TX_BANDWIDTH_HZ,
+    DEFAULT_UHD_TX_LO_OFFSET_HZ,
+    NodeSpec,
+    PlutoDuplexFactory,
+    ProcessNodeWorker,
+    UdpDuplexFactory,
+    UhdDuplexFactory,
+)
 
 STATS_INTERVAL_S = 0.5
 LA_HISTORY_S = 60.0
@@ -451,6 +467,48 @@ def pluto_factory(args, setup: node_options.NodeSetup, *, uri: str, serial: str,
     )
 
 
+def uhd_factory(args, setup: node_options.NodeSetup, *, serial: str, tx_gain_db: float,
+                rx_gain_db: float, rx_channel: int | None = None,
+                rx_antenna: str | None = None) -> UhdDuplexFactory:
+    channel = args.channel if rx_channel is None else rx_channel
+    antenna = args.antenna if rx_antenna is None else rx_antenna
+    factory = UhdDuplexFactory(
+        serial=serial,
+        sample_rate=int(setup.resolved.profile.sample_rate),
+        tx_frequency=setup.tx_frequency,
+        rx_frequency=setup.rx_frequency,
+        tx_gain_db=tx_gain_db,
+        rx_gain_db=rx_gain_db,
+        acknowledgement=args.acknowledgement,
+        rx_channel=DEFAULT_UHD_RX_CHANNEL if channel is None else int(channel),
+        rx_antenna=antenna or "TX/RX",
+        rx_bandwidth=args.rx_analog_bw,
+        tx_lo_offset=(DEFAULT_UHD_TX_LO_OFFSET_HZ if args.tx_lo_offset is None
+                      else args.tx_lo_offset),
+        tx_bandwidth=(DEFAULT_UHD_TX_BANDWIDTH_HZ if args.tx_analog_bw is None
+                      else args.tx_analog_bw),
+        peak_amplitude=args.peak_amplitude,
+    )
+    factory.settings()  # every B210 setting checked here (ValueError), before a child exists
+    return factory
+
+
+def find_usrp(serial: str):
+    """The USRP with this serial, found without opening any other device."""
+
+    from . import devices
+
+    devices.ensure_images_dir()
+    uhd = devices._load_uhd()
+    with devices.uhd_access_lock():
+        found = uhd.find(f"serial={serial}")
+    for entry in found:
+        fields = devices._address_fields(entry)
+        if fields.get("serial") == serial:
+            return fields
+    raise SystemExit(f"USRP {serial} not found (is UHD_IMAGES_DIR set and the device on USB?)")
+
+
 def find_pluto(serial: str):
     from . import pluto
 
@@ -489,7 +547,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def run_headless(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:
-    if setup.resolved.uses_radio:
+    if setup.resolved.transport == "uhd":
+        try:
+            factory = uhd_factory(args, setup, serial=args.serial,
+                                  tx_gain_db=args.tx_gain, rx_gain_db=args.rx_gain)
+        except (TypeError, ValueError) as error:
+            raise SystemExit(f"invalid B210 node settings: {error}") from error
+        find_usrp(args.serial)
+    elif setup.resolved.uses_radio:
         device = find_pluto(args.serial)
         factory = pluto_factory(args, setup, uri=device.address, serial=device.serial,
                                 tx_gain_db=args.tx_gain, rx_gain_db=args.rx_gain)

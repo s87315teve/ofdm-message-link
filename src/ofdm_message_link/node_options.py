@@ -1,4 +1,4 @@
-"""Command line of ``node_app``: one bidirectional node per Pluto.
+"""Command line of ``node_app``: one bidirectional node per Pluto or USRP B210.
 
 A node transmits on its own frequency and receives the peer's at the same
 time (FDD).  Everything a node needs comes from one profile with a
@@ -20,6 +20,12 @@ node    ingress  egress  control  UDP sample transport
 ``egress`` is where this node delivers what it received; with ``--transport
 udp`` a node sends its samples to the peer's sample port, which makes a
 radio-free duplex link on one PC.
+
+Gains depend on the radio: a Pluto's TX gain is its attenuator, -89.75 to
+0 dB; a B210's is an amplifier gain, 0 to 89.75 dB (RX 0 to 76 dB).  The
+defaults are the quietest TX setting of each (Pluto -89.75 dB, B210 0 dB) and
+RX 15 dB (Pluto, udp) or 30 dB (B210).  ``--tx-gain``, ``--rx-gain`` and
+``--gain-profile`` are checked against the range of ``--transport``.
 """
 
 from __future__ import annotations
@@ -42,6 +48,12 @@ DEFAULT_TX_GAIN_DB = -89.75
 DEFAULT_RX_GAIN_DB = 15.0
 MIN_TX_GAIN_DB = -89.75
 MAX_TX_GAIN_DB = 0.0
+# USRP B210 (--transport uhd): amplifier gains, not an attenuator.
+UHD_DEFAULT_TX_GAIN_DB = 0.0
+UHD_DEFAULT_RX_GAIN_DB = 30.0
+UHD_MIN_TX_GAIN_DB = 0.0
+UHD_MAX_TX_GAIN_DB = 89.75
+UHD_MAX_RX_GAIN_DB = 76.0
 DEFAULT_DECODE_WORKERS = 3
 DEFAULT_LINK_ADAPTATION = "olla"
 DEFAULT_REPORTER = "default"
@@ -69,12 +81,39 @@ def peer_id(node_id: int) -> int:
     return 2 if node_id == 1 else 1
 
 
-def parse_gain_profile(text: str) -> tuple[tuple[float, float], ...]:
+def tx_gain_range(transport: str) -> tuple[float, float]:
+    """The TX gains ``--transport`` accepts: a Pluto's attenuator, or a B210's amplifier."""
+
+    if transport == "uhd":
+        return (UHD_MIN_TX_GAIN_DB, UHD_MAX_TX_GAIN_DB)
+    return (MIN_TX_GAIN_DB, MAX_TX_GAIN_DB)
+
+
+def rx_gain_range(transport: str) -> tuple[float, float] | None:
+    """The RX gains ``--transport`` accepts; None = left to the device (Pluto, udp)."""
+
+    return (0.0, UHD_MAX_RX_GAIN_DB) if transport == "uhd" else None
+
+
+def default_gains(transport: str) -> tuple[float, float]:
+    """(TX, RX) defaults: the quietest TX setting of the radio, and its usual RX gain."""
+
+    if transport == "uhd":
+        return (UHD_DEFAULT_TX_GAIN_DB, UHD_DEFAULT_RX_GAIN_DB)
+    return (DEFAULT_TX_GAIN_DB, DEFAULT_RX_GAIN_DB)
+
+
+def parse_gain_profile(
+    text: str, gain_range: tuple[float, float] = (MIN_TX_GAIN_DB, MAX_TX_GAIN_DB)
+) -> tuple[tuple[float, float], ...]:
     """``"0:-5,30:-20,60:-5"`` → ((0.0, -5.0), (30.0, -20.0), (60.0, -5.0)).
 
-    Times are seconds from ready, non-negative and increasing; gains are a
-    Pluto TX gain, -89.75 to 0 dB.
+    Times are seconds from ready, non-negative and increasing; gains are TX
+    gains inside ``gain_range`` (default a Pluto's, -89.75 to 0 dB; see
+    :func:`tx_gain_range`).
     """
+
+    low, high = gain_range
 
     steps: list[tuple[float, float]] = []
     for part in text.split(","):
@@ -90,10 +129,8 @@ def parse_gain_profile(text: str) -> tuple[tuple[float, float], ...]:
             raise argparse.ArgumentTypeError(f"'{part}' is not t:gain in numbers") from None
         if not (math.isfinite(t) and t >= 0.0):
             raise argparse.ArgumentTypeError(f"time {when} must be >= 0 s")
-        if not MIN_TX_GAIN_DB <= g <= MAX_TX_GAIN_DB:
-            raise argparse.ArgumentTypeError(
-                f"gain {gain} dB is outside {MIN_TX_GAIN_DB:g}..{MAX_TX_GAIN_DB:g} dB"
-            )
+        if not low <= g <= high:
+            raise argparse.ArgumentTypeError(f"gain {gain} dB is outside {low:g}..{high:g} dB")
         if steps and t <= steps[-1][0]:
             raise argparse.ArgumentTypeError("gain-profile times must increase")
         steps.append((t, g))
@@ -121,13 +158,18 @@ class GainSchedule:
         return self._next >= len(self._steps)
 
 
-def _tx_gain(value: str) -> float:
+def _gain(value: str) -> float:
     gain = float(value)
-    if not MIN_TX_GAIN_DB <= gain <= MAX_TX_GAIN_DB:
-        raise argparse.ArgumentTypeError(
-            f"must be {MIN_TX_GAIN_DB:g} to {MAX_TX_GAIN_DB:g} dB (a Pluto's attenuator)"
-        )
+    if not math.isfinite(gain):
+        raise argparse.ArgumentTypeError("must be a finite number of dB")
     return gain
+
+
+def _lo_offset(value: str) -> float:
+    parsed = float(value)
+    if not (math.isfinite(parsed) and abs(parsed) <= 28e6):
+        raise argparse.ArgumentTypeError("must be within +-28 MHz (0 = no offset)")
+    return parsed
 
 
 def _port(value: str) -> int:
@@ -184,8 +226,11 @@ _NODE_HELP = {
     ),
     "--transport": (
         "udp (default) is a radio-free duplex link through localhost sample ports; pluto "
-        "drives one ADALM-Pluto for both directions; uhd is refused"
+        "drives one ADALM-Pluto for both directions; uhd drives one USRP B210 (TX on one "
+        "front end, RX on the other)"
     ),
+    "--channel": "uhd: the RX front end, 0 = RF A, 1 = RF B (default 1); TX uses the other",
+    "--antenna": "uhd: the RX antenna port, TX/RX (default) or RX2; TX is always TX/RX",
     "--udp-port": "not used by node_app: the sample ports are --udp-listen-port/--udp-peer-port",
     "--gain": "refused: a node has two gains, use --tx-gain and --rx-gain",
 }
@@ -203,7 +248,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ofdm-message-node",
         description=(
             "One node of a bidirectional OFDM link: transmits and receives at once on "
-            "one Pluto (FDD), with feedback and link adaptation. GUI or --headless."
+            "one Pluto or one USRP B210 (FDD), with feedback and link adaptation. GUI or "
+            "--headless."
         ),
     )
     options.add_common_arguments(parser)
@@ -215,12 +261,18 @@ def build_parser() -> argparse.ArgumentParser:
                       help="transmit frequency (default: the profile's for this node)")
     node.add_argument("--rx-freq", type=float, default=None, metavar="HZ",
                       help="receive frequency (default: the profile's for this node)")
-    node.add_argument("--tx-gain", type=_tx_gain, default=DEFAULT_TX_GAIN_DB,
-                      help=f"Pluto TX gain in dB, -89.75 to 0 (default {DEFAULT_TX_GAIN_DB:g})")
-    node.add_argument("--rx-gain", type=float, default=DEFAULT_RX_GAIN_DB,
-                      help=f"RX gain in dB (default {DEFAULT_RX_GAIN_DB:g})")
+    node.add_argument("--tx-gain", type=_gain, default=None,
+                      help=("TX gain in dB: Pluto -89.75 to 0 (default -89.75), B210 0 to 89.75 "
+                            "(default 0)"))
+    node.add_argument("--rx-gain", type=_gain, default=None,
+                      help="RX gain in dB (default 15; B210 0 to 76, default 30)")
     node.add_argument("--rx-analog-bw", type=_positive, default=None, metavar="HZ",
                       help="AD9361 RX analog filter bandwidth (default: the sample rate)")
+    node.add_argument("--tx-lo-offset", type=_lo_offset, default=None, metavar="HZ",
+                      help=("uhd: tune the TX LO this far from the carrier so its leakage "
+                            "misses the peer's RX band (default 8e6; 0 = none)"))
+    node.add_argument("--tx-analog-bw", type=_positive, default=None, metavar="HZ",
+                      help="uhd: TX analog filter bandwidth (default 25e6)")
     node.add_argument("--rx-kernel-buffers", type=_kernel_buffers, default=4, metavar="N",
                       help="libiio RX kernel buffers (default 4; 8 rides out longer USB stalls)")
     node.add_argument("--tx-duty-cap", type=_duty, default=0.7, metavar="D",
@@ -229,12 +281,12 @@ def build_parser() -> argparse.ArgumentParser:
     node.add_argument("--peak-amplitude", type=float, default=0.7,
                       help="scale each burst to this peak magnitude (default: 0.7)")
     node.add_argument("--headless", action="store_true",
-                      help="no window: implies --auto-start; pluto needs --serial")
+                      help="no window: implies --auto-start; pluto and uhd need --serial")
     node.add_argument("--duration", type=_positive, default=None, metavar="S",
                       help="stop S seconds after ready (headless)")
-    node.add_argument("--gain-profile", type=parse_gain_profile, default=None,
-                      metavar="T:DB,...",
-                      help="scheduled TX gain, seconds from ready, e.g. '0:-5,30:-20,60:-5'")
+    node.add_argument("--gain-profile", default=None, metavar="T:DB,...",
+                      help=("scheduled TX gain, seconds from ready, e.g. '0:-5,30:-20,60:-5' "
+                            "(gains in the --tx-gain range of the transport)"))
     node.add_argument("--control-port", type=_port, default=None, metavar="P",
                       help="localhost UDP JSON control socket (default: per node; 0 = off)")
     node.add_argument("--decode-workers", type=_decode_workers,
@@ -282,7 +334,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     rf = parser.add_argument_group("RF safety gate")
     rf.add_argument("--enable-rf", action="store_true",
-                    help="required for --transport pluto; this process will key a transmitter")
+                    help="required for --transport pluto or uhd; this process keys a transmitter")
     rf.add_argument("--acknowledgement", default=None,
                     help=f"must be exactly {options.RF_ACKNOWLEDGEMENT!r}")
     options.add_aggregation_arguments(parser)
@@ -320,13 +372,45 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         args.overlay = [DEFAULT_NODE_OVERLAY]
     if args.headless:
         args.auto_start = True
-        if args.transport == "pluto" and not args.serial:
-            parser.error("--headless with --transport pluto needs --serial")
-    if args.transport == "uhd":
-        parser.error("node_app drives a Pluto (--transport pluto) or the udp simulation")
+        if args.transport in ("pluto", "uhd") and not args.serial:
+            parser.error(f"--headless with --transport {args.transport} needs --serial")
     if args.snr_db is not None and args.transport != "udp":
         parser.error("--snr-db applies to the udp transport only")
+    _resolve_gains(parser, args)
+    if args.transport != "uhd":
+        for flag, value in (("--tx-lo-offset", args.tx_lo_offset),
+                            ("--tx-analog-bw", args.tx_analog_bw)):
+            if value is not None:
+                parser.error(f"{flag} applies to --transport uhd only")
+    else:
+        if args.channel is not None and args.channel not in (0, 1):
+            parser.error("--channel with --transport uhd is the RX front end, 0 or 1")
+        if args.antenna is not None and args.antenna not in ("TX/RX", "RX2"):
+            parser.error("--antenna with --transport uhd is the RX port, TX/RX or RX2")
     return args
+
+
+def _resolve_gains(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Fill the transport's default gains and check every gain against its range."""
+
+    tx_default, rx_default = default_gains(args.transport)
+    low, high = tx_gain_range(args.transport)
+    radio = "a B210's amplifier" if args.transport == "uhd" else "a Pluto's attenuator"
+    if args.tx_gain is None:
+        args.tx_gain = tx_default
+    elif not low <= args.tx_gain <= high:
+        parser.error(f"--tx-gain must be {low:g} to {high:g} dB ({radio})")
+    if args.rx_gain is None:
+        args.rx_gain = rx_default
+    else:
+        rx_range = rx_gain_range(args.transport)
+        if rx_range is not None and not rx_range[0] <= args.rx_gain <= rx_range[1]:
+            parser.error(f"--rx-gain must be {rx_range[0]:g} to {rx_range[1]:g} dB for a B210")
+    if args.gain_profile is not None:
+        try:
+            args.gain_profile = parse_gain_profile(args.gain_profile, (low, high))
+        except argparse.ArgumentTypeError as error:
+            parser.error(f"--gain-profile: {error}")
 
 
 def resolve_node(args: argparse.Namespace) -> NodeSetup:
@@ -397,9 +481,12 @@ __all__ = [
     "NodePorts",
     "NodeSetup",
     "build_parser",
+    "default_gains",
     "node_ports",
     "parse_args",
     "parse_gain_profile",
     "peer_id",
     "resolve_node",
+    "rx_gain_range",
+    "tx_gain_range",
 ]

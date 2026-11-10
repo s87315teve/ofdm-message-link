@@ -33,6 +33,9 @@ _MIN_BANDWIDTH_HZ = 200_000.0
 _MAX_BANDWIDTH_HZ = 56_000_000.0
 _MAX_RX_GAIN_DB = 76.0
 _MAX_TX_GAIN_DB = 89.8
+# The DSP shift an LO offset leaves to the FPGA must stay inside half the
+# widest AD9361 analog bandwidth.
+_MAX_LO_OFFSET_HZ = 28_000_000.0
 
 
 class UhdUnavailableError(RuntimeError):
@@ -90,6 +93,10 @@ class B210Settings:
     tx_antenna: str = "TX/RX"
     channel: int = 0
     clock_source: str = "internal"
+    # Tune the LO this far from center_frequency and let the FPGA shift the
+    # rest (UHD tune_request).  A transmitter's LO leakage then lands outside
+    # the band, not in the middle of an FDD peer's receive band.
+    lo_offset: float = 0.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.device_args, str):
@@ -123,6 +130,9 @@ class B210Settings:
             raise ValueError("channel must be the RF A (0) or RF B (1) front end")
         if self.clock_source != "internal":
             raise ValueError("clock_source must be internal in v1")
+        lo_offset = _finite_number("lo_offset", self.lo_offset)
+        if abs(lo_offset) > _MAX_LO_OFFSET_HZ:
+            raise ValueError("lo_offset must be within +-28 MHz")
 
 
 @dataclass(frozen=True, slots=True)
@@ -351,6 +361,7 @@ def create_b210_source(
         settings=settings,
         gain=settings.rx_gain,
         antenna=settings.rx_antenna,
+        uhd_api=uhd,
     )
     return source
 
@@ -414,6 +425,7 @@ def _create_b210_sink(
         settings=settings,
         gain=settings.tx_gain,
         antenna=settings.tx_antenna,
+        uhd_api=uhd,
     )
     return sink
 
@@ -432,10 +444,16 @@ def _configure_block(
     settings: B210Settings,
     gain: float,
     antenna: str,
+    uhd_api: Any | None = None,
 ) -> None:
     block.set_clock_source(settings.clock_source, 0)
     block.set_samp_rate(settings.sample_rate)
-    block.set_center_freq(settings.center_frequency, _BLOCK_CHANNEL)
+    if settings.lo_offset:
+        uhd = uhd_api if uhd_api is not None else _load_uhd()
+        target = uhd.tune_request(settings.center_frequency, settings.lo_offset)
+        block.set_center_freq(target, _BLOCK_CHANNEL)
+    else:
+        block.set_center_freq(settings.center_frequency, _BLOCK_CHANNEL)
     block.set_gain(gain, _BLOCK_CHANNEL)
     block.set_bandwidth(settings.bandwidth, _BLOCK_CHANNEL)
     block.set_antenna(antenna, _BLOCK_CHANNEL)

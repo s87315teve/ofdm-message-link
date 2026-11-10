@@ -6,10 +6,11 @@ reuses everything the one-way apps run: :class:`~.tx_app.TransmitWorker`
 and :class:`~.rx_app.ReceiveWorker`, the decode pool, UDP ingress and
 egress, and :func:`~.engine._serve`.  What is new here:
 
-* :class:`PlutoDuplexFactory` / :class:`UdpDuplexFactory`, picklable, build
-  the sink and source in the child, on one
-  :class:`~.pluto.SharedPlutoContext` (or as two UDP sample sockets, for a
-  radio-free duplex link on one PC);
+* :class:`PlutoDuplexFactory` / :class:`UhdDuplexFactory` /
+  :class:`UdpDuplexFactory`, picklable, build the sink and source in the
+  child: on one :class:`~.pluto.SharedPlutoContext`, on the two front ends of
+  one USRP B210, or as two UDP sample sockets (a radio-free duplex link on
+  one PC);
 * :class:`DutyCappedSink` keeps a Pluto's transmit duty at or below
   ``--tx-duty-cap`` (default 0.7), so USB 2.0 still carries the receive stream;
 * :class:`NodeWorker` starts transmit first and receive second, and stops in
@@ -206,6 +207,100 @@ class PlutoDuplexFactory:
             description=(
                 f"pluto {self.serial[-6:]} TX {self.tx_frequency / 1e6:.3f} MHz "
                 f"RX {self.rx_frequency / 1e6:.3f} MHz"
+            ),
+        )
+
+
+#: B210 node defaults (experiments/duplex_fdd/README.md, 4.6):
+#: the TX LO 8 MHz off its carrier and a 25 MHz TX analog filter.  Without the
+#: offset a node's TX LO leakage lands about 2.4 kHz from the peer's RX centre
+#: and floods its acquisition.
+DEFAULT_UHD_TX_LO_OFFSET_HZ = 8_000_000.0
+DEFAULT_UHD_TX_BANDWIDTH_HZ = 25_000_000.0
+#: RX on RF B, TX on RF A: device B's RF A received about 13 dB weaker at 2420 MHz.
+DEFAULT_UHD_RX_CHANNEL = 1
+
+
+@dataclass(frozen=True)
+class UhdDuplexFactory:
+    """Builds a node's sink and source on the two front ends of one USRP B210, in the child.
+
+    TX is a :class:`~.transport.UhdSampleSink` on the front end that is not
+    ``rx_channel`` (TX/RX port), tuned with ``tx_lo_offset``; RX is a
+    :class:`~.transport.UhdSampleSource` on ``rx_channel``.  Both select the
+    device by ``serial=``, and each opens its block under
+    :func:`~.devices.uhd_access_lock` (inside ``start()``), sink first.  The
+    sink needs the RF acknowledgement, exactly like the one-way apps.
+    """
+
+    serial: str
+    sample_rate: int
+    tx_frequency: float
+    rx_frequency: float
+    tx_gain_db: float
+    rx_gain_db: float
+    acknowledgement: str
+    rx_channel: int = DEFAULT_UHD_RX_CHANNEL
+    rx_antenna: str = "TX/RX"
+    rx_bandwidth: float | None = None
+    tx_lo_offset: float = DEFAULT_UHD_TX_LO_OFFSET_HZ
+    tx_bandwidth: float = DEFAULT_UHD_TX_BANDWIDTH_HZ
+    peak_amplitude: float = 0.7
+    recv_frames: int | None = None
+
+    def settings(self):
+        """(TX, RX) :class:`~ofdm_link.radio.uhd.B210Settings`; validated, no device touched."""
+
+        from ofdm_link.radio.uhd import B210Settings
+
+        if self.rx_channel not in (0, 1):
+            raise ValueError("rx_channel must be 0 (RF A) or 1 (RF B)")
+        device_args = f"serial={self.serial}"
+        rx_bandwidth = float(self.rx_bandwidth or max(float(self.sample_rate), 200_000.0))
+        tx = B210Settings(
+            device_args=device_args,
+            sample_rate=int(self.sample_rate),
+            center_frequency=float(self.tx_frequency),
+            rx_gain=float(self.rx_gain_db),
+            tx_gain=float(self.tx_gain_db),
+            bandwidth=float(self.tx_bandwidth),
+            rx_antenna=self.rx_antenna,
+            tx_antenna="TX/RX",
+            channel=1 - self.rx_channel,
+            lo_offset=float(self.tx_lo_offset),
+        )
+        rx = B210Settings(
+            device_args=device_args,
+            sample_rate=int(self.sample_rate),
+            center_frequency=float(self.rx_frequency),
+            rx_gain=float(self.rx_gain_db),
+            tx_gain=0.0,
+            bandwidth=rx_bandwidth,
+            rx_antenna=self.rx_antenna,
+            tx_antenna="TX/RX",
+            channel=self.rx_channel,
+        )
+        return tx, rx
+
+    def __call__(self) -> DuplexEndpoint:
+        from ofdm_link.radio import acknowledge_rf_transmission
+
+        from .devices import ensure_images_dir
+        from .transport import UhdSampleSink, UhdSampleSource
+
+        token = acknowledge_rf_transmission(self.acknowledgement)
+        tx, rx = self.settings()
+        ensure_images_dir()
+        sink = UhdSampleSink(tx, token, peak_amplitude=self.peak_amplitude)
+        source = UhdSampleSource(rx, recv_frames=self.recv_frames)
+        front = ("RF A", "RF B")
+        return DuplexEndpoint(
+            sink,
+            source,
+            description=(
+                f"uhd {self.serial} TX {self.tx_frequency / 1e6:.3f} MHz ({front[tx.channel]}, "
+                f"LO offset {self.tx_lo_offset / 1e6:g} MHz) RX {self.rx_frequency / 1e6:.3f} MHz "
+                f"({front[rx.channel]} {self.rx_antenna})"
             ),
         )
 
@@ -691,6 +786,7 @@ __all__ = [
     "PlutoDuplexFactory",
     "ProcessNodeWorker",
     "UdpDuplexFactory",
+    "UhdDuplexFactory",
     "build_algorithms",
     "describe_spec",
     "la_context",
