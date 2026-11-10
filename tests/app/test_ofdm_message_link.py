@@ -2850,3 +2850,23 @@ def test_udp_recv_prints_each_message_as_it_arrives(tmp_path):
             assert line() == "one line\n"
         finally:
             receiver.terminate()
+
+
+def test_a_full_receive_queue_waits_before_it_pushes_back(monkeypatch):
+    """A full queue waits (GIL released) before the sink block returns 0, instead of spinning."""
+
+    import threading
+
+    from ofdm_link.radio.uhd import B210Settings
+
+    source = transport.UhdSampleSource(B210Settings(rx_gain=30.0), queue_depth=1)
+    chunk = np.zeros(256, dtype=np.complex64)
+    assert source._enqueue(chunk)
+    started = time.monotonic()
+    assert not source._enqueue(chunk)                     # nobody drains: back-pressure
+    assert time.monotonic() - started >= transport._RX_QUEUE_WAIT_S * 0.9
+    assert source.snapshot()["queue_full_backpressure_events"] == 1
+    monkeypatch.setattr(transport, "_RX_QUEUE_WAIT_S", 2.0)
+    threading.Timer(0.05, lambda: source.recv(0.1)).start()
+    assert source._enqueue(chunk)                         # drained during the wait: accepted
+    assert source.snapshot()["chunks_received"] == 2

@@ -49,6 +49,12 @@ _RX_REFERENCE_RATE = 5_000_000
 # at 5 MS/s) then fell behind OTA at 330 burst/s, 65536 (13 ms) does not.
 _RX_CHUNK_SAMPLES = 65536
 _MAX_RX_RECV_FRAMES = 1024
+# A full receive queue makes the sink block return 0, and GNU Radio calls it
+# again at once while the input is still there: without a wait that loop spins
+# on the GIL and starves the receiver that would drain the queue (B210 node_app:
+# 1.9 million back-pressure returns and ~20 % of samples lost in 190 s).  The
+# blocking put releases the GIL while it waits.
+_RX_QUEUE_WAIT_S = 0.005
 
 
 def _rx_rate_scale(sample_rate: float) -> int:
@@ -601,7 +607,7 @@ class UhdSampleSource:
 
     def _enqueue(self, samples: NDArray[np.complex64]) -> bool:
         try:
-            self._queue.put_nowait(samples)
+            self._queue.put(samples, timeout=_RX_QUEUE_WAIT_S)
             self._chunks_received += 1
             self._samples_received += int(samples.size)
             return True
