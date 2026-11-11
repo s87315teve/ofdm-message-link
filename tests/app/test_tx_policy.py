@@ -121,30 +121,50 @@ def _start(profile, *, policy=None, limits=None, entry=None):
     return worker, bridge
 
 
+def _bursts_without_a_policy(profile, index, messages):
+    worker, bridge = _start(profile, entry=mcs_entry(index))
+    for message in messages:
+        assert worker.submit("t", message)
+    sink = _Sink()
+    worker.start()
+    worker.attach(sink)
+    try:
+        assert _wait_for(
+            lambda bridge=bridge: sum(r.message_count for r in bridge.sent.values)
+            == len(messages)
+        )
+    finally:
+        worker.stop()
+    assert not bridge.failed.values
+    assert all(r.control_subframes == 0 and not r.control_only for r in bridge.sent.values)
+    return [np.ascontiguousarray(burst, dtype=np.complex64) for burst in sink.bursts]
+
+
 def test_without_a_policy_the_bursts_are_bit_identical_to_before(profile, monkeypatch):
+    from ofdm_link.phy import native_backend
+
     monkeypatch.setattr(datagram, "local_origin", lambda: 0x0123456789ABCDEF)
     monkeypatch.setattr(datagram.time, "monotonic_ns", lambda: 1_000_000_000)
     messages = [bytes([index]) * (50 + 300 * index) for index in range(12)]
-    for index, (count, digest) in GOLDEN_SHA256.items():
-        worker, bridge = _start(profile, entry=mcs_entry(index))
-        for message in messages:
-            assert worker.submit("t", message)
-        sink = _Sink()
-        worker.start()
-        worker.attach(sink)
-        try:
-            assert _wait_for(
-                lambda bridge=bridge: sum(r.message_count for r in bridge.sent.values)
-                == len(messages)
-            )
-        finally:
-            worker.stop()
-        assert not bridge.failed.values
-        hasher = hashlib.sha256()
-        for burst in sink.bursts:
-            hasher.update(np.ascontiguousarray(burst, dtype=np.complex64).tobytes())
-        assert (len(sink.bursts), hasher.hexdigest()) == (count, digest), index
-        assert all(r.control_subframes == 0 and not r.control_only for r in bridge.sent.values)
+    try:
+        for index, (count, digest) in GOLDEN_SHA256.items():
+            # The golden digests are of the Python reference TX path.
+            monkeypatch.setenv(native_backend.env_name("tx"), "python")
+            native_backend.reset()
+            reference = _bursts_without_a_policy(profile, index, messages)
+            hasher = hashlib.sha256()
+            for burst in reference:
+                hasher.update(burst.tobytes())
+            assert (len(reference), hasher.hexdigest()) == (count, digest), index
+            # The native TX path differs only by its double-precision IFFT.
+            monkeypatch.setenv(native_backend.env_name("tx"), "native")
+            native_backend.reset()
+            native = _bursts_without_a_policy(profile, index, messages)
+            assert len(native) == len(reference), index
+            for got, expected in zip(native, reference, strict=True):
+                assert got.size == expected.size and np.max(np.abs(got - expected)) <= 2e-6
+    finally:
+        native_backend.reset()
 
 
 def test_the_policy_entry_is_used_for_both_plan_and_encode(profile):

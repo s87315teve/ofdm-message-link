@@ -8,9 +8,13 @@ it delivers.
 
 from __future__ import annotations
 
+import itertools
+from unittest import mock
+
 import numpy as np
 
 from ofdm_link.phy.mcs_table import mcs_entry
+from ofdm_message_link import datagram
 from ofdm_message_link.link import (
     MessageReceiver,
     MessageTransmitter,
@@ -44,14 +48,18 @@ def v5_stream(
     rng = np.random.default_rng(seed)
     pieces: list[np.ndarray] = [np.zeros(int(rng.integers(*gap_samples)), dtype=np.complex64)]
     payloads: list[bytes] = []
-    for index in range(bursts):
-        entry = mcs_entry(mcs_indices[index % len(mcs_indices)])
-        transmitter = MessageTransmitter(profile, mcs_entry=entry)
-        payload = rng.integers(0, 256, payload_bytes, dtype=np.uint8).tobytes()
-        for burst in transmitter.encode_message(payload):
-            pieces.append(np.asarray(burst.samples, dtype=np.complex64))
-        payloads.append(payload)
-        pieces.append(np.zeros(int(rng.integers(*gap_samples)), dtype=np.complex64))
+    # Each datagram header carries its send time; a fixed clock makes the
+    # waveform, not only the payloads, a function of the seed.
+    clock = itertools.count(1_000_000_000, 1_000_000)
+    with mock.patch.object(datagram.time, "monotonic_ns", lambda: next(clock)):
+        for index in range(bursts):
+            entry = mcs_entry(mcs_indices[index % len(mcs_indices)])
+            transmitter = MessageTransmitter(profile, mcs_entry=entry)
+            payload = rng.integers(0, 256, payload_bytes, dtype=np.uint8).tobytes()
+            for burst in transmitter.encode_message(payload):
+                pieces.append(np.asarray(burst.samples, dtype=np.complex64))
+            payloads.append(payload)
+            pieces.append(np.zeros(int(rng.integers(*gap_samples)), dtype=np.complex64))
     stream = np.concatenate(pieces).astype(np.complex128)
     signal_power = float(np.mean(np.abs(stream[np.abs(stream) > 0]) ** 2))
     variance = signal_power / 10.0 ** (snr_db / 10.0)
