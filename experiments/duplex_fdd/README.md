@@ -76,6 +76,9 @@ A→B 是 node 1 發、node 2 收（2420 MHz），B→A 相反（2460 MHz）。
   RF A 發、RF B 收，TX LO 偏 8 MHz。MCS 12、每個方向 450/s × 900 B、180 秒同時雙向：A→B 遺失 1.77%、
   B→A 2.30%，各 3.17–3.18 Mbit/s，p50／p99 延遲 96–98／128–130 ms，RX overflow 0（4.6）。第一次 run 遺失
   25–30%：RX sink block 在 queue 滿時忙等 GIL，修正後（`6a063d9`）才是上面的數字。
+  **TX 從 68 改成 80 dB 重測（4.7）**：同樣的雙向 MCS 12 遺失 0.00%／0.01%，MCS 16、每個方向 800/s 是 0.08%／0.04%
+  （5.76 Mbit/s）；單向 5 MS/s MCS 17 到約 10.6 Mbit/s、遺失 ≤ 0.81%，10 MS/s 單向約 18 Mbit/s、遺失 ≤ 0.83%（收端 8 個
+  decode workers）。10 MS/s 雙向與 20 MS/s 不能用，重測的判斷是收端 Python 處理的 CPU 不夠（USB buffer 不是 1x1 的限制）。全部沒有 real-time priority、每點一次。
 - **雙向影像（M4，實測）。** 60 秒、OLLA、TX −5 dB：750 與 1300 kbit/s 兩端都解出完整 60 秒（877–884 frame）。
   A→B corrupt 行 2／4、遺失 0.01–0.02%、MCS 17；B→A corrupt 行 96／155，來自 ch-11 的遺失下限，OLLA 在約 MCS 10
   （offset −3 到 −4.6 dB）。Engine 0.66–0.82 core，overflow 0–1 次。`video_duplex.sh` 的 consumer 卡住問題已修
@@ -778,12 +781,66 @@ corrupt datagram、沒有 TX underflow 或 late。
   `return 0`：GNU Radio 在 input 還在時立刻再呼叫 `work`，`put_nowait` 失敗、再回 0，190 秒內 190 萬次，搶走要清 queue
   的 receiver 的 GIL。`6a063d9` 改成最多等 5 ms 的 blocking put（等待時放開 GIL）：back-pressure 次數 190 萬 → 1600–1800，
   overflow → 0，engine 1.03 → 0.91 core，延遲 p50 約 400 → 97 ms。這也是之前單向 B210 量測裡「中等負載時
-  300–360 ms 延遲」的可能原因（那時 back-pressure 538 萬次），沒有重量確認。
+  300–360 ms 延遲」的可能原因（那時 back-pressure 538 萬次）；4.7 的重測在中等負載量到 p50 61–72 ms。
 - **兩個方向不對稱約 8 dB**（A→B 17 dB、B→A 25 dB，同樣 TX 68 dB）。之前單向量到 B 的 RF A 在 2420 MHz 收得比 RF B
   弱約 13 dB，所以 RX 都放 RF B；剩下的差異（天線、擺放、2420 在 Wi-Fi channel 1）沒有分開。
 - **剩下的 1.8–2.3% 遺失**比 Pluto 的 M2（MCS 12：0%／0.86%）高；只跑一次，沒有分開 Wi-Fi、SNR 與 CPU 的部分。
+  TX 改成 80 dB 後同樣的 run 是 0.00%／0.01%（4.7）。
 - 兩個 run 的 `meta.json` 是 `git_rev 3abca7e`、`git_dirty true`：程式是工作目錄裡的 `bdb468b`（UHD node）加上
   （修正後的 run）`6a063d9`，commit 在 run 開始之後。
+
+### 4.7 B210 重測：TX gain 70 → 80 dB（2026-11-10 晚）
+
+**實測**，2026-11-10 晚，同一對 B210、同一張桌，程式 `7a39973`（雙向 run 的 `meta.json`：`git_dirty false`）。
+原始資料在本機 `runs/usrp_b210_retest_20261110/`（`runs/` 不進版控）。單向用 `tx_app`／`rx_app`：TX 在 RF A、
+RX 在 RF B（channel 0／1），A→B 2420 MHz、B→A 2460 MHz，900 B，每點 15 秒，RX gain 30 dB。**每點只跑一次。**
+UHD 這時拿不到 real-time priority：重測的 agent 回報該 session 的 `ulimit -r` 是 0，所以下面全是沒有 RT priority
+的結果（`runs/` 裡沒有記下這個值的檔案）。
+
+**USB 的速率餘裕**（`01_rate/summary.txt`，重測自己寫的 `uhd_fdd_probe.py`，每點 15 秒、TX 送零、TX gain 0）：
+`num_recv_frames`／`num_send_frames` 512 時，1x1 在 5、10、20、30.72 MS/s 兩台都是 0 overflow、0 underflow；
+2x2 用 1024 時 10 與 15.36 MS/s 也是 0，30.72 MS/s 失敗（RX overflow 1628–1688、TX underflow 33636–40138）。
+所以 1x1 的上限不在 USB。
+
+**單向 5 MS/s，同樣的提供量**（遺失率；`10_mcs_sweep/summary.txt` 是 TX 70，`30_sweep_tx80/summary.txt` 是 TX 80）：
+
+| MCS，提供量 | TX 70，A→B | TX 70，B→A | TX 80，A→B | TX 80，B→A |
+|---|---:|---:|---:|---:|
+| 12，690/s（4.97 Mbit/s） | 0.29% | 0.59% | 0% | 0% |
+| 14，1100/s（7.92 Mbit/s） | 6.53% | 2.93% | 0% | 0% |
+| 16，1330/s（9.58 Mbit/s） | 9.77% | 4.73% | 0.12% | 0.005% |
+| 17，1480/s（10.66 Mbit/s） | 54.6% | 73.8% | 0.81%（10.57 Mbit/s） | 0.21%（10.63 Mbit/s） |
+
+- **TX 70 dB 的遺失主要是 SNR 不夠。** `30_sweep_tx80/summary.txt` 的 TX 80 dB 點 RX overflow 都是 0。MCS 17 在 750/s：B→A TX 75 dB 3.47%、
+  TX 80 dB 0.03%，A→B TX 75 dB 5.22%、TX 80 dB 0.45%；RX gain 改成 20 dB 沒有更好（`21_gain_up/summary.txt`）。
+- **中等負載的延遲**：TX 70 dB、MCS 8–12、沒超過 TX 服務速率的點 p50 61–72 ms，back-pressure 0–1 次（`10_mcs_sweep/summary.txt`），
+  符合 4.6 對修正前 300–360 ms 的解釋。
+- **5 MS/s MCS 17 的上限約 10.7 Mbit/s，超過就崩潰。** B→A 提供 11.52 Mbit/s（1600/s）遺失 93.1%，降回 10.66 Mbit/s
+  仍是 93.1%；1700／1900/s 用 8 個 decode workers 也是 100%（`30_sweep_tx80/BA_tx80_rx30_mcs17_1600/`、`…_hi_w8/`）。
+  收端 CPU（`summary.txt` 的 `cpu_rx`）：MCS 12 約 2.3 core，MCS 17 2.7–4.2 core。
+- **10 MS/s 單向**（重測時自己加的 overlay，在 `runs/…/overlays/`；`40_rate10m/`）：預設的 decode workers 在 MCS 17、TX 80 dB
+  遺失 13–36%，`--decode-workers=8` 後 7.7–9.5%，再加到 TX 85 dB 後 A→B 0.76–1.5%、B→A ≤ 0.012%（到 15.84 Mbit/s）。
+  MCS 16、TX 85 dB、8 workers、提供 18.0 Mbit/s：A→B 遺失 0.83%（17.85 Mbit/s，p50／p99 385／484 ms）、
+  B→A 0.024%（18.0 Mbit/s，213／254 ms）。MCS 14、TX 80 dB、15.12 Mbit/s：0.18%／0.073%。
+- **20 MS/s 單向不可用**：MCS 14、TX 85 dB、12 workers，提供 7.2／14.4／20.2 Mbit/s 遺失 28.5／19.1／28.0%（`50_rate20m/`）。
+- **雙向 `node_app`，5 MS/s，TX 80 dB**（`70_duplex/`，180 秒，每個 node 3 個 decode workers）：
+
+| Run | 方向 | Datagram 遺失 | Goodput Mbit/s | 延遲 p50／p99 ms | SNR dB | RX overflow（node 1／node 2） |
+|---|---|---:|---:|---:|---:|---:|
+| `mcs12_450_tx80_180s` | A→B | 0.00%（0／81000） | 3.240 | 100／137 | 18.6 | 0／0 |
+| | B→A | 0.01%（6／81000） | 3.240 | 100／135 | 30.2 | |
+| `mcs16_800_tx80_180s` | A→B | 0.08% | 5.756 | 146／210 | 19.2 | 0／1 |
+| | B→A | 0.04% | 5.758 | 153／218 | 30.4 | |
+| `mcs16_1000_tx80_180s` | A→B | 0.45% | 7.168 | 236／331 | 22.3 | 90／36 |
+| | B→A | 1.04% | 7.125 | 250／350 | 30.6 | |
+
+- **10 MS/s 雙向失敗**（MCS 14、TX 85 dB）：每個方向 1500/s 遺失約 54%、每個 node overflow 約 4100 次；600/s 仍遺失
+  26–31%（`70_duplex/10m_mcs14_*`）。雙向維持 5 MS/s。
+- **A→B 比 B→A 弱約 12 dB**（雙向、兩邊都 TX 80 dB：18.6 對 30.2 dB）。原因沒有分開（天線、擺放、port、2420 MHz 的 Wi-Fi）。
+- **和 Pluto 的對照條件不同**：Pluto 單向 5 MS/s MCS 17 的最好點是 9.295 Mbit/s、遺失 < 0.1%
+  （`experiments/tx_v5/results/v5_goodput_after_fix/NOTES.md`：TX −5 dB、30 秒的 run、每點一次搜尋），B210 是固定提供量的
+  15 秒點、gain 尺度也不同。所以只能說這次 5 MS/s 的 B210 不比 Pluto 差，不能說它比較好。10 MS/s 是 Pluto 在 USB 2 上
+  做不到的（1 節〈其他結論〉）。
 
 ## 5. ARQ 提案（沒有實作）
 
@@ -873,6 +930,7 @@ Pluto 沒有 timestamp，給不了。
 | `step_metrics.py` | M3／M3b：每個 gain step 的遺失與到目標 MCS 的時間 |
 | `results/m3b/` | M3b：la-tune 之後的重跑（`README.md`、`step_metrics.json`、`m3b_olla_run1/`、`m3b_olla_ba_idle/`） |
 | `results/b210/` | 4.6：兩台 USRP B210 的雙向 run，`m2_mcs12_450_180s/`（RX queue 修正後）與 `m2_mcs12_450_180s_spin/`（修正前） |
+| `runs/usrp_b210_retest_20261110/`（本機，不進版控） | 4.7：B210 重測的原始資料、overlay 與 sweep 腳本 |
 | `results/m3/`、`results/m4/` | M3（`olla` ×2、`olla` B→A 閒置、固定 8／10／12／15；`m3_prefix/` 是舊 burst 間隔的一次 run）、M4（`video_750k/`、`video_1300k/`） |
 
 程式（`src/ofdm_message_link/`）：`node_app.py`、`node_options.py`、`node_engine.py`（含 `DutyCappedSink`）、`node_window.py`、
@@ -891,7 +949,7 @@ node `test_pluto_shared.py`、`test_node_uhd.py`（B210 的 factory、gain 範�
 ## 7. 證據邊界
 
 - M0–M4 只有 Pluto 對 Pluto、一個擺放位置、一天、一組頻率。B210 對 B210（其中一台是 USRP-2901）只有
-  4.6 的兩個固定 MCS 12 run（各一次、180 秒、一個擺放位置）；OLLA、gain step、影像沒有在 B210 上跑。N210 沒有跑
+  4.6 的兩個固定 MCS 12 run 與 4.7 的重測（每點一次、一個擺放位置、沒有 real-time priority）；OLLA、gain step、影像沒有在 B210 上跑。N210 沒有跑
   `node_app`。B210 的 gain 與 Pluto 的尺度不同，兩邊的數字不能直接對照。
 - B210 node 的 CPU：修正後 engine 0.91 core，離 1 core 的上限不遠；更高的 burst rate 或 sample rate 可能再碰到
   GIL 的上限（設計稿的 `split` layout 仍沒有實作）。使用者不在 `usrp` group，UHD 拿不到 real-time priority；
