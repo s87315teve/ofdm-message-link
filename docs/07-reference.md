@@ -626,6 +626,12 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
   沒有缺口時 `lost` 的 `off` 是 `最後一個 burst 的 off + timeout`，和 v2.1.0 相同；失鎖的時間點落在 overflow 缺口裡時，
   `off` 是缺口後的第一個 sample（串流裡沒有更早的位置），`dev_t` 是 `最後一個 burst 的 dev_t + timeout`。
 - 沒有 `rx_time` 的 transport（udp、Pluto）用串流位置 `off` 計時，和 v2.1.0 相同。
+- 一個 header 已經解出來、payload 結果還沒回來的 burst（decode pool 還在解，或 samples 還沒到齊），可能就是 peer 的，
+  所以 v2.1.2 起，只要它在上一個 peer burst 之後 timeout 以內，就先不判失鎖，等它的結果；最多等到串流超過它一個
+  timeout。這只改變 `lost` 那一行寫出的時間（`mono`），`off` 與 `dev_t` 仍以最後一個 peer burst 計算。v2.1.1 沒有等：
+  接收端停住 2 s 一次會寫出 2–5 組 `lost`／`acquired`（桌上量測 `v211_stalltree_r1`、`r2`），只有最後一組是對的，
+  多出來的 `acquired` 的 `mono` 也比前一行 `lost` 早。分析 v2.1.1 的檔案時，同一個缺口的 `lost` 只取最後一個、
+  `acquired` 只取 `off` 在缺口之後的那個。
 - v2.1.0 只用 `off` 計時：overflow 遺失的 samples 不算進 `off`，所以接收端自己停住超過 timeout 也不會寫 `lock lost`
   （桌上量測 `v210_stalltree_r2` 發現）。分析 v2.1.0 的檔案時，要用 `overflow` 行的 `lost` 自己補判。
 
@@ -635,6 +641,8 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 
 **對效能的影響（2026-11-12，同一台電腦、一個 CPU、同一段 240 個 MCS 16 burst 的串流，`MessageReceiver.feed` 的
 CPU 時間，各 5 次的中位數，兩輪）**：關閉時 0.412 與 0.398 s，改動前 0.411 與 0.410 s，差異在雜訊內；打開時
-0.415 與 0.399 s。還沒有在 B210 上用 `--realtime` 量過打開時的遺失與 overflow。
+0.415 與 0.399 s。B210 上（`--realtime`、MCS 16、兩個方向各 1300 個 datagram／s、60 s）開與關也看不到代價：v2.1.0
+關兩次遺失 0、開兩次遺失 0 與 18／78000（RF 造成的 FCS 失敗），四次都沒有 overflow 與遺失樣本，開的兩次也沒有 `gap`；v2.1.1 開六次
+也沒有 overflow、遺失樣本與 `gap`（PRISM `experiments/jms1_bench/README.md` 第 4 節與〈2026-11-12 第二輪〉）。
 
 回到 [README](../README.md)。
