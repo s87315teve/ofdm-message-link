@@ -188,6 +188,15 @@ class V5RxConfig:
     the burst later; starting early only costs a linear phase, which the
     LTF-based channel estimate absorbs because every window moves alike.  It
     must stay well below the 16-sample CP minus the channel's delay spread.
+
+    ``snr_fft_advance_samples`` does the same for the preamble SNR estimate
+    only (:func:`~ofdm_link.phy.streaming.link_snr_db`, reported per burst and
+    to link adaptation), which otherwise starts both LTF windows exactly at the
+    acquired L1 start.  On hardware that start is often a sample or two late,
+    the L2 window then takes the head of the next symbol, and L1 - L2 reads
+    that as noise: a bench pair of B210s read up to a few dB more SNR with 4
+    (PRISM jms1_bench, 2026-11-12).  0 (the default) is the estimate of
+    v2.1.0 and earlier; decoding never uses this value.
     """
 
     acquisition: V5SyncConfig = field(default_factory=V5SyncConfig)
@@ -199,6 +208,7 @@ class V5RxConfig:
     max_psdu_bytes: int = 16384
     turbo_max_iterations: int = 8
     fft_backoff_samples: int = 3
+    snr_fft_advance_samples: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.acquisition, V5SyncConfig):
@@ -220,6 +230,13 @@ class V5RxConfig:
         ):
             raise SyncError(
                 f"fft_backoff_samples must be an integer in [0, {MAX_FFT_BACKOFF_SAMPLES}]"
+            )
+        if (
+            type(self.snr_fft_advance_samples) is not int
+            or not 0 <= self.snr_fft_advance_samples <= MAX_FFT_BACKOFF_SAMPLES
+        ):
+            raise SyncError(
+                f"snr_fft_advance_samples must be an integer in [0, {MAX_FFT_BACKOFF_SAMPLES}]"
             )
 
 

@@ -127,6 +127,7 @@
 | `max_psdu_bytes` | 16384 | SIG 可以宣告的最大 PSDU（19–65535） |
 | `turbo_max_iterations` | 8 | Turbo iteration 上限（2、4、6、8） |
 | `fft_backoff_samples` | 3 | 每個 v5 FFT window 提早進入 cyclic prefix 幾個 sample（0–8） |
+| `snr_fft_advance_samples` | 0 | 量測選項（v2.1.1 起）：preamble SNR 估計的兩個 LTF FFT window 提早幾個 sample（0–8）。只改 SNR 的讀值（`link_snr`、`--events` 的 `snr_db`、給 link adaptation 的 feedback），不改解碼。0 是 v2.1.0 的估計；`node_app --snr-fft-advance` 可以覆寫 |
 
 `duplex`（只有 `node_app` 讀；`tx_app` 與 `rx_app` 忽略它）：
 
@@ -466,6 +467,7 @@ process 默默分流。
 | `--tx-duty-cap D` | `pluto`：TX duty 不超過 D（0.05–1），預設 0.7（USB 2.0 同時帶 5 MS/s RX 時的上限，見 M0）；1 = 不限。`udp` 沒有 duty cap |
 | `--peak-amplitude` | 每個 burst 縮放到這個 peak，預設 0.7 |
 | `--snr-db` | 只有 `udp`：在 RX 加 AWGN |
+| `--snr-fft-advance N` | v2.1.1 起：preamble SNR 估計的兩個 LTF FFT window 提早 N 個 sample（0–8），覆寫 `phy.rx.snr_fft_advance_samples`。**不給時是 0，和 v2.1.0 的 SNR 完全相同。** 只改 SNR 的讀值，不改解碼；但 `olla` 用的 SNR feedback 也會跟著變。原因：硬體上估到的 L1 起點常晚一兩個 sample，L2 的 window 吃到下一個 symbol，`L1 − L2` 把它算成雜訊。桌上兩台 B210（2026-11-12）用快照離線重算，提早 4 個 sample 時 B→A 中位數高約 3 dB、低於 28 dB 的比例從約 13 % 降到 0–5 %。是否改成預設還沒決定。`--events` 的 `start` 行記下用的值 |
 | `--headless` | 不開視窗，隱含 `--auto-start`；`pluto` 與 `uhd` 需要 `--serial` |
 | `--duration S` | Ready 後 S 秒停止（headless） |
 | `--gain-profile "T:DB,..."` | 依 ready 後的秒數排程 TX gain，例如 `0:-5,30:-20,60:-5`；gain 依 `--transport` 的 TX 範圍檢查 |
@@ -589,7 +591,7 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 
 | `k` | 什麼時候 | 欄位 |
 |---|---|---|
-| `start` | 開檔時 | `version`、`sample_rate`、`burst_fields`、`package_version`、`argv`、`peer_id`、`transport`、`serial`、`tx_freq_hz`、`rx_freq_hz`、`tx_gain_db`、`rx_gain_db`、`tx_lo_offset_hz`、`tx_bandwidth_hz`、`mcs_index`、`link_adaptation`、`lock_timeout_s`、`clipping_level`；v2.1.1 起加 `tx_settle_guard_s`（B210 每個 burst 前的零值保護段，秒；預設 0.00025，其他 transport 是 `null`。v2.1.0 的檔案沒有這個欄位，當時一律 250 µs） |
+| `start` | 開檔時 | `version`、`sample_rate`、`burst_fields`、`package_version`、`argv`、`peer_id`、`transport`、`serial`、`tx_freq_hz`、`rx_freq_hz`、`tx_gain_db`、`rx_gain_db`、`tx_lo_offset_hz`、`tx_bandwidth_hz`、`mcs_index`、`link_adaptation`、`lock_timeout_s`、`clipping_level`；v2.1.1 起加 `snr_fft_advance_samples`（`snr_db` 用的 FFT window 提早量，0 = v2.1.0 的估計；v2.1.0 的檔案沒有這個欄位，當時一律是 0）與 `tx_settle_guard_s`（B210 每個 burst 前的零值保護段，秒；預設 0.00025，其他 transport 是 `null`。v2.1.0 的檔案沒有這個欄位，當時一律 250 µs） |
 | `burst` | 每個 preamble 一行（下表） | |
 | `lock` | 失鎖與重新鎖定 | `state`（`acquired`／`lost`）、`off`、`stream_t`（= `off / sample_rate`）、`dev_t`（v2.1.1 起：轉換時的裝置時間，沒有 `rx_time` 的 transport 是 `null`；v2.1.0 的檔案沒有這個欄位） |
 | `rx_time` | UHD 的 `rx_time` tag（開始時一個，每次 overflow 或 retune 一個） | `off`、`dev_t`：這個 sample 的裝置時間 |
@@ -608,7 +610,7 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 | `off` | preamble 第一個 sample 在接收串流中的位置（從 RX 開始算的 sample 數） |
 | `dev_t` | 那個 sample 的裝置時間（秒）：最近一個不晚於它的 `rx_time` anchor 加上 `(off − anchor) / sample_rate`。只有 UHD 有；B210 的裝置時鐘從開機起算，沒有對主機或 GNSS 對時 |
 | `mono`、`wall` | 接收 thread 把含有這個 preamble 的 chunk 交給 decoder 時的主機時間。比 burst 在空中的時間晚一段 queue 與 USB 的延遲（沒有量） |
-| `snr_db` | preamble（v5 是 LTF pair）量到的 SNR，換算到 payload samples，和 `link_snr` 事件同一個值 |
+| `snr_db` | preamble（v5 是 LTF pair）量到的 SNR，換算到 payload samples，和 `link_snr` 事件同一個值。兩個 FFT window 提早 `start` 行的 `snr_fft_advance_samples` 個 sample；不同值的檔案不能直接合併比較 |
 | `noise_var`、`signal_power` | 同一個量測的複數雜訊變異數（每個 sample）與 active carriers 上的平均 `|H|²`；都是線性值，接收的 full scale 是 1.0 |
 | `peak`、`clip` | burst 的 samples 裡最大的 `|I|` 或 `|Q|`（header 失敗時只看 fixed header 那一段）；`clip = peak ≥ 1900/2048`（與 `rx_app` 相同） |
 | `hdr` | `ok`（CRC 檢查過的 header）、`fail`（header 解碼失敗）、`invalid`（找到 preamble，但因為其他原因沒有可用的 header） |

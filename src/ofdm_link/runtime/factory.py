@@ -339,5 +339,6 @@ def build_burst_config(config: LinkConfig) -> BurstConfig:
         max_psdu_bytes=rx.max_psdu_bytes,
         turbo_max_iterations=rx.turbo_max_iterations,
         fft_backoff_samples=rx.fft_backoff_samples,
+        snr_fft_advance_samples=rx.snr_fft_advance_samples,
     )
     return BurstConfig(numerology=numerology, sync=sync, v5=v5)

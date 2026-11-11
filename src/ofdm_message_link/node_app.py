@@ -627,6 +627,7 @@ def open_events(args, setup: node_options.NodeSetup, spec: NodeSpec, factory):
         "lock_timeout_s": spec.lock_timeout_s,
         "clipping_level": CLIPPING_LEVEL,
         "tx_settle_guard_s": tx_settle_guard_s(factory),
+        "snr_fft_advance_samples": setup.resolved.profile.config.phy.rx.snr_fft_advance_samples,
     })
     return writer
 

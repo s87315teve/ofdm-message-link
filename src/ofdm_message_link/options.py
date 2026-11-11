@@ -515,6 +515,12 @@ def resolve(args: argparse.Namespace) -> ResolvedOptions:
             f"Add --overlay {DEFAULT_OVERLAY}."
         )
 
+    # node_app --snr-fft-advance: a measurement option on top of phy.rx.
+    advance = getattr(args, "snr_fft_advance", None)
+    if advance is not None:
+        rx = replace(config.phy.rx, snr_fft_advance_samples=int(advance))
+        config = replace(config, phy=replace(config.phy, rx=rx))
+
     selected_entry = mcs_entry(args.mcs_index) if args.mcs_index is not None else None
     mcs = selected_entry.modulation if selected_entry is not None else (
         MCS[args.mcs.upper()] if args.mcs else None

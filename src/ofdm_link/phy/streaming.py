@@ -339,7 +339,12 @@ class StreamingBurstDecoder:
         numerology = self._config.numerology
         measurement: PreambleMeasurement | LtfMeasurement | None
         if is_v5:
-            measurement = measure_ltf_pair(self._buffer, acquisition, numerology)
+            measurement = measure_ltf_pair(
+                self._buffer,
+                acquisition,
+                numerology,
+                backoff=self._config.v5.snr_fft_advance_samples,
+            )
         else:
             measurement = measure_preamble(
                 self._buffer, acquisition, numerology.active_carriers, self._config.sync

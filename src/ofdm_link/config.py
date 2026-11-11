@@ -100,6 +100,9 @@ class RxConfigSection:
     max_psdu_bytes: int = 16384
     turbo_max_iterations: int = 8
     fft_backoff_samples: int = 3
+    # Measurement option: start both FFT windows of the preamble SNR estimate
+    # this many samples early (0-8).  0 is the v2.1.0 estimate.
+    snr_fft_advance_samples: int = 0
 
 
 @dataclass(frozen=True)
@@ -920,6 +923,7 @@ def _rx_section(phy_raw: Mapping[str, Any]) -> RxConfigSection:
             "max_psdu_bytes",
             "turbo_max_iterations",
             "fft_backoff_samples",
+            "snr_fft_advance_samples",
         },
     )
     values: dict[str, Any] = {}
@@ -942,6 +946,10 @@ def _rx_section(phy_raw: Mapping[str, Any]) -> RxConfigSection:
             raise ConfigError("phy.rx.turbo_max_iterations must be one of: 2, 4, 6, 8")
     if "fft_backoff_samples" in raw:
         values["fft_backoff_samples"] = _bounded_int(raw, "fft_backoff_samples", "phy.rx", 0, 8)
+    if "snr_fft_advance_samples" in raw:
+        values["snr_fft_advance_samples"] = _bounded_int(
+            raw, "snr_fft_advance_samples", "phy.rx", 0, 8
+        )
     section = RxConfigSection(**{**asdict(defaults), **values})
     if not (section.legacy_acquisition or section.v5_acquisition):
         raise ConfigError("phy.rx must leave at least one acquisition family enabled")

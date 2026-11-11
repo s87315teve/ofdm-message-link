@@ -199,6 +199,42 @@ def test_fft_backoff_is_validated() -> None:
     assert V5RxConfig().fft_backoff_samples == 3
 
 
+@pytest.mark.parametrize("late", [1, 2, 3])
+def test_snr_fft_advance_keeps_the_preamble_snr_when_timing_is_late(late: int) -> None:
+    # The hardware effect behind phy.rx.snr_fft_advance_samples: with the
+    # acquired L1 start a few samples late, the L2 window of the v2.1.0
+    # estimate takes the head of the SIG and L1 - L2 counts it as noise.
+    from ofdm_link.phy.streaming import link_snr_db
+    from ofdm_link.phy.sync_v5 import _DEFAULT_NUMEROLOGY, measure_ltf_pair
+
+    burst = encode_burst_v5(_body(500, 78), mcs_entry(14), scrambler_seed=9)
+    stream = _awgn(_framed(burst.samples, before=200, after=300), 35.0,
+                   np.random.default_rng(8), 0.8)
+    acquisition = acquire_all(stream, None, V5SyncConfig())[0]
+    assert acquisition.stf_start == 200
+
+    def snr(acq, advance: int) -> float:
+        return link_snr_db(measure_ltf_pair(stream, acq, backoff=advance), _DEFAULT_NUMEROLOGY)
+
+    on_time = snr(acquisition, 0)
+    assert on_time == pytest.approx(35.0, abs=1.5)
+    late_acquisition = replace(
+        acquisition, stf_start=200 + late, ltf_start=acquisition.ltf_start + late
+    )
+    assert snr(late_acquisition, 0) < on_time - 10.0
+    assert snr(late_acquisition, 4) == pytest.approx(on_time, abs=1.5)
+
+
+def test_snr_fft_advance_is_validated_and_off_by_default() -> None:
+    with pytest.raises(ValueError):
+        V5RxConfig(snr_fft_advance_samples=9)
+    with pytest.raises(ValueError):
+        V5RxConfig(snr_fft_advance_samples=-1)
+    with pytest.raises(ValueError):
+        V5RxConfig(snr_fft_advance_samples=True)
+    assert V5RxConfig().snr_fft_advance_samples == 0
+
+
 @pytest.mark.parametrize(
     ("size", "mcs_index", "ppm", "snr"),
     [

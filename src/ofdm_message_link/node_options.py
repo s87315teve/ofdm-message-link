@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ofdm_link.phy.mcs_table import McsTableEntry, mcs_entry
+from ofdm_link.phy.sync_v5 import MAX_FFT_BACKOFF_SAMPLES
 
 from . import log_limits, options
 from .link import node_seed_range
@@ -198,6 +199,13 @@ def _tx_guard_us(value: str) -> float:
     return parsed
 
 
+def _snr_fft_advance(value: str) -> int:
+    parsed = int(value)
+    if not 0 <= parsed <= MAX_FFT_BACKOFF_SAMPLES:
+        raise argparse.ArgumentTypeError(f"must be 0 to {MAX_FFT_BACKOFF_SAMPLES}")
+    return parsed
+
+
 def _duty(value: str) -> float:
     parsed = float(value)
     if not 0.05 <= parsed <= 1.0:
@@ -312,6 +320,12 @@ def build_parser() -> argparse.ArgumentParser:
                       help=f"payload decode worker processes (default {DEFAULT_DECODE_WORKERS})")
     node.add_argument("--snr-db", type=float, default=None,
                       help="udp transport only: add AWGN at this SNR")
+    node.add_argument("--snr-fft-advance", type=_snr_fft_advance, default=None, metavar="N",
+                      help=("start both FFT windows of the preamble SNR estimate N samples "
+                            f"early, 0-{MAX_FFT_BACKOFF_SAMPLES} (default: phy.rx."
+                            "snr_fft_advance_samples, 0 = the v2.1.0 estimate); moves the SNR "
+                            "in --events, the stats and the feedback to link adaptation, "
+                            "not decoding"))
 
     la = parser.add_argument_group("link adaptation")
     la.add_argument("--link-adaptation", default=DEFAULT_LINK_ADAPTATION, metavar="SPEC",

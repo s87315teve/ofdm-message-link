@@ -389,6 +389,61 @@ def test_writer_lines_round_trip_and_mark_lost_batches(tmp_path):
     assert len(read_events(str(path), kinds=["burst"])) == 1
 
 
+def _with_snr_advance(profile, samples):
+    from dataclasses import replace
+
+    phy = profile.config.phy
+    rx = replace(phy.rx, snr_fft_advance_samples=samples)
+    return replace(profile, config=replace(profile.config, phy=replace(phy, rx=rx)))
+
+
+def test_the_snr_fft_advance_moves_the_snr_windows_only(profile, stream, monkeypatch):
+    from ofdm_link.phy import streaming
+
+    seen = []
+    original = streaming.measure_ltf_pair
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("backoff", 0))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(streaming, "measure_ltf_pair", spy)
+    samples, payloads = stream
+    base, _, base_delivered, base_snrs = _record(profile, samples)
+    assert seen and set(seen) == {0}
+    seen.clear()
+    advanced, _, delivered, snrs = _record(_with_snr_advance(profile, 4), samples)
+    assert seen and set(seen) == {4}
+    # Decoding does not use it: the same bursts, outcomes and payloads.
+    assert delivered == base_delivered == payloads
+    assert [(e.off, e.hdr, e.pl) for e in advanced] == [(e.off, e.hdr, e.pl) for e in base]
+    assert [e.snr_db for e in advanced] == pytest.approx(snrs)
+    # Exact timing on a clean stream: 4 samples into the CP read the same SNR.
+    assert np.median(snrs) == pytest.approx(np.median(base_snrs), abs=1.0)
+
+
+@pytest.mark.parametrize(("extra", "expected"), [((), 0), (("--snr-fft-advance", "4"), 4)])
+def test_the_snr_fft_advance_option_reaches_the_profile_and_the_start_line(tmp_path, extra,
+                                                                           expected):
+    from ofdm_message_link import node_app
+
+    path = tmp_path / "events.jsonl"
+    args = node_options.parse_args(["--node-id", "1", "--headless", "--events", str(path),
+                                    *extra])
+    setup = node_options.resolve_node(args)
+    assert setup.resolved.profile.config.phy.rx.snr_fft_advance_samples == expected
+    spec = node_app.build_spec(args, setup)
+    node_app.open_events(args, setup, spec, node_app.udp_factory(args, setup)).stop()
+    (start,) = read_events(str(path), kinds=["start"])
+    assert start["snr_fft_advance_samples"] == expected
+
+
+@pytest.mark.parametrize("value", ["-1", "9", "2.5"])
+def test_an_snr_fft_advance_outside_0_to_8_is_refused(value):
+    with pytest.raises(SystemExit):
+        node_options.parse_args(["--node-id", "1", "--snr-fft-advance", value])
+
+
 def test_events_option_needs_headless_and_an_existing_directory(tmp_path):
     with pytest.raises(SystemExit):
         node_options.parse_args(["--node-id", "1", "--transport", "udp", "--events", "x.jsonl"])
