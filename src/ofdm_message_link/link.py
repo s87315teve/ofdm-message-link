@@ -33,6 +33,7 @@ import time
 from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
 
@@ -1294,9 +1295,66 @@ def measure_quality(
     if not np.isfinite(power) or power <= 0.0:
         return (None, None)
     scaled = symbols / np.sqrt(power)
+    return normalized_evm(_nearest_reference(scaled, mcs), scaled)
+
+
+@lru_cache(maxsize=4)
+def _reference_grid(mcs: MCS) -> tuple[NDArray[np.complex128], NDArray[np.float64], NDArray[np.intp]]:
+    """The reference points, their axis levels, and the index of each level pair.
+
+    Every constellation here is square (QPSK, 16QAM, 64QAM): point ``index[i, q]``
+    is ``levels[i] + 1j * levels[q]``.
+    """
+
     reference = np.asarray(_constellation(mcs), dtype=np.complex128)
-    nearest = reference[np.argmin(np.abs(scaled[:, None] - reference[None, :]), axis=1)]
-    return normalized_evm(nearest, scaled)
+    levels = np.unique(reference.real)
+    if not np.array_equal(levels, np.unique(reference.imag)) or levels.size**2 != reference.size:
+        raise ValueError(f"{mcs.name} is not a square constellation")
+    index = np.full((levels.size, levels.size), -1, dtype=np.intp)
+    index[np.searchsorted(levels, reference.real), np.searchsorted(levels, reference.imag)] = (
+        np.arange(reference.size)
+    )
+    for array in (reference, levels, index):
+        array.setflags(write=False)
+    return reference, levels, index
+
+
+def _nearest_reference(scaled: NDArray[np.complex128], mcs: MCS) -> NDArray[np.complex128]:
+    """Each symbol's nearest reference point, exactly as an argmin over all of them.
+
+    The nearest point of a square constellation is the nearest level on each
+    axis, which rounding the coordinate in level units finds.  Only a
+    coordinate within ``_TIE_BAND`` level units of a decision boundary could
+    be judged differently by the complex distance a full ``argmin`` uses, so
+    those few symbols take the full search and its tie rule (the lower
+    reference index wins).  The result is the argmin's, at the cost of two
+    roundings per symbol instead of 64 distances for 64QAM.
+    """
+
+    reference, levels, index = _reference_grid(mcs)
+    step = (levels[-1] - levels[0]) / (levels.size - 1)
+    u = (scaled.real - levels[0]) / step
+    v = (scaled.imag - levels[0]) / step
+    top = levels.size - 1
+    nearest = reference[
+        index[
+            np.clip(np.rint(u), 0, top).astype(np.intp),
+            np.clip(np.rint(v), 0, top).astype(np.intp),
+        ]
+    ]
+    boundary = (np.abs(u - np.floor(u) - 0.5) < _TIE_BAND) | (
+        np.abs(v - np.floor(v) - 0.5) < _TIE_BAND
+    )
+    if np.any(boundary):
+        close = scaled[boundary]
+        nearest[boundary] = reference[
+            np.argmin(np.abs(close[:, None] - reference[None, :]), axis=1)
+        ]
+    return nearest
+
+
+# Level units around a decision boundary inside which the full search decides.
+_TIE_BAND = 1e-6
 
 
 def concatenate_bursts(bursts: Iterable[OutgoingBurst]) -> NDArray[np.complex64]:

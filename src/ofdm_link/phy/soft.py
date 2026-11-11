@@ -123,27 +123,31 @@ def _qam16_max_log_llrs(
     symbols: NDArray[np.complex128],
     variances: NDArray[np.float64],
 ) -> NDArray[np.float64]:
-    axis_pairs = np.array(((0, 0), (0, 1), (1, 1), (1, 0)), dtype=np.uint8)
+    """Max-log LLRs for Gray 16QAM, one axis at a time like :func:`_qam64_max_log_llrs`.
+
+    I carries bits 0-1 and Q bits 2-3, and the squared distance is the sum of
+    the two axes' parts, so each bit's minimum over half of the 16 points is
+    the 4-level minimum on its own axis plus a term that cancels in the
+    difference.  The LLRs are those of the 16-point search to within
+    rounding; the 16-point distance matrix made 16QAM the slowest demapper.
+    """
+
     axis_levels = np.array((-3.0, -1.0, 1.0, 3.0), dtype=np.float64) / np.sqrt(10.0)
-    labels = np.column_stack(
-        (
-            np.repeat(axis_pairs, 4, axis=0),
-            np.tile(axis_pairs, (4, 1)),
-        )
-    )
-    constellation = (
-        np.repeat(axis_levels, 4) + 1j * np.tile(axis_levels, 4)
-    ).astype(np.complex128)
+    # Gray label of each axis level, by increasing amplitude.
+    labels = np.array(((0, 0), (0, 1), (1, 1), (1, 0)), dtype=np.uint8)
+    zero_masks = [labels[:, bit] == 0 for bit in range(2)]
     output = np.empty((symbols.size, 4), dtype=np.float64)
     for start in range(0, symbols.size, _DISTANCE_CHUNK_SYMBOLS):
         stop = min(start + _DISTANCE_CHUNK_SYMBOLS, symbols.size)
-        distances = np.abs(symbols[start:stop, None] - constellation[None, :]) ** 2
-        for bit_index in range(4):
-            minimum_zero = np.min(distances[:, labels[:, bit_index] == 0], axis=1)
-            minimum_one = np.min(distances[:, labels[:, bit_index] == 1], axis=1)
-            output[start:stop, bit_index] = (
-                minimum_one - minimum_zero
-            ) / variances[start:stop]
+        chunk = symbols[start:stop]
+        for axis_offset, axis_values in ((0, chunk.real), (2, chunk.imag)):
+            distances = (axis_values[:, None] - axis_levels[None, :]) ** 2
+            for bit, zero in enumerate(zero_masks):
+                minimum_zero = np.min(distances[:, zero], axis=1)
+                minimum_one = np.min(distances[:, ~zero], axis=1)
+                output[start:stop, axis_offset + bit] = (
+                    minimum_one - minimum_zero
+                ) / variances[start:stop]
     return output.reshape(-1)
 
 
