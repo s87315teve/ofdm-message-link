@@ -34,6 +34,7 @@ from ofdm_link.phy.mcs_table import (
     mcs_index_for,
     mcs_index_for_wire,
     v5_entries,
+    v5_ofdm_symbol_count,
     v5_payload_geometry,
 )
 
@@ -265,6 +266,29 @@ def test_v5_geometry_rejects_legacy_entries_and_bad_lengths() -> None:
     for bad in (3, 65536, 100.0):
         with pytest.raises(McsTableError, match="psdu_bytes"):
             v5_payload_geometry(mcs_entry(8), bad)
+
+
+@pytest.mark.parametrize("entry", V5_MCS_TABLE, ids=lambda entry: f"mcs{entry.index}")
+def test_v5_symbol_count_equals_the_geometry_without_building_it(entry, monkeypatch) -> None:
+    sizes = [4, 5, 19, 100, 947, 948, 7555, 16383, 16384, 30000, 65535]
+    expected = {size: v5_payload_geometry(entry, size).ofdm_symbol_count for size in sizes}
+
+    def no_plan(*_args, **_kwargs):
+        raise AssertionError("the symbol count must not build a rate-match plan")
+
+    import ofdm_link.phy.mcs_table as table
+
+    monkeypatch.setattr(table, "rate_match_plan", no_plan)
+    table._v5_payload_geometry.cache_clear()
+    assert {size: v5_ofdm_symbol_count(entry, size) for size in sizes} == expected
+
+
+def test_v5_symbol_count_rejects_what_the_geometry_rejects() -> None:
+    with pytest.raises(McsTableError, match="wire-v5"):
+        v5_ofdm_symbol_count(mcs_entry(0), 100)
+    for bad in (3, 65536, 100.0):
+        with pytest.raises(McsTableError, match="psdu_bytes"):
+            v5_ofdm_symbol_count(mcs_entry(8), bad)
 
 
 def test_v5_description_names_64qam() -> None:

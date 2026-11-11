@@ -227,6 +227,25 @@ def v5_payload_geometry(entry: McsTableEntry, psdu_bytes: int) -> PayloadGeometr
     and receiver cannot disagree through float rounding.
     """
 
+    _require_v5_psdu(entry, psdu_bytes)
+    return _v5_payload_geometry(entry, psdu_bytes)
+
+
+def v5_ofdm_symbol_count(entry: McsTableEntry, psdu_bytes: int) -> int:
+    """``N_sym`` of one v5 entry and PSDU length, without building the geometry.
+
+    Equal to ``v5_payload_geometry(entry, psdu_bytes).ofdm_symbol_count``.  It
+    exists for burst-length questions (aggregation planning asks one per
+    candidate subframe count): the full geometry also builds the rate-match
+    plan, one index per transmitted bit, which costs about a millisecond per
+    PSDU size whenever the small geometry cache misses.
+    """
+
+    _require_v5_psdu(entry, psdu_bytes)
+    return _v5_symbol_count(entry, 8 * psdu_bytes)
+
+
+def _require_v5_psdu(entry: McsTableEntry, psdu_bytes: int) -> None:
     if not isinstance(entry, McsTableEntry) or entry.family != "v5":
         raise McsTableError("v5_payload_geometry requires a wire-v5 table entry")
     if type(psdu_bytes) is not int or not (
@@ -236,7 +255,6 @@ def v5_payload_geometry(entry: McsTableEntry, psdu_bytes: int) -> PayloadGeometr
             "psdu_bytes must be an integer in "
             f"[{V5_PSDU_FCS_BYTES}, {V5_MAX_PSDU_BYTES}]"
         )
-    return _v5_payload_geometry(entry, psdu_bytes)
 
 
 @lru_cache(maxsize=64)

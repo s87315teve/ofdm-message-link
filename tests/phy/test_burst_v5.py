@@ -65,6 +65,27 @@ def _framed(samples: np.ndarray, before: int = 16, after: int = 64) -> np.ndarra
     return np.concatenate((np.zeros(before), samples, np.zeros(after))).astype(np.complex64)
 
 
+def test_burst_sample_count_does_not_build_rate_match_plans(monkeypatch) -> None:
+    """Aggregation planning asks for up to 31 burst lengths per burst.
+
+    Building a rate-match plan for each (about 1 ms per PSDU size whenever the
+    small geometry cache misses, which the receiver in the same node_app
+    process makes it do) held duplex TX near 105 bursts/s at 10 MS/s.
+    """
+
+    import ofdm_link.phy.mcs_table as table
+
+    def no_plan(*_args, **_kwargs):
+        raise AssertionError("a burst length must not build a rate-match plan")
+
+    entry = ALL_V5[-1]
+    expected = [560 + 80 * v5_payload_geometry(entry, size + 4).ofdm_symbol_count
+                for size in range(900, 16380, 912)]
+    monkeypatch.setattr(table, "rate_match_plan", no_plan)
+    table._v5_payload_geometry.cache_clear()
+    assert [v5_burst_sample_count(entry, size) for size in range(900, 16380, 912)] == expected
+
+
 @pytest.mark.parametrize("entry", ALL_V5, ids=lambda entry: f"mcs{entry.index}")
 @pytest.mark.parametrize("size", [15, 943, 3000, 7551])
 def test_every_v5_mcs_round_trips_noiseless_and_at_25_db(entry, size: int) -> None:

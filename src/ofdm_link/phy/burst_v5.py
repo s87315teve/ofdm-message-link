@@ -76,6 +76,7 @@ from .mcs_table import (
     PayloadGeometry,
     mcs_entry,
     v5_entries,
+    v5_ofdm_symbol_count,
     v5_payload_geometry,
 )
 from .ofdm import OfdmNumerology, modulate_ofdm, pilot_symbols
@@ -199,8 +200,10 @@ def v5_burst_sample_count(entry: McsTableEntry, body_bytes: int) -> int:
     _require_v5_entry(entry)
     if type(body_bytes) is not int or body_bytes < 0:
         raise BurstValidationError("body_bytes must be a non-negative integer")
-    geometry = v5_payload_geometry(entry, body_bytes + PSDU_FCS_BYTES)
-    return V5_FIXED_LENGTH + _BLOCK_LENGTH * geometry.ofdm_symbol_count
+    # Only N_sym is needed: the full geometry would also build a rate-match
+    # plan, which made duplex TX planning miss its cache and fall behind.
+    symbols = v5_ofdm_symbol_count(entry, body_bytes + PSDU_FCS_BYTES)
+    return V5_FIXED_LENGTH + _BLOCK_LENGTH * symbols
 
 
 @lru_cache(maxsize=4)
