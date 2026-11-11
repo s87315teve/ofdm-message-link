@@ -901,6 +901,32 @@ ingress drop 每分鐘 31、130、67、84、190）判 FAIL，使用者確認維�
 IFFT 差 ≤ 1e-6。端到端：native 與 Python（`OFDM_LINK_NATIVE=python`）在 8–25 dB、legacy 開／關、inline 與 2 個 workers
 下 delivered 的 payload 相同。`measure_quality`：75 組向量的 EVM 與 SNR 與原本逐 bit 相同。
 
+**v2.0.1：`node_app` 的 TX 規劃（2026-11-12）。** v2.0 驗收時 10 MS/s 雙向的 TX 固定在約 105 burst/s。原因是算 burst 長度
+（`v5_burst_sample_count`）時經過 `v5_payload_geometry`，順便把整份 rate-match plan 建出來；aggregation 規劃每個 burst
+要問最多 31 個長度，而同一個 process 裡的 RX 一直用對方的 PSDU 大小把 64 格的 geometry cache 擠掉，所以 32 個 datagram 的
+規劃從 0.02 ms 變成約 31 ms。改成直接用 `N_sym` 的整數公式（`v5_ofdm_symbol_count`），burst 長度不變。B210 桌上重測
+（兩台 B210、FDD 2420／2460 MHz、TX 89.75／RX 20 dB、`--realtime`、MCS 16、900 B、每點 300 秒、n=1，
+`judge_run.py` 判定；資料在 `runs/usrp_b210_v201_20261111/`，不進版控）：
+
+| 每個方向 | v2.0 | v2.0.1 | TX burst/s |
+|---|---|---|---|
+| 10 MS/s 900/s | 0.19%／0.23% | 第一次 2.20%／0.00%（A→B 的 SNR 約 20 dB，全是 FCS 錯，TX 計數全 0），重跑 0.12%／0.14% | 171 |
+| 10 MS/s 1100/s | 1.20%／1.13%（FAIL） | 0.54%／0.07% | 約 162 |
+| 10 MS/s 1300/s | 60 秒 2.4%／3.3% | 0.004%／0.004%，9.36 Mb/s | 155 |
+| 10 MS/s 1600/s | — | 0.03%／0.02%，11.52 Mb/s | 約 148 |
+| 5 MS/s 1300/s | 0.17%／0.23%，p50 137／110 ms | 0.000%／0.003%，p50 78／79 ms | 168 |
+| 5 MS/s 1450/s | 1.03%／1.19%（FAIL） | 0.001%／0.000%，10.44 Mb/s | 165 |
+| 5 MS/s 1600/s | — | 6.7%（FAIL），airtime 約 95%，空中時間上限 | 133 |
+
+10 MS/s 雙向的上限從每個方向 900/s 提高到至少 1600/s；5 MS/s 現在停在 airtime 上限。A→B 在 10 MS/s 的 SNR 只有約
+20–21 dB（B→A 約 32 dB），MCS 16 在這個方向是 RF 邊緣。
+
+**`tx_app` 的壞啟動，確認實驗（2026-11-12，使用者決定記成「支持但未確認」）。** 用診斷 hook（`runs/` 裡，不在 repo）讓
+`tx_app` 在同一台 B210 的另一個前端開一條閒置的 RX stream。5 MS/s B→A、MCS 17、1480/s、每次 15 秒：控制組 12 次啟動 2 次壞
+（遺失 17%、14%），加閒置 RX 0／12。15.36 MS/s A→B MCS 17 3800/s 這次兩組都是 0／12，沒有重現。方向符合「只開 TX 的啟動」
+假說，但樣本小（單尾 Fisher p ≈ 0.24）。每次啟動讀回的中心頻率、增益、類比頻寬、sample rate、master clock 好壞都一樣，溫度分
+不開；AD9361 的 filter 物件與校正值從 gr-uhd 的 Python binding 讀不到。加閒置 RX 時 B→A 的 SNR 中位數低約 2.5 dB，遺失仍是 0。
+
 ## 5. ARQ 提案（沒有實作）
 
 Owner 只要求提案。下面是 LTE RLC AM（TS 36.322）式的設計，以及它與這個 link 已有的 A-MPDU、feedback
