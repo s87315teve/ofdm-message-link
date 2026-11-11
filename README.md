@@ -1,5 +1,7 @@
 # ofdm-message-link：用 OFDM 傳影像與資料
 
+> **版本說明：這是 v1.0（tag `v1.0.0`），只支援單向 link（TX → RX）。** 這個 branch 已經凍結，不會再更新。最新版本在 [`main`](https://github.com/s87315teve/ofdm-message-link/tree/main)。
+
 把 webcam 的影像、或你自己程式的資料，經過一條 OFDM 無線 link 送到另一端。
 
 這是一個用 GNU Radio 與 Python 寫的**教學用通訊系統範例**，讓你做兩件事：
