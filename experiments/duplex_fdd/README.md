@@ -387,6 +387,10 @@ guard +10 dB）每秒 300 個 burst：90% → 61%。`sim_acq.py` 修正前後輸
 | Reporter 在 FCS 失敗時讓 report 到期；OLLA 的 SNR filter 在兩份新 report 低 6 dB 以上時重啟（`snr_drop_db` = 6、`snr_drop_reports` = 2） | M3：失敗的 burst 不產生 report，B 靜音到 200 ms keepalive，SNR filter 又慢；離線 10 個 seed 184 → 77 個遺失、段 3.55% → 2.13%；M3b 實測 188–209 → 91–108（4.4） |
 | Ladder 拿掉 MCS 14 | 與 MCS 15 同樣 3 bit/symbol，多需要 1 dB |
 | Fixed mode 凍結 OLLA，不重設 offset | 操作員介入前學到的仍然有效 |
+| B210 量測關掉 legacy acquisition，只在附加的 overlay `b210_measurement.yaml` 裡，預設不變（使用者 2026-11-11） | v1.0 的 TX 只送 legacy frame，預設要能收；B210 run 的 `detected_legacy_candidates` 都是 0，離線關掉省 owner 10–16%（有 DC 44–46%），delivered 不變（4.8） |
+| Native 加速（acquisition、header probe、Turbo float32、TX encode）放在 Python 介面後面，各有 `auto／python／native` 開關，Python 版保留為參考與 fallback（使用者 2026-11-11） | 單一 node 的上限是 engine 的 GIL（cpp_eval phase 1/2）；等價性用容差測，不要求 bit-exact（4.8） |
+| `--cpu-affinity`、`--realtime[=PRIO]`、`--overload-protection` 都是選用、預設關閉；過載保護在量測時一律關閉（使用者 2026-11-11） | 低階機器與 Jetson 要能用；整棵 tree RT 在 2 核上有害；丟掉或放棄的 burst 會改變遺失與 BLER 的意義，所以另外計數（4.8） |
+| 不做：native UHD 接收、把 TX 搬出 engine、IPC 縮減（先量剩下多少再決定）、20 MS/s 目標（使用者 2026-11-11） | 4.8 |
 | `split` layout 沒有實作（待定） | RX 修正之後 smoke2 0 overflow；M2 完整結果的雙向 run 每個 0–3 次／60 秒（最壞 MCS 12、−5／0 dB 的 3 次），碰到設計的 1 次／分鐘的線；M3 固定 15 的 node 2 有 42 次，原因是失敗的 burst 佔滿 decode workers（4.3、4.4）。仍沒有實作 |
 
 ## 3. 怎麼量的
@@ -848,6 +852,37 @@ UHD 這時拿不到 real-time priority：重測的 agent 回報該 session 的 `
 clipping（收到的樣本頂到滿刻度，或 gain 往上時 SNR 反而變差）就往下調。第一次接天線或改了接線時，仍照
 [`docs/04-ota-hardware.md`](../../docs/04-ota-hardware.md) 4.1 的步驟從低 gain 開始。
 
+### 4.8 CPU 加速（2026-11-11，`speedup-wip` 併入 `duplex-fdd`）
+
+依據是 cpp_eval 的兩份離線 profiling 報告（phase 1／phase 2，不在 repo 裡）：單一 node 的 CPU 上限是 engine process 的
+GIL（acquisition、header probe、GNU Radio 的 Python block，duplex 時再加 TX encode）；worker 端最大的是 Turbo
+（40–66%）與 `measure_quality`（23–33%）；低階機器（2 個 E-core）崩在 worker。使用者 2026-11-11 核准的範圍與做法：
+
+| 項目 | 改了什麼 | 開關 |
+|---|---|---|
+| B210 量測關 legacy acquisition | `configs/profiles/b210_measurement.yaml`（附加 overlay）；`run_duplex.sh --transport uhd` 自動加，`--legacy-acquisition` 不加 | overlay |
+| CPU affinity | `--cpu-affinity CPUS\|p-cores`，不寫死核心 | 預設不綁 |
+| Chunk 合併 | `ReceiveWorker` 把短 chunk 併到 ≥ 8192 samples，最多等 2 ms | 無（samples 不變） |
+| Worker 的 NumPy 快速路徑 | `measure_quality` 每軸找最近點（平手照 argmin 的規則），16QAM soft demap 每軸分開 | 無（輸出相同） |
+| Native acquisition | `_acq_native` | `OFDM_LINK_NATIVE_ACQ` |
+| Native header probe | `_header_native`（`channel.py` 不動） | `OFDM_LINK_NATIVE_HEADER` |
+| Turbo float32 | `_turbo_native.decode`；舊的 double kernel 是 `decode_reference` | `OFDM_LINK_NATIVE_TURBO` |
+| TX encode | `_tx_native`：rate match、map、IFFT；TX 仍在 engine 裡 | `OFDM_LINK_NATIVE_TX` |
+| 過載保護 | `--overload-protection off\|drop\|give-up\|both` | 預設 `off` |
+| RT | `--realtime[=PRIO]`、`--force`；`ofdm_link/runtime/realtime.py` | 預設關閉 |
+
+開關與計數器的說明在 [`docs/07-reference.md` 7.10 節](../../docs/07-reference.md#710-效能開關與-native-模組)。
+
+**量測規則。** JMS1 與其他量測 run：`--overload-protection` 一律 `off`（預設），`--realtime` 只有在要量 RT 本身時才開，
+並且記在 run 的 meta。B210 的量測用 `b210_measurement.yaml`；要和 4.6、4.7 的舊 run 對照時要記得它們的 legacy 偵測是開的。
+
+**等價性（離線，固定 seed，全部是正確性測試）。** Acquisition：測試語料（−6 到 30 dB、背靠背、±20 ppm、DC、tone、
+兩種 family 混合、純雜訊、全零；整個 buffer 與 8192-sample 視窗）起點全部相同，|ΔCFO| ≤ 1.2e-9，confidence 相對差
+≤ 1e-9。Header probe：74 個 acquisition 加上 toggle 組合，結果與 header 欄位全部相同，SIG LLR 差 ≤ 2.7e-5。Turbo：60
+個 block 的 waterfall（Eb/N0 0–0.9 dB）BLER 與每個 block 的 iteration 數完全相同。TX：rate match 與 map 逐 bit 相同，
+IFFT 差 ≤ 1e-6。端到端：native 與 Python（`OFDM_LINK_NATIVE=python`）在 8–25 dB、legacy 開／關、inline 與 2 個 workers
+下 delivered 的 payload 相同。`measure_quality`：75 組向量的 EVM 與 SNR 與原本逐 bit 相同。
+
 ## 5. ARQ 提案（沒有實作）
 
 Owner 只要求提案。下面是 LTE RLC AM（TS 36.322）式的設計，以及它與這個 link 已有的 A-MPDU、feedback
@@ -937,6 +972,7 @@ Pluto 沒有 timestamp，給不了。
 | `results/m3b/` | M3b：la-tune 之後的重跑（`README.md`、`step_metrics.json`、`m3b_olla_run1/`、`m3b_olla_ba_idle/`） |
 | `results/b210/` | 4.6：兩台 USRP B210 的雙向 run，`m2_mcs12_450_180s/`（RX queue 修正後）與 `m2_mcs12_450_180s_spin/`（修正前） |
 | `runs/usrp_b210_retest_20261110/`（本機，不進版控） | 4.7：B210 重測的原始資料、overlay 與 sweep 腳本 |
+| `../../configs/profiles/b210_measurement.yaml` | 4.8：B210 量測用的附加 overlay（關 legacy acquisition） |
 | `results/m3/`、`results/m4/` | M3（`olla` ×2、`olla` B→A 閒置、固定 8／10／12／15；`m3_prefix/` 是舊 burst 間隔的一次 run）、M4（`video_750k/`、`video_1300k/`） |
 
 程式（`src/ofdm_message_link/`）：`node_app.py`、`node_options.py`、`node_engine.py`（含 `DutyCappedSink`）、`node_window.py`、

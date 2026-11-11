@@ -24,6 +24,10 @@
 | `--ui-fps` | Constellation 與 spectrum 的刷新率，1–60 Hz，預設 15 Hz |
 | `--log-lines N` | `Log` tab 保留的行數，預設 2000 |
 | `--geometry WxH+X+Y` | 視窗內容區大小與外框左上角位置 |
+| `--cpu-affinity CPUS` | 把 app 與它啟動的每個 process（engine、decode workers）綁在 CPUS：`0-7`、`2,4-5` 這種列表，或 `p-cores`（讀 `/sys/devices/cpu_core/cpus`，沒有這個檔就不綁，記一行 log）。**預設不綁**。見 [7.10 節](#710-效能開關與-native-模組) |
+| `--realtime[=PRIO]` | 只限 Linux：engine process 的 thread 用 SCHED_RR、優先權 PRIO（1–49，只寫 `--realtime` 時是 15），decode workers 維持一般排程，不動 RT throttling。可用 CPU 少於 4 個時拒絕，除非加 `--force`。**預設關閉** |
+| `--force` | 允許在少於 4 個可用 CPU 的機器上用 `--realtime` |
+| `--native-backend {auto,python,native}` | Acquisition、header probe、Turbo kernel、TX encode 用 native 還是 Python 參考實作；預設 `auto`（有 build 就用 native，沒有就退回 Python 並警告一次）。設定 `OFDM_LINK_NATIVE` |
 
 ### 只有發送端
 
@@ -49,6 +53,7 @@
 | `--stats-log PATH` | 每次統計刷新附加一行 JSON，見 [2.7 節](02-gui.md#27---stats-log把統計存成檔案) |
 | `--stats-log-max-mb MB` | `--stats-log` 的大小上限，預設 16 MiB，超過就輪替成 `PATH.1`；0 = 不設限 |
 | `--stats-log-backups N` | 保留幾份輪替後的舊檔，預設 1 |
+| `--overload-protection {off,drop,give-up,both}` | 過載保護，**預設 `off`，量測一律關閉**。`drop`：decode pool 滿時丟掉放不下的 burst，不讓 receiver 等；`give-up`：Turbo block 到第 4 次 iteration 還有超過 1/64 的 bit 在翻，就放棄。兩者各有自己的計數器，見 [7.10 節](#710-效能開關與-native-模組) |
 
 ## 7.2 設定檔
 
@@ -63,6 +68,7 @@
 | [`b210_ota_3p8ghz_10msps.yaml`](../configs/profiles/b210_ota_3p8ghz_10msps.yaml) | 選用。同上但 10 MS/s |
 | [`duplex_fdd_2420_2460.yaml`](../configs/profiles/duplex_fdd_2420_2460.yaml) | `node_app` 的預設。兩台 Pluto、5 MS/s；node 1 TX 2420／RX 2460 MHz，node 2 相反 |
 | [`duplex_fdd_2405_2475.yaml`](../configs/profiles/duplex_fdd_2405_2475.yaml) | `node_app` 的備用：70 MHz 間距，2405／2475 MHz |
+| [`b210_measurement.yaml`](../configs/profiles/b210_measurement.yaml) | **附加用**，接在上面任一個 profile 後面：只把 `phy.rx.legacy_acquisition` 關掉。B210 量測用（`run_duplex.sh --transport uhd` 會自動加），預設值仍是開 |
 
 這個專案實際讀取的區段：
 
@@ -445,6 +451,7 @@ process 默默分流。
 | `--enable-rf` / `--acknowledgement` | `--transport pluto` 必要，和 `tx_app` 相同 |
 | Aggregation | `--aggregation`、`--aggregation-max-subframes`、`--aggregation-max-wait-ms`、`--min-burst-interval-ms`、`--max-burst-airtime-ms`，與 `tx_app` 相同（7.1 節） |
 | 其他共用的選項 | `--config`、`--mcs`、`--frame-payload-bytes`、`--ui-fps`、`--log-lines`、`--geometry`、`--channel`、`--antenna`，與 7.1 節相同 |
+| 效能開關 | `--cpu-affinity`、`--realtime[=PRIO]`、`--force`、`--native-backend`、`--overload-protection`，與 7.1 節相同（7.10 節）；全部預設關閉 |
 
 **Control socket**：每個 datagram 一個 JSON request，回一個 JSON answer。
 
@@ -466,5 +473,56 @@ LA 演算法（預設演算法 `olla` 的參數、ladder）與怎麼寫自己的
 **USB 限制（M0，`experiments/duplex_fdd/results/usb/`）**：Pluto 同時以 5 MS/s 接收時，TX duty 到
 0.7 都沒有 overflow；要求 0.8 以上時 TX 只到 0.78，其中一個 Pluto 每分鐘 overflow 約 180–220 次。
 8 個 kernel buffers 沒有改善。
+
+## 7.10 效能開關與 native 模組
+
+**Native 模組。** `pip install -e .`（或 `python setup.py build_ext --inplace`）編譯四個 C++17 extension，
+每個只負責一件事，Python 函式的介面都沒變：
+
+| 模組 | 取代的 Python 實作 | 用在 |
+|---|---|---|
+| `_acq_native` | `sync.acquire_all` 底下兩種 preamble 的偵測：lag-32 相關、DC／tone 的 steady 修正、legacy coherent、v5 M128 gate、NMS、STF coherent、LTF 精細時序與 CFO | Receive owner |
+| `_header_native` | v5 header probe：LTF pair 量測、channel smoothing、SIG 等化，交出 SIG LLR（`channel.py` 沒改，workers 照舊） | Receive owner |
+| `_turbo_native` | Turbo decoder：新的 float32 kernel（`decode`）；原本的 double kernel 保留為 `decode_reference` | Decode workers |
+| `_tx_native` | `rate_match`、`map_symbols`、`modulate_ofdm` | 發送端（仍在 engine 裡） |
+
+全部計算時都會放開 GIL。編譯只用 `-O3 -std=c++17 -ffp-contract=off`，沒有 `-march` 或任何 ISA 旗標，同一份原始碼在
+aarch64（Jetson）也能編。
+
+**Backend 開關。** 每一塊都可以選 native 或 Python 參考實作，用環境變數（engine 與 decode workers 會繼承）：
+
+| 變數 | 值 |
+|---|---|
+| `OFDM_LINK_NATIVE` | `auto`（預設）、`python`、`native`，套用到全部；`python` 會蓋過下面每一個 |
+| `OFDM_LINK_NATIVE_ACQ`、`_HEADER`、`_TURBO`、`_TX` | 只設一塊 |
+
+`auto`：模組 import 失敗就退回 Python，警告一次。`native`：import 失敗就報錯。Turbo 的 `python` 是原本的 double kernel
+（沒有 Python 版的 max-log decoder）。`--native-backend` 會在任何子 process 啟動前設好 `OFDM_LINK_NATIVE`。等價性由
+`tests/phy/test_acq_native.py`、`test_header_native.py`、`test_turbo_fast.py`、`test_tx_native.py` 與
+`tests/app/test_native_end_to_end.py` 檢查（容差：起點相同、|ΔCFO| ≤ 1e-6、confidence 相對誤差 ≤ 1e-5、header 欄位相同、
+Turbo BLER 差 ≤ 0.1 dB 且 iteration ±1、固定 seed 的端到端 delivered 相同）。
+
+**接收端的其他改變（不需要開關）。** `ReceiveWorker` 會把 queue 裡已經在等的短 chunk 併成至少 8192 samples 再 feed，
+最多為此等 2 ms；`measure_quality` 改成每軸各自找最近點，16QAM soft demap 改成每軸分開算，輸出與原本相同。
+
+**CPU 放置與排程（全部預設關閉）。**
+
+- `--cpu-affinity CPUS` 在 `main` 一開始就套用，engine、forkserver、decode workers 都繼承。不寫死任何核心編號。
+- `--realtime[=PRIO]`（`ofdm_link/runtime/realtime.py`）：engine process 的每個 thread 改成 SCHED_RR，加上
+  SCHED_RESET_ON_FORK，所以 decode workers 與之後產生的 process 都是一般排程；radio attach 之後新開的 thread 會補上。
+  優先權限 1–49，低於 kernel 的 IRQ thread（50）。不會關閉 RT throttling（`sched_rt_runtime_us`）。可用 CPU（套用
+  `--cpu-affinity` 之後）少於 4 個時拒絕，除非 `--force`；非 Linux 或沒有權限（`ulimit -r`）時不做事，只記一行 log。
+  離線測試（2 個 E-core）中整棵 process tree 用 `chrt -f 50` 反而遺失變多，其他程式最多卡 0.95 s，所以只開到這裡。
+
+**過載保護 `--overload-protection`（預設 `off`）。** 只有在 CPU 不夠、寧可讓遺失平緩增加也不要整個崩潰時才用：
+
+| 模式 | 做什麼 | 計數器 |
+|---|---|---|
+| `drop` | Decode pool 滿時，丟掉放不下的 segment，receive owner 不等 | `decode_pool.dropped_full` |
+| `give-up` | Turbo block 到第 4 次 iteration 時，hard decision 還有超過 1/64 在變，就停止（reason `abandoned`） | decoder 的 `payload_abandoned` |
+| `both` | 兩者都開 | 兩者 |
+
+被丟掉或放棄的 burst **不算**進 `payload_decode_attempts`、`payload_decode_failure`、`crc_failures`、`psdu_fcs_failures`，
+所以遺失與 BLER 的定義在保護關閉時不變。**量測（包含 JMS1 的 SNR／EVM 與遺失量測）一律關閉**；打開時程式會印一行提醒。
 
 回到 [README](../README.md)。

@@ -61,7 +61,7 @@ cd ofdm-message-link
 
 conda env create -f environment.yml      # 第一次約需數分鐘；GNU Radio、UHD、libiio、PyQt5 都在裡面
 conda activate ofdm-message-link
-pip install -e .                         # 會編譯一個 C++ 的 Turbo decoder
+pip install -e .                         # 會編譯 C++ 的 Turbo decoder 與 acquisition、header、TX 的 native 模組
 
 python -m pytest -q                      # 選用：確認安裝正確，全部應該通過
 ```
@@ -201,6 +201,15 @@ python -m pytest -q
 
 全部 headless：不需要 SDR、display 或 root。修改程式之後先跑一次，可以馬上知道有沒有弄壞既有行為。
 `tests/phy/` 測 PHY 的每一層，`tests/app/` 測應用程式（包含用上面的指令實際啟動兩個 app）。
+`OFDM_LINK_NATIVE=python python -m pytest -q` 讓每個 native 模組都改走 Python 參考實作，用來確認兩條路徑都對。
+
+## 效能開關
+
+Acquisition、header probe、Turbo decoder 與發送端的 encode 有 C++ 版（`pip install -e .` 會編），每一塊都能用
+`--native-backend` 或 `OFDM_LINK_NATIVE*` 換回 Python 參考實作。`--cpu-affinity`、`--realtime[=PRIO]`、
+`--overload-protection` 都是選用的，**預設全部關閉**；過載保護在量測時一律不開。B210 量測另外加
+`configs/profiles/b210_measurement.yaml`（只關掉 legacy acquisition）。細節見
+[7.10 節](docs/07-reference.md#710-效能開關與-native-模組)。
 
 ## License
 
