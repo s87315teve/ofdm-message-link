@@ -100,7 +100,7 @@ class DefaultReporter:
         self._last_mcs: int | None = None
         self._health: RxHealth | None = None
         self._fcs_fail_total: int | None = None  # baseline for "a PSDU failed"
-        # Per-chunk flags, ORed over the report window.
+        # Per-feed flags (one or more merged chunks), ORed over the report window.
         self._clipping_seen = False
         self._decode_backlog = False
 

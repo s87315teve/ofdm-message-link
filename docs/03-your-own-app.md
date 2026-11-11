@@ -225,7 +225,7 @@ feedback 為每個 data burst 選 MCS。選 MCS 的演算法與 RX 端的量測�
 ```
 peer 的 RX                                   這個 node 的 TX
 FeedbackReporter.on_preambles / on_burst      LinkAdaptation.on_feedback(report)
-  / on_rx_health（每個 RX chunk）                     │
+  / on_rx_health（每次 RX feed）                      │
 FeedbackReporter.due() → build() ──FEEDBACK──▶  LinkAdaptation.decide(now) → Decision(mcs)
   （附在下一個 burst，或單獨的 control burst）   LinkAdaptation.on_sent(burst)（每個送出的 burst）
 ```
@@ -378,7 +378,7 @@ RX 端的 reporter 用同樣的方式寫與載入：`Class(context: ReporterCont
 | `reporter_id` | 屬性 | 非 0 的 id（0 是內建 reporter），peer 用它分辨 report 的來源 |
 | `on_preambles(now_s, snr_db, *, control_only)` | 每個 RX chunk | 這段 chunk 裡每個 peer preamble 的 SNR |
 | `on_burst(report: BurstReport)` | 每個收到的 DATA burst | 累計 ok／lost，記下最近的 bursts |
-| `on_rx_health(now_s, health: RxHealth)` | 每個 RX chunk | overflow、header／FCS 失敗、clipping、decode backlog |
+| `on_rx_health(now_s, health: RxHealth)` | 每次 RX feed（一個 transport chunk，或併在一起的幾個短 chunk，至少 8192 samples） | overflow、header／FCS 失敗、clipping、decode backlog |
 | `due(now_s)` / `next_due_s(now_s)` | TX 準備下一個 burst 時 | 是否該回報；下一次何時該回報（閒置的 node 會在那時醒來送 control burst） |
 | `build(now_s)` | `due` 為真時 | 回傳 `FeedbackReport` 並結束這個量測窗 |
 

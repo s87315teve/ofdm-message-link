@@ -134,3 +134,27 @@ def test_the_merge_stops_with_the_worker():
     started = time.monotonic()
     worker._next_chunk(Slow([]))
     assert time.monotonic() - started < 0.5
+
+
+class _Observer:
+    def __init__(self):
+        self.calls = []
+
+    def on_receive(self, now, *, snrs, bursts, health):
+        self.calls.append(health)
+
+
+def test_a_merged_feed_reports_clipping_from_any_chunk_in_it():
+    """The observer's flags are per feed; a clip in any merged chunk is never lost."""
+
+    link = profile(MEASUREMENT)
+    quiet = np.zeros(2560, np.complex64)
+    loud = quiet.copy()
+    loud[2000] = 0.97 + 0.0j
+    chunks = [quiet, quiet, loud, quiet, quiet, quiet, quiet, quiet]  # loud is the 3rd of 4
+    receiver = _CountingReceiver(link)
+    observer = _Observer()
+    worker = ReceiveWorker(receiver, _Bridge(), observer=observer)
+    _run(worker, _QueueSource(chunks), receiver, sum(c.size for c in chunks))
+    assert receiver.feed_sizes == [4 * 2560, 4 * 2560]  # two feeds of four chunks
+    assert [health.clipping_seen for health in observer.calls] == [True, False]

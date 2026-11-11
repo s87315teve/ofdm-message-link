@@ -244,7 +244,9 @@ class ReceiveWorker:
         if drain_peer is not None:
             snrs = drain_peer()
         values = np.asarray(chunk)
-        # Per chunk, like decode_backlog; the reporter ORs it over a window.
+        # Per feed, like decode_backlog: a feed is one transport chunk or several
+        # merged (_next_chunk), and a sample that clips in any of them is in it.
+        # The only consumer, the feedback reporter, ORs it over its window.
         self._clipping_seen = bool(values.size) and (
             max(float(np.max(np.abs(values.real))), float(np.max(np.abs(values.imag))))
             >= CLIPPING_LEVEL
@@ -260,7 +262,8 @@ class ReceiveWorker:
         """Receiver health for the observer.
 
         The totals are cumulative; ``clipping_seen`` and ``decode_backlog``
-        describe this chunk only.
+        describe this feed only (one transport chunk, or the short chunks
+        merged into it; see :meth:`_next_chunk`).
         """
 
         snapshot = self._receiver.decoder_snapshot()

@@ -18,7 +18,8 @@ touching the program:
 Data flow
 ---------
 The peer's reporter receives one :class:`BurstReport` per DATA burst, the SNR
-of every preamble and an :class:`RxHealth` per receive chunk.  When it says
+of every preamble and an :class:`RxHealth` per receive feed (one transport
+chunk, or the short chunks the receive worker merged into one feed).  When it says
 :meth:`FeedbackReporter.due`, the node calls :meth:`FeedbackReporter.build`
 and sends the :class:`FeedbackReport` back, piggybacked on its next burst or
 in a small control-only burst.  The wire format carries a version field; the
@@ -226,7 +227,14 @@ class ReporterContext:
 
 @dataclass(frozen=True, slots=True)
 class RxHealth:
-    """Receiver health counters, cumulative since the receiver started."""
+    """Receiver health: totals cumulative since the receiver started, flags per feed.
+
+    ``clipping_seen`` and ``decode_backlog`` describe one receive feed: one
+    transport chunk, or several short ones merged (at least 8192 samples
+    when they are queued; ``rx_app.ReceiveWorker``).  A clipped sample in any
+    merged chunk sets ``clipping_seen``; ``decode_backlog`` is the pool state
+    after the feed.
+    """
 
     overflow_total: int
     header_fail_total: int
