@@ -274,6 +274,9 @@ class UhdDuplexFactory:
     tx_bandwidth: float = DEFAULT_UHD_TX_BANDWIDTH_HZ
     peak_amplitude: float = 0.7
     recv_frames: int | None = None
+    # Zeros before every keyed burst, in seconds; None keeps the sink's own
+    # default (UhdSinkLimits.tx_settle_guard_seconds, 250 us).
+    tx_settle_guard_s: float | None = None
 
     def settings(self):
         """(TX, RX) :class:`~ofdm_link.radio.uhd.B210Settings`; validated, no device touched."""
@@ -312,14 +315,19 @@ class UhdDuplexFactory:
     def __call__(self) -> DuplexEndpoint:
         from ofdm_link.radio import acknowledge_rf_transmission
 
+        from . import transport
         from .devices import ensure_images_dir
-        from .transport import UhdSampleSink, UhdSampleSource
 
         token = acknowledge_rf_transmission(self.acknowledgement)
         tx, rx = self.settings()
         ensure_images_dir()
-        sink = UhdSampleSink(tx, token, peak_amplitude=self.peak_amplitude)
-        source = UhdSampleSource(rx, recv_frames=self.recv_frames)
+        if self.tx_settle_guard_s is None:
+            sink = transport.UhdSampleSink(tx, token, peak_amplitude=self.peak_amplitude)
+        else:
+            limits = transport.UhdSinkLimits(tx_settle_guard_seconds=self.tx_settle_guard_s)
+            sink = transport.UhdSampleSink(tx, token, peak_amplitude=self.peak_amplitude,
+                                           limits=limits)
+        source = transport.UhdSampleSource(rx, recv_frames=self.recv_frames)
         front = ("RF A", "RF B")
         return DuplexEndpoint(
             sink,

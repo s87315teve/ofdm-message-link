@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pickle
 
+import numpy as np
 import pytest
 
 from ofdm_link.radio import acknowledge_rf_transmission
@@ -301,3 +302,121 @@ def _rate_overlay(rate):
     path.write_text(f"phy:\n  sample_rate: {rate}\nradio:\n  bandwidth: {rate}\n",
                     encoding="utf-8")
     return path
+
+
+# --------------------------------------------------------------------------
+# --tx-guard-us: the zero guard before every keyed burst
+# --------------------------------------------------------------------------
+
+
+def test_the_tx_guard_defaults_to_the_sinks_own_value():
+    from ofdm_message_link import transport
+
+    args = node_options.parse_args(_uhd_args("--enable-rf", "--acknowledgement", ACK))
+    assert args.tx_guard_us is None
+    setup = node_options.resolve_node(args)
+    factory = node_app.uhd_factory(args, setup, serial=args.serial,
+                                   tx_gain_db=args.tx_gain, rx_gain_db=args.rx_gain)
+    # None: the sink is built exactly as before, with UhdSinkLimits' 250 us.
+    assert factory.tx_settle_guard_s is None
+    assert transport.UhdSinkLimits().tx_settle_guard_seconds == 250e-6
+
+
+def test_the_tx_guard_option_reaches_the_sink(monkeypatch):
+    from ofdm_message_link import transport
+
+    args = node_options.parse_args(_uhd_args("--tx-guard-us", "1000", "--enable-rf",
+                                             "--acknowledgement", ACK))
+    setup = node_options.resolve_node(args)
+    factory = node_app.uhd_factory(args, setup, serial=args.serial,
+                                   tx_gain_db=args.tx_gain, rx_gain_db=args.rx_gain)
+    assert factory.tx_settle_guard_s == pytest.approx(1e-3)
+    assert pickle.loads(pickle.dumps(factory)) == factory
+    built = []
+
+    class Sink:
+        def __init__(self, settings, token, *, peak_amplitude, limits):
+            built.append(limits)
+
+    class Source:
+        def __init__(self, settings, *, recv_frames):
+            pass
+
+    monkeypatch.setattr(transport, "UhdSampleSink", Sink)
+    monkeypatch.setattr(transport, "UhdSampleSource", Source)
+    factory()
+    assert built == [transport.UhdSinkLimits(tx_settle_guard_seconds=1e-3)]
+
+
+@pytest.mark.parametrize("value", ["-1", "20001", "nan"])
+def test_a_tx_guard_outside_0_to_20_ms_is_refused(value):
+    with pytest.raises(SystemExit):
+        node_options.parse_args(_uhd_args("--tx-guard-us", value))
+
+
+def test_the_tx_guard_is_refused_on_other_transports():
+    for transport in ("udp", "pluto"):
+        with pytest.raises(SystemExit):
+            node_options.parse_args(["--node-id", "1", "--transport", transport, "--serial",
+                                     "x", "--tx-guard-us", "1000"])
+
+
+def test_the_sink_leads_each_burst_with_the_guard_it_was_given():
+    from types import SimpleNamespace
+
+    from ofdm_message_link import transport
+
+    class Clock:
+        def get_time_now(self):
+            return 10.0
+
+    class Queue:
+        def __init__(self):
+            self.bursts = []
+
+        def enqueue(self, samples, start):
+            self.bursts.append(samples)
+            return True
+
+    rate = 5_000_000.0
+    sizes = {}
+    for guard in (None, 1e-3):
+        limits = None if guard is None else transport.UhdSinkLimits(tx_settle_guard_seconds=guard)
+        sink = transport.UhdSampleSink(SimpleNamespace(sample_rate=rate), rf_enable=None,
+                                       limits=limits)
+        sink._sink_block = Clock()
+        sink._source_block = Queue()
+        assert sink.send(np.ones(1000, dtype=np.complex64))
+        (burst,) = sink._source_block.bursts
+        zeros = int(np.argmax(np.abs(burst) > 0))
+        assert not np.any(burst[:zeros])
+        sizes[guard] = zeros
+    assert sizes == {None: 1250, 1e-3: 5000}  # 250 us and 1 ms at 5 MS/s
+
+
+@pytest.mark.parametrize(("extra", "expected"), [((), 250e-6), (("--tx-guard-us", "1000"), 1e-3)])
+def test_the_events_start_line_records_the_tx_guard(tmp_path, extra, expected):
+    from ofdm_message_link.burst_events import read_events
+
+    path = tmp_path / "events.jsonl"
+    args = node_options.parse_args(_uhd_args(*extra, "--events", str(path), "--enable-rf",
+                                             "--acknowledgement", ACK))
+    setup = node_options.resolve_node(args)
+    spec = node_app.build_spec(args, setup)
+    factory = node_app.uhd_factory(args, setup, serial=args.serial,
+                                   tx_gain_db=args.tx_gain, rx_gain_db=args.rx_gain)
+    node_app.open_events(args, setup, spec, factory).stop()
+    (start,) = read_events(str(path), kinds=["start"])
+    assert start["tx_settle_guard_s"] == pytest.approx(expected)
+
+
+def test_the_events_start_line_has_no_tx_guard_without_a_b210(tmp_path):
+    from ofdm_message_link.burst_events import read_events
+
+    path = tmp_path / "events.jsonl"
+    args = node_options.parse_args(["--node-id", "1", "--headless", "--events", str(path)])
+    setup = node_options.resolve_node(args)
+    spec = node_app.build_spec(args, setup)
+    node_app.open_events(args, setup, spec, node_app.udp_factory(args, setup)).stop()
+    (start,) = read_events(str(path), kinds=["start"])
+    assert "tx_settle_guard_s" in start and start["tx_settle_guard_s"] is None

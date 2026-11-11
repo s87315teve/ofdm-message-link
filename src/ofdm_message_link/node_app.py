@@ -535,6 +535,8 @@ def uhd_factory(args, setup: node_options.NodeSetup, *, serial: str, tx_gain_db:
         tx_bandwidth=(default_uhd_tx_bandwidth(setup.resolved.profile.sample_rate, lo_offset)
                       if args.tx_analog_bw is None else args.tx_analog_bw),
         peak_amplitude=args.peak_amplitude,
+        tx_settle_guard_s=(None if getattr(args, "tx_guard_us", None) is None
+                           else args.tx_guard_us * 1e-6),
     )
     factory.settings()  # every B210 setting checked here (ValueError), before a child exists
     return factory
@@ -624,8 +626,21 @@ def open_events(args, setup: node_options.NodeSetup, spec: NodeSpec, factory):
         "link_adaptation": spec.la_spec,
         "lock_timeout_s": spec.lock_timeout_s,
         "clipping_level": CLIPPING_LEVEL,
+        "tx_settle_guard_s": tx_settle_guard_s(factory),
     })
     return writer
+
+
+def tx_settle_guard_s(factory) -> float | None:
+    """The zero guard the B210 sink puts before every burst; None on other transports."""
+
+    if not isinstance(factory, UhdDuplexFactory):
+        return None
+    if factory.tx_settle_guard_s is not None:
+        return float(factory.tx_settle_guard_s)
+    from .transport import UhdSinkLimits
+
+    return float(UhdSinkLimits().tx_settle_guard_seconds)
 
 
 def run_headless(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:

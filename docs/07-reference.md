@@ -458,6 +458,7 @@ process 默默分流。
 | `--serial` / `--auto-start` | `pluto`／`uhd`：選哪一台 Pluto 或 USRP；`--headless` 必須給 `--serial`，而且隱含 `--auto-start` |
 | `--channel` / `--antenna` | `uhd`：RX 的前端（0 = RF A，1 = RF B，預設 1；TX 用另一個）與 RX port（`TX/RX` 預設，或 `RX2`）；TX 一律 `TX/RX` |
 | `--tx-lo-offset HZ` / `--tx-analog-bw HZ` | `uhd`：TX LO 離載波的距離（預設 8e6，`tune_request`；0 = 不偏移）與 TX analog filter。沒有偏移時 TX 的 LO 洩漏落在對方 RX 中心約 2.4 kHz，淹沒 acquisition。其他 transport 給這兩個會被拒絕。TX filter 的預設值依 sample rate 與 LO offset 計算（見下表）；給 `--tx-analog-bw 25e6` 就是 v2.0 以前的設定 |
+| `--tx-guard-us US` | `uhd`（v2.1.1 起）：每個 burst 前送的零值保護段，讓前端 key-up 後穩定，單位 µs（0–20000）。**不給時是 sink 自己的 250 µs，和 v2.1.0 完全相同。** 每個 burst 會多佔這段 air time（1000 µs 比 250 µs 多 0.75 ms）。桌上兩台 B210（2026-11-12）：一台閒置後第一個 burst 有 key-up 暫態，1000 µs 讓那個方向的 preamble SNR 中位數高約 12 dB，1300/s 時 air time 約從 77 % 升到 88 %。是否改成預設還沒決定。其他 transport 給這個會被拒絕 |
 | `--tx-freq` / `--rx-freq` | 覆寫 profile 的頻率；信號邊緣離開 2400–2483.5 MHz 時警告 |
 | `--tx-gain` / `--rx-gain` | Pluto／udp：TX −89.75–0 dB（衰減），預設 −89.75 / 15 dB。B210（`uhd`）：TX 0–89.75 dB、RX 0–76 dB，預設 0 / 30 dB；兩種尺度不能互用。`--gain` 會被拒絕（node 有兩個 gain） |
 | `--rx-analog-bw HZ` | AD9361 RX analog filter，預設 = sample rate |
@@ -588,7 +589,7 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 
 | `k` | 什麼時候 | 欄位 |
 |---|---|---|
-| `start` | 開檔時 | `version`、`sample_rate`、`burst_fields`、`package_version`、`argv`、`peer_id`、`transport`、`serial`、`tx_freq_hz`、`rx_freq_hz`、`tx_gain_db`、`rx_gain_db`、`tx_lo_offset_hz`、`tx_bandwidth_hz`、`mcs_index`、`link_adaptation`、`lock_timeout_s`、`clipping_level` |
+| `start` | 開檔時 | `version`、`sample_rate`、`burst_fields`、`package_version`、`argv`、`peer_id`、`transport`、`serial`、`tx_freq_hz`、`rx_freq_hz`、`tx_gain_db`、`rx_gain_db`、`tx_lo_offset_hz`、`tx_bandwidth_hz`、`mcs_index`、`link_adaptation`、`lock_timeout_s`、`clipping_level`；v2.1.1 起加 `tx_settle_guard_s`（B210 每個 burst 前的零值保護段，秒；預設 0.00025，其他 transport 是 `null`。v2.1.0 的檔案沒有這個欄位，當時一律 250 µs） |
 | `burst` | 每個 preamble 一行（下表） | |
 | `lock` | 失鎖與重新鎖定 | `state`（`acquired`／`lost`）、`off`、`stream_t`（= `off / sample_rate`）、`dev_t`（v2.1.1 起：轉換時的裝置時間，沒有 `rx_time` 的 transport 是 `null`；v2.1.0 的檔案沒有這個欄位） |
 | `rx_time` | UHD 的 `rx_time` tag（開始時一個，每次 overflow 或 retune 一個） | `off`、`dev_t`：這個 sample 的裝置時間 |

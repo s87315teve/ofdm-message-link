@@ -186,6 +186,18 @@ def _positive(value: str) -> float:
     return parsed
 
 
+#: Largest --tx-guard-us: 20 ms of zeros before every burst is far past any
+#: key-up transient seen (bench: 1 ms already settles the B210).
+MAX_TX_GUARD_US = 20_000.0
+
+
+def _tx_guard_us(value: str) -> float:
+    parsed = float(value)
+    if not (math.isfinite(parsed) and 0.0 <= parsed <= MAX_TX_GUARD_US):
+        raise argparse.ArgumentTypeError(f"must be 0 to {MAX_TX_GUARD_US:g} us")
+    return parsed
+
+
 def _duty(value: str) -> float:
     parsed = float(value)
     if not 0.05 <= parsed <= 1.0:
@@ -275,6 +287,10 @@ def build_parser() -> argparse.ArgumentParser:
     node.add_argument("--tx-analog-bw", type=_positive, default=None, metavar="HZ",
                       help="uhd: TX analog filter bandwidth (default: wide enough for the "
                            "LO-offset signal, at least 25e6; 25e6 reproduces the pre-2.0 setting)")
+    node.add_argument("--tx-guard-us", type=_tx_guard_us, default=None, metavar="US",
+                      help=("uhd: zeros sent before every burst so the front end settles after "
+                            "key-up, in microseconds (default: the sink's 250; each burst then "
+                            "takes this much more air time)"))
     node.add_argument("--rx-kernel-buffers", type=_kernel_buffers, default=4, metavar="N",
                       help="libiio RX kernel buffers (default 4; 8 rides out longer USB stalls)")
     node.add_argument("--tx-duty-cap", type=_duty, default=0.7, metavar="D",
@@ -391,7 +407,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _resolve_gains(parser, args)
     if args.transport != "uhd":
         for flag, value in (("--tx-lo-offset", args.tx_lo_offset),
-                            ("--tx-analog-bw", args.tx_analog_bw)):
+                            ("--tx-analog-bw", args.tx_analog_bw),
+                            ("--tx-guard-us", args.tx_guard_us)):
             if value is not None:
                 parser.error(f"{flag} applies to --transport uhd only")
     else:
