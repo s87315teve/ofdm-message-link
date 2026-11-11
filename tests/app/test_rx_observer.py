@@ -149,7 +149,9 @@ def test_clipping_is_reported_for_the_chunk_that_clipped(profile):
     loud_q = quiet.copy()
     loud_q[7] = 0.1 - 0.94j
     observer = _Observer()
-    worker = ReceiveWorker(MessageReceiver(profile), _Bridge(), observer=observer)
+    # One feed per chunk (no merging), so each call describes one chunk.
+    worker = ReceiveWorker(MessageReceiver(profile), _Bridge(), observer=observer,
+                           min_feed_samples=0)
     _run(worker, _Source([quiet, loud, quiet, loud_q]), lambda: len(observer.calls) >= 4)
     assert [call[3].clipping_seen for call in observer.calls] == [False, True, False, True]
 
@@ -175,7 +177,7 @@ def test_an_observer_error_is_surfaced_and_the_worker_keeps_going(profile):
             raise RuntimeError("observer bug")
 
     bridge = _Bridge()
-    worker = ReceiveWorker(MessageReceiver(profile), bridge, observer=Broken())
+    worker = ReceiveWorker(MessageReceiver(profile), bridge, observer=Broken(), min_feed_samples=0)
     chunks = [np.zeros(1024, np.complex64)] * 3
     _run(worker, _Source(chunks), lambda: Broken.calls >= 3)
     assert Broken.calls == 3
@@ -221,7 +223,7 @@ def test_decode_backlog_follows_the_pool(profile):
 
     observer = _Observer()
     receiver = PoolReceiver([(0, 0), (4, 0), (1, 2), (1, 2)])
-    worker = ReceiveWorker(receiver, _Bridge(), observer=observer)
+    worker = ReceiveWorker(receiver, _Bridge(), observer=observer, min_feed_samples=0)
     chunks = [np.zeros(256, np.complex64)] * 4
     _run(worker, _Source(chunks), lambda: len(observer.calls) >= 4)
     assert [call[3].decode_backlog for call in observer.calls] == [False, True, True, False]

@@ -81,6 +81,12 @@ class _Bridge(QtCore.QObject):
     link_snr = QtCore.pyqtSignal(object)
 
 
+# A receive feed is at least this many samples when the transport has them
+# queued; a short chunk waits at most MAX_MERGE_WAIT_S for the rest.
+MIN_FEED_SAMPLES = 8192
+MAX_MERGE_WAIT_S = 0.002
+
+
 class ReceiveWorker:
     """Pull sample chunks from the transport and decode them continuously."""
 
@@ -92,7 +98,15 @@ class ReceiveWorker:
         *,
         egress: EgressForwarder | None = None,
         observer: ReceiveObserver | None = None,
+        min_feed_samples: int = MIN_FEED_SAMPLES,
+        max_merge_wait_s: float = MAX_MERGE_WAIT_S,
     ) -> None:
+        if type(min_feed_samples) is not int or min_feed_samples < 0:
+            raise ValueError("min_feed_samples must be a non-negative integer")
+        if not 0.0 <= max_merge_wait_s <= 0.1:
+            raise ValueError("max_merge_wait_s must be in [0, 0.1] s")
+        self._min_feed_samples = min_feed_samples
+        self._max_merge_wait_s = float(max_merge_wait_s)
         self._receiver = receiver
         self._observer = observer
         self._clipping_seen = False
@@ -162,7 +176,7 @@ class ReceiveWorker:
                 self._attached.wait(0.1)
                 self._attached.clear()
                 continue
-            chunk = source.recv(0.2)
+            chunk = self._next_chunk(source)
             if chunk is None:
                 continue
             now = time.monotonic()
@@ -197,6 +211,32 @@ class ReceiveWorker:
                     self._notify_observer(source, chunk, snrs)
                 except Exception as error:  # surfaced in the window, never silent
                     self._bridge.failed.emit(f"observer {type(error).__name__}: {error}")
+
+    def _next_chunk(self, source):
+        """One transport chunk, merged with the ones queued behind it up to a minimum size.
+
+        A B210 at 5 MS/s hands the sink about 2.5k samples per call, and each
+        feed pays a fixed cost (a whole acquisition pass, the pool handoff)
+        whatever its size: offline, 2560-sample feeds cost the receive owner
+        14% more than 8192-sample ones (cpp_eval phase 2, E3, n=2).  So chunks
+        already queued are taken at once, and a short one waits at most
+        ``max_merge_wait_s`` (2 ms) for more.  The samples and their order are
+        unchanged; only the feed boundaries move.
+        """
+
+        chunk = source.recv(0.2)
+        if chunk is None or self._min_feed_samples <= 0 or chunk.size >= self._min_feed_samples:
+            return chunk
+        parts = [chunk]
+        total = int(chunk.size)
+        deadline = time.monotonic() + self._max_merge_wait_s
+        while total < self._min_feed_samples and not self._stop.is_set():
+            more = source.recv(max(0.0, deadline - time.monotonic()))
+            if more is None:
+                break
+            parts.append(more)
+            total += int(more.size)
+        return parts[0] if len(parts) == 1 else np.concatenate(parts)
 
     def _notify_observer(self, source, chunk, snrs: tuple[float, ...]) -> None:
         assert self._observer is not None
