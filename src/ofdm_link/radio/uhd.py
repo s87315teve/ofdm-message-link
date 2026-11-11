@@ -19,7 +19,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-SUPPORTED_SAMPLE_RATES = frozenset({5_000_000, 10_000_000, 20_000_000})
+SUPPORTED_SAMPLE_RATES = frozenset({5_000_000, 10_000_000, 15_360_000, 20_000_000})
+# Master clock rates set explicitly per sample rate; UHD chooses for the others.
+# 15.36 MS/s is an LTE rate: 30.72 MHz is twice it, a clean decimation by 2 in
+# the FPGA, and the highest master clock a B210 allows with both channels in
+# use (node_app opens RF A for TX and RF B for RX on one device), so the same
+# value is valid single- and dual-channel.  UHD's automatic choice for
+# 15.36 MS/s is not guaranteed to be an exact integer multiple.
+MASTER_CLOCK_RATES = {15_360_000: 30_720_000}
 RF_ENABLE_ACKNOWLEDGEMENT = "I acknowledge that this process will transmit RF"
 TX_LENGTH_TAG = "ofdm_tx_len"
 TX_TIME_TAG = "tx_time"
@@ -81,7 +88,7 @@ def acknowledge_rf_transmission(acknowledgement: str) -> RFEnableToken:
 
 @dataclass(frozen=True, slots=True)
 class B210Settings:
-    """Validated single-channel B210 settings for the 5/10/20 MS/s sweep."""
+    """Validated single-channel B210 settings at 5, 10, 15.36 or 20 MS/s."""
 
     device_args: str = ""
     sample_rate: int = 10_000_000
@@ -106,7 +113,9 @@ class B210Settings:
         if type(self.sample_rate) is not int:
             raise TypeError("sample_rate must be an integer")
         if self.sample_rate not in SUPPORTED_SAMPLE_RATES:
-            raise ValueError("sample_rate must be one of 5000000, 10000000, or 20000000")
+            raise ValueError(
+                "sample_rate must be one of 5000000, 10000000, 15360000, or 20000000"
+            )
 
         center_frequency = _finite_number("center_frequency", self.center_frequency)
         if not _MIN_CENTER_FREQUENCY_HZ <= center_frequency <= _MAX_CENTER_FREQUENCY_HZ:
@@ -350,7 +359,7 @@ def create_b210_source(
         raise ValueError("recv_frames must be an integer in [1, 1024]")
     uhd = uhd_api if uhd_api is not None else _load_uhd()
     stream_args = _make_stream_args(uhd, settings.channel)
-    device_args = settings.device_args
+    device_args = block_device_args(settings)
     if recv_frames is not None:
         device_args = ",".join(
             part for part in (device_args, f"num_recv_frames={recv_frames}") if part
@@ -419,7 +428,7 @@ def _create_b210_sink(
     _require_settings(settings)
     uhd = uhd_api if uhd_api is not None else _load_uhd()
     stream_args = _make_stream_args(uhd, settings.channel)
-    sink = uhd.usrp_sink(settings.device_args, stream_args, length_tag_name)
+    sink = uhd.usrp_sink(block_device_args(settings), stream_args, length_tag_name)
     _configure_block(
         sink,
         settings=settings,
@@ -428,6 +437,17 @@ def _create_b210_sink(
         uhd_api=uhd,
     )
     return sink
+
+
+def block_device_args(settings: B210Settings) -> str:
+    """The device args a block opens with: the serial selector, plus a fixed
+    ``master_clock_rate`` where :data:`MASTER_CLOCK_RATES` names one."""
+
+    clock = MASTER_CLOCK_RATES.get(settings.sample_rate)
+    parts = [settings.device_args]
+    if clock is not None:
+        parts.append(f"master_clock_rate={clock}")
+    return ",".join(part for part in parts if part)
 
 
 # gr-uhd addresses a block by its own channel index, 0 to N-1, where N is the

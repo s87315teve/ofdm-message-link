@@ -1,0 +1,35 @@
+# One-way profile for tx_app / rx_app on USRP B210s at 15.36 MS/s, 2.45 GHz.
+#   rx_app --transport uhd --overlay configs/profiles/b210_2p45ghz_15p36msps.yaml
+#   tx_app --transport uhd --overlay configs/profiles/b210_2p45ghz_15p36msps.yaml --enable-rf ...
+#
+# 15.36 MS/s comes from a 30.72 MHz master clock, decimation 2
+# (ofdm_link.radio.uhd.MASTER_CLOCK_RATES).  B210 only.  Signal 2442.32-2457.68
+# MHz.  The aggregate airtime cap is 5 ms (80 000 samples at 50 ppm is 5.21 ms
+# at this rate).  Not measured on hardware yet.  It does not arm the
+# transmitter: every RF run still requires --enable-rf and its acknowledgement.
+phy:
+  sample_rate: 15360000
+  center_frequency: 2450000000
+  mcs: qpsk
+  fec:
+    scheme: turbo
+    code_rate: "1/3"
+    decision_mode: turbo
+    max_iterations: 8
+  sync:
+    detection_threshold: 0.25
+    correlation_threshold: 0.30
+
+mac:
+  aggregation:
+    max_burst_airtime_ms: 5.0
+
+radio:
+  adapter: uhd
+  rf_enabled: false
+  bandwidth: 15360000
+  rx_gain: 30.0
+  tx_gain: 0.0
+  rx_antenna: TX/RX
+  tx_antenna: TX/RX
+  clock_source: internal

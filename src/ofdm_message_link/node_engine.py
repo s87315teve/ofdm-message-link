@@ -218,6 +218,17 @@ class PlutoDuplexFactory:
 #: and floods its acquisition.
 DEFAULT_UHD_TX_LO_OFFSET_HZ = 8_000_000.0
 DEFAULT_UHD_TX_BANDWIDTH_HZ = 25_000_000.0
+#: Sample rates whose signal, shifted by the 8 MHz LO offset, needs a wider TX
+#: analog filter than 25 MHz.  At 15.36 MS/s the signal reaches 8 + 7.68 =
+#: 15.68 MHz from the LO, past a 25 MHz filter's 12.5 MHz half-width, so it
+#: gets 40 MHz (half-width 20 MHz).  5/10/20 MS/s keep the measured 25 MHz.
+UHD_TX_BANDWIDTH_BY_RATE_HZ = {15_360_000: 40_000_000.0}
+
+
+def default_uhd_tx_bandwidth(sample_rate: int) -> float:
+    """The node's default TX analog bandwidth at ``sample_rate``."""
+
+    return UHD_TX_BANDWIDTH_BY_RATE_HZ.get(int(sample_rate), DEFAULT_UHD_TX_BANDWIDTH_HZ)
 #: RX on RF B, TX on RF A: device B's RF A received about 13 dB weaker at 2420 MHz.
 DEFAULT_UHD_RX_CHANNEL = 1
 

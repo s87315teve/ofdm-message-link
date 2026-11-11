@@ -593,8 +593,12 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         raise ConfigError(
             "radio.rf_enabled must remain false in YAML; use the explicit --enable-rf CLI guard"
         )
-    if radio.adapter == "uhd" and phy.sample_rate not in {5_000_000, 10_000_000, 20_000_000}:
-        raise ConfigError("phy.sample_rate must be 5, 10, or 20 MS/s for the B210 adapter")
+    if radio.adapter == "uhd" and phy.sample_rate not in {
+        5_000_000, 10_000_000, 15_360_000, 20_000_000
+    }:
+        raise ConfigError(
+            "phy.sample_rate must be 5, 10, 15.36, or 20 MS/s for the B210 adapter"
+        )
     if radio.adapter == "uhd" and not 70_000_000 <= phy.center_frequency <= 6_000_000_000:
         raise ConfigError("phy.center_frequency must be within 70 MHz to 6 GHz for B210")
     _check_v5_link_limits(phy, mac.aggregation)

@@ -89,7 +89,7 @@ python -m ofdm_message_link.tx_app --transport uhd \
 | **Front end** | 選到裝置後實際開啟它讀回的 channels。B210／2901 是 `RF A (ch 0)` 與 `RF B (ch 1)`；N210 是 `Slot A (ch 0)` |
 | **Antenna** | 該 channel 該方向實際回報的 port。RX 有 `TX/RX` 與 `RX2`，**TX 只有 `TX/RX`**（N210 front panel 上是 RF1／RF2） |
 | **Gain (dB)** | 上下限直接取自裝置（B210 為 RX 0–76、TX 0–89.75；N210 + CBX 為 TX 0–31.5、RX 0–38）。**Radio 執行中仍可調整**，立即套用。數字框右邊的灰字說明這台裝置的 gain 是什麼，見下方 [Gain 的定義](#gain-的定義) |
-| **Centre (MHz)** / **Sample rate** | Center frequency 與 sample rate；sample rate 限於 5／10／20 MS/s |
+| **Centre (MHz)** / **Sample rate** | Center frequency 與 sample rate；sample rate 限於 5／10／15.36／20 MS/s（15.36 只有 B210） |
 | **Start radio** | 按下去才會建立 UHD flowgraph。在此之前不會有任何 RF 輸出 |
 
 設計上的幾個重點：

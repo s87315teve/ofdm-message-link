@@ -273,7 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help=("uhd: tune the TX LO this far from the carrier so its leakage "
                             "misses the peer's RX band (default 8e6; 0 = none)"))
     node.add_argument("--tx-analog-bw", type=_positive, default=None, metavar="HZ",
-                      help="uhd: TX analog filter bandwidth (default 25e6)")
+                      help="uhd: TX analog filter bandwidth (default 25e6; 40e6 at 15.36 MS/s)")
     node.add_argument("--rx-kernel-buffers", type=_kernel_buffers, default=4, metavar="N",
                       help="libiio RX kernel buffers (default 4; 8 rides out longer USB stalls)")
     node.add_argument("--tx-duty-cap", type=_duty, default=0.7, metavar="D",

@@ -60,13 +60,13 @@ from . import log_limits, node_options, options
 from .dashboard import RxDashboard, TxDashboard
 from .node_engine import (
     DEFAULT_UHD_RX_CHANNEL,
-    DEFAULT_UHD_TX_BANDWIDTH_HZ,
     DEFAULT_UHD_TX_LO_OFFSET_HZ,
     NodeSpec,
     PlutoDuplexFactory,
     ProcessNodeWorker,
     UdpDuplexFactory,
     UhdDuplexFactory,
+    default_uhd_tx_bandwidth,
 )
 
 STATS_INTERVAL_S = 0.5
@@ -487,8 +487,8 @@ def uhd_factory(args, setup: node_options.NodeSetup, *, serial: str, tx_gain_db:
         rx_bandwidth=args.rx_analog_bw,
         tx_lo_offset=(DEFAULT_UHD_TX_LO_OFFSET_HZ if args.tx_lo_offset is None
                       else args.tx_lo_offset),
-        tx_bandwidth=(DEFAULT_UHD_TX_BANDWIDTH_HZ if args.tx_analog_bw is None
-                      else args.tx_analog_bw),
+        tx_bandwidth=(default_uhd_tx_bandwidth(setup.resolved.profile.sample_rate)
+                      if args.tx_analog_bw is None else args.tx_analog_bw),
         peak_amplitude=args.peak_amplitude,
     )
     factory.settings()  # every B210 setting checked here (ValueError), before a child exists

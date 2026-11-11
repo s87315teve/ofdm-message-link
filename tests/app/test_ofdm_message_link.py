@@ -1707,7 +1707,7 @@ def test_probe_reports_the_front_ends_the_device_declares():
     assert capabilities.channels[0].rx_antennas == ("TX/RX", "RX2")
     assert capabilities.channels[0].tx_antennas == ("TX/RX",)
     assert capabilities.channels[1].rx_gain_range_db == (0.0, 76.0)
-    assert capabilities.sample_rates == (5_000_000, 10_000_000, 20_000_000)
+    assert capabilities.sample_rates == (5_000_000, 10_000_000, 15_360_000, 20_000_000)
 
 
 def test_probe_failure_is_reported_not_raised_as_an_arbitrary_error():
