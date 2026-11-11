@@ -151,6 +151,85 @@ def test_lock_is_lost_after_the_timeout_and_regained_at_the_next_header(profile,
     assert locks[2][1] == min(e.off for e in events if e.off >= samples.size)
 
 
+def _peer_burst(recorder, off):
+    """One acquired preamble whose header decoded and whose payload carried our data."""
+
+    recorder.acquired(off, 20.0, 1e-3, 0.1)
+    recorder.header_ok()
+    recorder.payload(None, True)
+    recorder.link(off, "data", 16, 1, 1, 0, 0, True)
+
+
+def _run_feeds(recorder, feeds, anchors_at):
+    """Feed (offset, count, burst offsets) chunks; ``anchors_at(offset)`` gives the anchors
+    the receive stream has once that chunk arrived.  Returns every lock transition."""
+
+    locks = []
+    for offset, count, bursts in feeds:
+        recorder.on_feed(offset, count)
+        for off in bursts:
+            _peer_burst(recorder, off)
+        locks.extend(recorder.drain(anchors_at(offset))[1])
+    return locks
+
+
+_LOCK_RATE = 1e5  # a fake rate: the 0.5 s timeout is 50 000 samples
+
+
+def _steady_feeds(until):
+    """10 000-sample chunks, one peer burst at the start of each."""
+
+    return [(off, 10_000, (off,)) for off in range(0, until, 10_000)]
+
+
+def test_lock_without_overflow_is_the_same_with_or_without_device_time():
+    # A peer that stops: 'lost' exactly timeout after its last header, in both clocks.
+    feeds = _steady_feeds(110_000) + [(off, 10_000, ()) for off in range(110_000, 200_000, 10_000)]
+    feeds += [(200_000, 10_000, (203_000,))]
+    plain = BurstEventRecorder(_LOCK_RATE, lock_timeout_s=0.5)
+    timed = BurstEventRecorder(_LOCK_RATE, lock_timeout_s=0.5)
+    without = _run_feeds(plain, feeds, lambda off: [])
+    with_anchor = _run_feeds(timed, feeds, lambda off: [(0, 10.0)])
+    assert [lock[:2] for lock in without] == [("acquired", 0), ("lost", 150_000),
+                                               ("acquired", 203_000)]
+    assert [lock[:2] for lock in with_anchor] == [lock[:2] for lock in without]
+    # The device time of each transition rides along when there is one.
+    assert [lock[4] for lock in without] == [None, None, None]
+    assert [lock[4] for lock in with_anchor] == pytest.approx([10.0, 11.5, 12.03])
+
+
+@pytest.mark.parametrize("resumes_in_gap_chunk", [False, True])
+def test_a_receive_overflow_longer_than_the_timeout_is_a_lost_lock(resumes_in_gap_chunk):
+    # The receiver's own overflow loses 2 s of samples between offsets 109 999 and
+    # 110 000: the stream offsets run on, but the device clock jumps.  The peer never
+    # stopped, so its bursts carry on the moment samples flow again.
+    before = [(0, 10.0)]
+    after = [(0, 10.0), (110_000, 13.1)]  # 1.1 s of samples, then 2.0 s lost
+    feeds = _steady_feeds(110_000)
+    first_after = 110_000 + (2_000 if resumes_in_gap_chunk else 10_000)
+    feeds += [(110_000, 10_000, (first_after,) if resumes_in_gap_chunk else ())]
+    feeds += [(120_000, 10_000, (120_000,))]
+    recorder = BurstEventRecorder(_LOCK_RATE, lock_timeout_s=0.5)
+    locks = _run_feeds(recorder, feeds, lambda off: after if off >= 110_000 else before)
+    assert [lock[0] for lock in locks] == ["acquired", "lost", "acquired"]
+    lost, regained = locks[1], locks[2]
+    # Lost 0.5 s of device time after the last header (100 000 -> 11.0 s), which falls
+    # inside the gap: the first sample after the gap is where the stream knows it.
+    assert lost[1] == 110_000
+    assert lost[4] == pytest.approx(11.5)
+    assert regained[1] == first_after
+    assert regained[4] == pytest.approx(13.1 + (first_after - 110_000) / _LOCK_RATE)
+
+
+def test_a_short_receive_overflow_is_not_a_lost_lock():
+    after = [(0, 10.0), (110_000, 11.3)]  # 0.2 s lost: under the 0.5 s timeout
+    feeds = _steady_feeds(110_000) + [(110_000, 10_000, (110_000,))]
+    recorder = BurstEventRecorder(_LOCK_RATE, lock_timeout_s=0.5)
+    locks = _run_feeds(recorder, feeds,
+                       lambda off: after if off >= 110_000 else [(0, 10.0)])
+    assert [lock[0] for lock in locks] == ["acquired"]
+
+
 def test_device_time_comes_from_the_last_anchor_at_or_before_the_burst():
     recorder = BurstEventRecorder(RATE)
     for off in (1000, 3_000_000):
@@ -269,7 +348,8 @@ def test_writer_lines_round_trip_and_mark_lost_batches(tmp_path):
     writer.start({"transport": "uhd"})
     row = tuple(BurstEvent(800, 12.5, 3.0, 1003.0, 25.1234, 1e-4, 0.03, 0.5, False, "ok", "ok",
                            "data", 16, 7, 12, 0, 0, True))
-    writer.on_event("bursts", {"seq": 0, "events": [row], "locks": [("acquired", 800, 3.0, 1003.0)],
+    writer.on_event("bursts", {"seq": 0, "events": [row],
+                               "locks": [("acquired", 800, 3.0, 1003.0, 12.5)],
                                "anchors": [(0, 12.5)], "overflows": []})
     writer.on_event("bursts", {"seq": 3, "events": [], "locks": [], "anchors": [],
                                "overflows": [(5000, 12.6, 40)]})
@@ -290,7 +370,8 @@ def test_writer_lines_round_trip_and_mark_lost_batches(tmp_path):
     assert burst["snr_db"] == 25.123 and burst["kind"] == "data" and burst["fcs"] is True
     gap = next(r for r in rows if r["k"] == "gap")
     assert gap["lost_batches"] == 2
-    assert next(r for r in rows if r["k"] == "lock")["stream_t"] == pytest.approx(800 / RATE)
+    lock = next(r for r in rows if r["k"] == "lock")
+    assert lock["stream_t"] == pytest.approx(800 / RATE) and lock["dev_t"] == 12.5
     assert next(r for r in rows if r["k"] == "gain")["mono"] == 4.0
     assert next(r for r in rows if r["k"] == "readback")["rx"] == {"gain_db": 30.0}
     assert next(r for r in rows if r["k"] == "radio")["rx_freq_hz"] == 2.46e9

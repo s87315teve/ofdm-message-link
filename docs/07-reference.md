@@ -590,7 +590,7 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 |---|---|---|
 | `start` | 開檔時 | `version`、`sample_rate`、`burst_fields`、`package_version`、`argv`、`peer_id`、`transport`、`serial`、`tx_freq_hz`、`rx_freq_hz`、`tx_gain_db`、`rx_gain_db`、`tx_lo_offset_hz`、`tx_bandwidth_hz`、`mcs_index`、`link_adaptation`、`lock_timeout_s`、`clipping_level` |
 | `burst` | 每個 preamble 一行（下表） | |
-| `lock` | 失鎖與重新鎖定 | `state`（`acquired`／`lost`）、`off`、`stream_t`（= `off / sample_rate`） |
+| `lock` | 失鎖與重新鎖定 | `state`（`acquired`／`lost`）、`off`、`stream_t`（= `off / sample_rate`）、`dev_t`（v2.1.1 起：轉換時的裝置時間，沒有 `rx_time` 的 transport 是 `null`；v2.1.0 的檔案沒有這個欄位） |
 | `rx_time` | UHD 的 `rx_time` tag（開始時一個，每次 overflow 或 retune 一個） | `off`、`dev_t`：這個 sample 的裝置時間 |
 | `overflow` | 接收串流有缺口 | `source = "rx_time"`：`off`、`dev_t`、`lost`（遺失的 samples，由 `rx_time` 算出）；`source = "counter"`：`counter`（`uhd_rx_overflow`、`chunks_dropped_overflow`、`rx_overflow_events`）、`delta`、`total` |
 | `gain` | 每次 gain 變更（control socket、`--gain-profile`） | `dir`、`db`（要求值）、`readback`（裝置讀回）；`mono` 是子 process 套用的時間 |
@@ -615,9 +615,16 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 | `kind` | payload 解出來時：`data`（至少一個自己 link 的 DATA frame）、`control`（只有 control frame）、`own`（自己 TX 的洩漏，被丟掉）、`foreign`（CRC 正確但不是我們的）、`other` |
 | `mcs`、`seq`、`sf_ok`、`sf_bad`、`lost`、`fcs` | burst 的 MCS、第一個 DATA sequence、CRC 正確與錯誤的 subframes、這個 burst 之前不見的 DATA sequence 數、PSDU 的 FCS 是否通過。header 失敗或 payload 沒解出來時是 `null`（MCS 也是，header 的 MCS 沒有往外送） |
 
-**失鎖的定義**：串流時間（不是主機時間）連續 `--events-lock-timeout`（預設 1 s）沒有一個 `hdr = ok` 且 `kind` 不是
-`own` 的 burst，就在 `最後一個 burst 的 off + timeout` 寫一行 `lock lost`；下一個這樣的 burst 寫 `lock acquired`。
-peer 沒有負載時每 0.5 s 左右仍送一個 control burst，所以 1 s 不會把閒置的 link 算成失鎖。
+**失鎖的定義**：連續 `--events-lock-timeout`（預設 1 s）沒有一個 `hdr = ok` 且 `kind` 不是 `own` 的 burst，就寫一行
+`lock lost`；下一個這樣的 burst 寫 `lock acquired`。peer 沒有負載時每 0.5 s 左右仍送一個 control burst，所以 1 s
+不會把閒置的 link 算成失鎖。時間用接收串流本身的時間，不是主機時間：
+
+- 有 `rx_time` 的 transport（UHD）從 v2.1.1 起用**裝置時間**計時，所以接收端自己 overflow 遺失的 samples 也算在內。
+  沒有缺口時 `lost` 的 `off` 是 `最後一個 burst 的 off + timeout`，和 v2.1.0 相同；失鎖的時間點落在 overflow 缺口裡時，
+  `off` 是缺口後的第一個 sample（串流裡沒有更早的位置），`dev_t` 是 `最後一個 burst 的 dev_t + timeout`。
+- 沒有 `rx_time` 的 transport（udp、Pluto）用串流位置 `off` 計時，和 v2.1.0 相同。
+- v2.1.0 只用 `off` 計時：overflow 遺失的 samples 不算進 `off`，所以接收端自己停住超過 timeout 也不會寫 `lock lost`
+  （桌上量測 `v210_stalltree_r2` 發現）。分析 v2.1.0 的檔案時，要用 `overflow` 行的 `lost` 自己補判。
 
 **順序與完整性**：同一批（一次 receive feed）裡的 `burst` 依 `off` 排序；decode pool 的 payload 比較晚回來，所以
 跨批次時要再依 `off` 排一次。每批有編號，queue 滿而掉的批次寫成 `gap`，不會默默消失。停止時（detach）會把還沒有

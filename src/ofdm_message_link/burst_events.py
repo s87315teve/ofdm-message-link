@@ -161,6 +161,7 @@ class BurstEventRecorder:
         self._stream_end = 0
         # Lock: offset of the last header from the peer, and the state.
         self._last_peer_off: int | None = None
+        self._last_peer_dev: float | None = None
         self._locked: bool | None = None
         self._lock_events: list[tuple] = []
         self.records = 0
@@ -276,17 +277,73 @@ class BurstEventRecorder:
             self._current = None
         self._done.append(record)
 
-    def _note_lock(self, record: _Open) -> None:
+    def _device_time(self, off: int, anchors: Sequence[tuple[int, float]],
+                     offsets: list[int]) -> float | None:
+        """Device time of stream offset ``off`` from the last anchor at or before it."""
+
+        i = bisect_right(offsets, off) - 1
+        if i < 0:
+            return None
+        a_off, a_sec = anchors[i]
+        return a_sec + (off - a_off) / self.sample_rate
+
+    def _offset_at(self, seconds: float, anchors: Sequence[tuple[int, float]]) -> int | None:
+        """Stream offset of device time ``seconds``; in a gap, the first sample after it."""
+
+        for i in range(len(anchors) - 1, -1, -1):
+            a_off, a_sec = anchors[i]
+            if a_sec <= seconds:
+                off = a_off + int(round((seconds - a_sec) * self.sample_rate))
+                if i + 1 < len(anchors):
+                    off = min(off, anchors[i + 1][0])
+                return off
+        return None
+
+    def _timed_out(self, off: int, dev_t: float | None) -> bool:
+        """Whether more than the timeout passed between the last peer header and ``off``.
+
+        Counted on the device clock when both ends have a device time, so the
+        samples a receive overflow lost count too; on the stream offsets
+        otherwise (no ``rx_time``: udp, Pluto), where nothing is ever lost.
+        """
+
+        if dev_t is not None and self._last_peer_dev is not None:
+            elapsed = int(round((dev_t - self._last_peer_dev) * self.sample_rate))
+        else:
+            elapsed = off - self._last_peer_off
+        return elapsed > self.lock_timeout_samples
+
+    def _lose(self, anchors: Sequence[tuple[int, float]], offsets: list[int],
+              mono: float, wall: float) -> None:
+        when_dev = None
+        when = None
+        if self._last_peer_dev is not None and anchors:
+            when_dev = self._last_peer_dev + self.lock_timeout_samples / self.sample_rate
+            when = self._offset_at(when_dev, anchors)
+        if when is None:
+            when = self._last_peer_off + self.lock_timeout_samples
+            when_dev = self._device_time(when, anchors, offsets) if anchors else None
+        self._lock_events.append(("lost", when, mono, wall, when_dev))
+        self._locked = False
+
+    def _note_lock(self, record: _Open, dev_t: float | None,
+                   anchors: Sequence[tuple[int, float]], offsets: list[int]) -> None:
         if record.hdr != "ok":
             return
         kind = None if record.link is None else record.link[0]
         if kind == "own":
             return
+        newer = self._last_peer_off is None or record.off > self._last_peer_off
+        # A header from the peer after a silence longer than the timeout that
+        # no drain saw (a receive overflow can lose it inside one chunk).
+        if self._locked is True and newer and self._timed_out(record.off, dev_t):
+            self._lose(anchors, offsets, record.mono, record.wall)
         if self._locked is not True:
-            self._lock_events.append(("acquired", record.off, record.mono, record.wall))
+            self._lock_events.append(("acquired", record.off, record.mono, record.wall, dev_t))
             self._locked = True
-        if self._last_peer_off is None or record.off > self._last_peer_off:
+        if newer:
             self._last_peer_off = record.off
+            self._last_peer_dev = dev_t
 
     def drain(self, anchors: Sequence[tuple[int, float]] = ()) -> tuple[
             list[BurstEvent], list[tuple]]:
@@ -294,7 +351,9 @@ class BurstEventRecorder:
 
         ``anchors`` are the receive stream's device-time anchors, ``(offset,
         seconds)`` sorted by offset (UHD ``rx_time`` tags); a record gets the
-        device time of its offset from the last anchor at or before it.
+        device time of its offset from the last anchor at or before it.  A
+        lock transition is ``(state, off, mono, wall, dev_t)``; the lock
+        timeout runs on device time when there is one (see :meth:`_timed_out`).
         """
 
         done, self._done = self._done, []
@@ -302,13 +361,8 @@ class BurstEventRecorder:
         offsets = [anchor[0] for anchor in anchors]
         events = []
         for record in done:
-            self._note_lock(record)
-            dev_t = None
-            if anchors:
-                i = bisect_right(offsets, record.off) - 1
-                if i >= 0:
-                    a_off, a_sec = anchors[i]
-                    dev_t = a_sec + (record.off - a_off) / self.sample_rate
+            dev_t = self._device_time(record.off, anchors, offsets) if anchors else None
+            self._note_lock(record, dev_t, anchors, offsets)
             peak = record.peak
             link = record.link or (None,) * 7
             events.append(BurstEvent(
@@ -316,11 +370,11 @@ class BurstEventRecorder:
                 record.signal_power, peak, None if peak is None else peak >= CLIPPING_LEVEL,
                 record.hdr, record.pl, *link,
             ))
-        if (self._locked is True and self._last_peer_off is not None
-                and self._stream_end - self._last_peer_off > self.lock_timeout_samples):
-            when = self._last_peer_off + self.lock_timeout_samples
-            self._lock_events.append(("lost", when, self._feed_mono, self._feed_wall))
-            self._locked = False
+        if self._locked is True and self._last_peer_off is not None:
+            end_dev = (self._device_time(self._stream_end, anchors, offsets)
+                       if anchors else None)
+            if self._timed_out(self._stream_end, end_dev):
+                self._lose(anchors, offsets, self._feed_mono, self._feed_wall)
         locks, self._lock_events = self._lock_events, []
         return events, locks
 
@@ -447,9 +501,11 @@ class EventLogWriter:
             if fields["dev_t"] is not None:
                 fields["dev_t"] = round(fields["dev_t"], 9)
             self._write("burst", fields, mono=mono, wall=wall)
-        for state, off, mono, wall in batch.get("locks", ()):
+        for state, off, mono, wall, *rest in batch.get("locks", ()):
+            dev_t = rest[0] if rest else None
             self._write("lock", {"state": state, "off": off,
-                                 "stream_t": round(off / self.sample_rate, 6)},
+                                 "stream_t": round(off / self.sample_rate, 6),
+                                 "dev_t": None if dev_t is None else round(dev_t, 9)},
                         mono=mono, wall=wall)
 
     def status(self, line: dict[str, Any] | None) -> None:
