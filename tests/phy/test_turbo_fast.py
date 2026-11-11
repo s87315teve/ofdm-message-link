@@ -19,6 +19,17 @@ from ofdm_link.phy.turbo import _qpp_for_plan, turbo_segmentation_plan
 native = pytest.importorskip("ofdm_link.phy._turbo_native")
 
 
+@pytest.fixture(autouse=True)
+def _compare_both_backends(monkeypatch):
+    """These tests compare native with Python themselves; a global OFDM_LINK_NATIVE=python
+    (used to run the whole suite on the reference path) must not turn both sides Python."""
+
+    monkeypatch.delenv(native_backend.GLOBAL_ENV, raising=False)
+    native_backend.reset()
+    yield
+    native_backend.reset()
+
+
 def _frame(rng, payload_bytes):
     body = rng.integers(0, 256, payload_bytes, dtype=np.uint8).tobytes()
     crc = zlib.crc32(body).to_bytes(4, "big")

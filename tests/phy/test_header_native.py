@@ -36,6 +36,17 @@ native = pytest.importorskip("ofdm_link.phy._header_native")
 SETTINGS = BurstConfig()
 
 
+@pytest.fixture(autouse=True)
+def _compare_both_backends(monkeypatch):
+    """These tests compare native with Python themselves; a global OFDM_LINK_NATIVE=python
+    (used to run the whole suite on the reference path) must not turn both sides Python."""
+
+    monkeypatch.delenv(native_backend.GLOBAL_ENV, raising=False)
+    native_backend.reset()
+    yield
+    native_backend.reset()
+
+
 def _python_sig_llrs(values, acquisition, settings):
     """The SIG LLRs exactly as burst_v5._decode_v5_acquired computes them."""
 

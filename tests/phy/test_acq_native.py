@@ -29,6 +29,17 @@ LEGACY = SyncConfig(detection_threshold=0.25, correlation_threshold=0.30)
 V5 = V5SyncConfig()
 
 
+@pytest.fixture(autouse=True)
+def _compare_both_backends(monkeypatch):
+    """These tests compare native with Python themselves; a global OFDM_LINK_NATIVE=python
+    (used to run the whole suite on the reference path) must not turn both sides Python."""
+
+    monkeypatch.delenv(native_backend.GLOBAL_ENV, raising=False)
+    native_backend.reset()
+    yield
+    native_backend.reset()
+
+
 def _close(a: float, b: float, rel: float) -> bool:
     return abs(a - b) <= rel * max(abs(a), abs(b), 1e-12)
 
