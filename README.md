@@ -25,6 +25,23 @@ TX 和 RX 是**兩個各自啟動的 process**，彼此只透過 sample transpor
 > 點任何一個模組，看它做什麼、對應哪一段程式、在 GUI 的哪裡看得到；也可以調 message 大小與 MCS，
 > 看 packet 怎麼一層層包起來。離線時用瀏覽器開 [`guide/index.html`](guide/index.html) 也一樣。
 
+## 版本
+
+| 版本 | 在哪裡 | 內容 |
+|---|---|---|
+| **v2.0**（目前） | `main`，tag [`v2.0.0`](https://github.com/s87315teve/ofdm-message-link/releases/tag/v2.0.0) | 單向 `tx_app`／`rx_app`，加上雙向 FDD 的 `node_app`；C++ 加速（acquisition、header、Turbo、TX encode）；USRP 支援 15.36 MS/s |
+| **v1.0** | branch [`v1.0`](https://github.com/s87315teve/ofdm-message-link/tree/v1.0)，tag [`v1.0.0`](https://github.com/s87315teve/ofdm-message-link/releases/tag/v1.0.0) | 只支援單向 link（TX → RX）。已凍結，不再更新 |
+
+v2.0 的 RX 預設不收 v1.0 TX 送的舊格式；兩端版本要一致，或在 v2.0 的 RX 加
+`--overlay configs/profiles/legacy_rx.yaml`。切換版本：
+
+```bash
+git fetch --tags origin
+git checkout v1.0      # 用 v1.0（只有單向）
+git checkout main      # 用最新版
+pip install -e .       # 切換後重新安裝，C++ 模組才會跟著版本
+```
+
 ## 這個範例是什麼、不是什麼
 
 這是**單向** link：只有 TX → RX，沒有回傳路徑。所以：
