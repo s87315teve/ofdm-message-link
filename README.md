@@ -29,7 +29,8 @@ TX 和 RX 是**兩個各自啟動的 process**，彼此只透過 sample transpor
 
 | 版本 | 在哪裡 | 內容 |
 |---|---|---|
-| **v2.0.1**（目前） | `main`，tag [`v2.0.1`](https://github.com/s87315teve/ofdm-message-link/releases/tag/v2.0.1) | 修正 `node_app` 的 TX 規劃瓶頸（10 MS/s 雙向從每個方向 900/s 提高到至少 1600/s）；stats 加 wall-clock、平均 goodput／airtime 與 TX filter 讀回值；`experiments/duplex_fdd/judge_run.py` |
+| **v2.1.0**（目前） | `main`，tag `v2.1.0` | `node_app --events`：逐 burst 的接收事件（preamble SNR、雜訊變異數、clipping、header／payload／FCS 結果、裝置與主機時間，加上 gain、頻率、失鎖與 overflow），預設關閉，見 [7.11 節](docs/07-reference.md#711-逐-burst-的接收事件--events) |
+| **v2.0.1** | tag [`v2.0.1`](https://github.com/s87315teve/ofdm-message-link/releases/tag/v2.0.1) | 修正 `node_app` 的 TX 規劃瓶頸（10 MS/s 雙向從每個方向 900/s 提高到至少 1600/s）；stats 加 wall-clock、平均 goodput／airtime 與 TX filter 讀回值；`experiments/duplex_fdd/judge_run.py` |
 | **v2.0** | tag [`v2.0.0`](https://github.com/s87315teve/ofdm-message-link/releases/tag/v2.0.0) | 單向 `tx_app`／`rx_app`，加上雙向 FDD 的 `node_app`；C++ 加速（acquisition、header、Turbo、TX encode）；USRP 支援 15.36 MS/s |
 | **v1.0** | branch [`v1.0`](https://github.com/s87315teve/ofdm-message-link/tree/v1.0)，tag [`v1.0.0`](https://github.com/s87315teve/ofdm-message-link/releases/tag/v1.0.0) | 只支援單向 link（TX → RX）。已凍結，不再更新 |
 
