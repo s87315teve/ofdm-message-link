@@ -268,6 +268,16 @@ def _cpu_affinity(value: str) -> str:
         raise argparse.ArgumentTypeError(str(error)) from error
 
 
+DEFAULT_REALTIME_PRIORITY = 15
+
+
+def _realtime_priority(value: str) -> int:
+    parsed = int(value)
+    if not 1 <= parsed <= 49:
+        raise argparse.ArgumentTypeError("must be between 1 and 49")
+    return parsed
+
+
 def add_performance_arguments(parser: argparse.ArgumentParser) -> None:
     """CPU placement and scheduling switches; every one is off by default."""
 
@@ -282,6 +292,35 @@ def add_performance_arguments(parser: argparse.ArgumentParser) -> None:
             "a list like 0-7 or 2,4-5, or p-cores for the list in "
             "/sys/devices/cpu_core/cpus (pins nothing where that file does not exist). "
             "Default: no pinning"
+        ),
+    )
+    group.add_argument(
+        "--realtime",
+        nargs="?",
+        type=_realtime_priority,
+        const=DEFAULT_REALTIME_PRIORITY,
+        default=None,
+        metavar="PRIO",
+        help=(
+            "Linux only: run the radio engine process's threads in SCHED_RR at PRIO "
+            f"(1-49, default {DEFAULT_REALTIME_PRIORITY} when given without a value); decode "
+            "workers stay SCHED_OTHER and RT throttling is left on. Refused on fewer than 4 "
+            "usable CPUs unless --force. Default: off"
+        ),
+    )
+    group.add_argument(
+        "--force",
+        action="store_true",
+        help="allow --realtime with fewer than 4 usable CPUs",
+    )
+    group.add_argument(
+        "--native-backend",
+        choices=("auto", "python", "native"),
+        default=None,
+        help=(
+            "native acquisition, header probe, Turbo kernel and transmit encode: auto (the "
+            "default: native when built, else Python with one warning), python (the reference "
+            "implementations) or native (fail if not built). Sets OFDM_LINK_NATIVE"
         ),
     )
 
@@ -310,12 +349,23 @@ def apply_performance_options(args: argparse.Namespace) -> None:
 
     import sys
 
-    from ofdm_link.runtime import cpu_affinity, overload
+    from ofdm_link.phy import native_backend
+    from ofdm_link.runtime import cpu_affinity, overload, realtime
 
     try:
         cpu_affinity.apply(getattr(args, "cpu_affinity", None))
     except cpu_affinity.CpuAffinityError as error:
         raise SystemExit(f"--cpu-affinity: {error}") from error
+    priority = getattr(args, "realtime", None)
+    if priority is not None:
+        try:
+            realtime.check_request(priority, force=bool(getattr(args, "force", False)))
+        except realtime.RealtimeError as error:
+            raise SystemExit(f"--realtime: {error}") from error
+        realtime.request(priority)
+    backend = getattr(args, "native_backend", None)
+    if backend is not None:
+        native_backend.set_choice(backend)
     mode = getattr(args, "overload_protection", "off")
     if mode != "off":
         overload.request(mode)

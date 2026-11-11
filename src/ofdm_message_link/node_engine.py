@@ -640,6 +640,8 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
         )
 
     try:
+        # _serve applies an opt-in --realtime request (ofdm_link.runtime.realtime)
+        # to every thread started above, and to the radio's after each attach.
         _serve(worker, control, replies, tick, handle, switch_interval_s=SWITCH_INTERVAL_S)
     finally:
         worker.detach()

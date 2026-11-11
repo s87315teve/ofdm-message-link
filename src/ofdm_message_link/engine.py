@@ -31,6 +31,7 @@ from typing import Any
 
 import numpy as np
 
+from ofdm_link.runtime import realtime
 from ofdm_link.runtime.segment_decode_pool import _safe_context
 
 from .transport import TransportError
@@ -287,6 +288,9 @@ def _serve(
     # The parent owns Ctrl-C and closes the window, which stops this process.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     sys.setswitchinterval(switch_interval_s)
+    # Opt-in --realtime: every engine thread that exists now (the receive
+    # owner, the transmit worker, ingress); radio threads after each attach.
+    realtime.apply_requested()
     # Diagnostic only: a thread waking every 2 ms preempts the CPU-bound
     # receive owner often enough to cost it throughput.
     lag = _LagMonitor() if os.environ.get(LAG_MONITOR_ENV) == "1" else _NoLag()
@@ -309,6 +313,7 @@ def _serve(
                 except BaseException as error:  # reported, never silent
                     replies.put(("error", f"{type(error).__name__}: {error}"))
                 else:
+                    realtime.refresh()
                     replies.put(("ok", getattr(endpoint, "description", "")))
             elif kind == "detach":
                 worker.detach()
