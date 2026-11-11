@@ -91,6 +91,14 @@ def _strip_readback(snapshot: dict | None) -> dict | None:
     return {key: value for key, value in snapshot.items() if key != "readback"}
 
 
+def _readback_bandwidth(snapshot: dict | None) -> float | None:
+    """The analog filter bandwidth the device reports (UHD readback), if any."""
+
+    readback = (snapshot or {}).get("readback")
+    value = readback.get("bandwidth_hz") if isinstance(readback, dict) else None
+    return float(value) if isinstance(value, (int, float)) else None
+
+
 class NodeMonitor:
     """Turns the child's events into dashboards, LA history and one stats line.
 
@@ -99,10 +107,16 @@ class NodeMonitor:
     """
 
     def __init__(self, node_id: int, mode: str, sample_rate: float,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 wall_clock: Callable[[], float] = time.time) -> None:
         self.node_id = node_id
         self.mode = mode
+        self.sample_rate = float(sample_rate)
         self._clock = clock
+        self._wall_clock = wall_clock
+        # (monotonic time, payload bytes, samples) at the first stats line: the base
+        # of the run averages.
+        self._tx_first: tuple[float, int, int] | None = None
         self._lock = threading.Lock()
         self.rx_dashboard = RxDashboard()
         self.tx_dashboard = TxDashboard(sample_rate)
@@ -169,8 +183,14 @@ class NodeMonitor:
             )
             self.last_views = (rx_view, tx_view)
             transport = _strip_readback(rx.get("transport"))
+            if self._tx_first is None:
+                self._tx_first = (now, int(tx["payload_bytes"]), int(tx["samples"]))
+            first_t, first_bytes, first_samples = self._tx_first
+            span = now - first_t
             line = {
                 "monotonic_s": now,
+                # Wall clock (Unix seconds), to line up the two nodes' and other logs.
+                "wall_time": round(self._wall_clock(), 3),
                 "elapsed_s": now - (self.ready_at if self.ready_at is not None else self.started),
                 "node_id": self.node_id,
                 "mode": self.mode,
@@ -188,6 +208,13 @@ class NodeMonitor:
                     ),
                     "airtime_frac": round(tx_view.airtime, 4),
                     "goodput_bps": round(tx_view.goodput_bps, 1),
+                    # Averages since the first stats line.  The two fields above are
+                    # 2 s windows and fall to 0 once traffic stops.
+                    "airtime_avg_frac": None if span <= 0.0 else round(
+                        (int(tx["samples"]) - first_samples) / self.sample_rate / span, 4),
+                    "goodput_avg_bps": None if span <= 0.0 else round(
+                        8.0 * (int(tx["payload_bytes"]) - first_bytes) / span, 1),
+                    "bandwidth_hz": _readback_bandwidth(tx.get("transport")),
                     "transport": _strip_readback(tx.get("transport")),
                     # Flat TX health (tx_health.py): queues, drops, UHD faults.
                     "health": tx.get("health"),
@@ -196,6 +223,7 @@ class NodeMonitor:
                     "receiver": receiver,
                     "decoder": decoder,
                     "goodput_now_bps": round(rx_view.goodput_bps, 1),
+                    "bandwidth_hz": _readback_bandwidth(rx.get("transport")),
                     "snr_2s": rx_view.snr_2s,
                     "loss_10s": rx_view.loss_10s,
                     "egress_datagrams": rx["egress_datagrams"],

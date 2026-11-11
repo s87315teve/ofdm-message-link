@@ -33,7 +33,7 @@
 
 | 選項 | 說明 |
 |---|---|
-| `--stats-log PATH` | 每次統計刷新附加一行 JSON：messages、bursts、goodput、airtime 與 `tx_health`（見下）。`--stats-log-max-mb`／`--stats-log-backups` 與接收端相同 |
+| `--stats-log PATH` | 每次統計刷新附加一行 JSON：messages、bursts、goodput、airtime 與 `tx_health`（見下）。`t` 是 monotonic 時間，`wall_time` 是 Unix 時間（秒），用來和其他機器的紀錄對時。`goodput_bps`、`airtime` 是 2 秒視窗，流量停了就歸零；`goodput_avg_bps`、`airtime_avg` 是開始（或重設統計）以來的平均。`--stats-log-max-mb`／`--stats-log-backups` 與接收端相同 |
 | `--ingress-port` | 接受 application bytes 的 UDP port，預設 52001 |
 | `--peak-amplitude` | 每個 burst 發射前正規化到的 peak，預設 0.7 |
 | `--aggregation {on,off}` | `on`：radio 可以接下一個 burst 時，把 queue 裡的 datagram 放進同一個 burst（在下面的上限內）。`off`：一個 burst 一個 datagram，供 A/B 量測。預設取 `mac.aggregation.enabled`（`on`） |
@@ -470,7 +470,7 @@ process 默默分流。
 | `--mcs-index N` | 起始的 MCS（`fixed` 時是固定的 MCS），預設 8 |
 | `--control-mcs-index N` | Control-only burst 的 MCS，預設 profile 的值（8） |
 | `--decode-workers N` | 1–64，預設 3（兩個 node 在同一台 PC 時的 CPU 預算） |
-| `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`tx.health` 是 TX health（見 7.1 節的 `tx_health`）。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
+| `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`tx.health` 是 TX health（見 7.1 節的 `tx_health`）。`wall_time` 是 Unix 時間（秒），`monotonic_s` 是 monotonic 時間。`tx.goodput_bps`、`tx.airtime_frac` 是 2 秒視窗，`tx.goodput_avg_bps`、`tx.airtime_avg_frac` 是第一行以來的平均。`tx.bandwidth_hz`、`rx.bandwidth_hz` 是 UHD 讀回的類比濾波器頻寬（沒有讀回值時是 `null`）。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
 | `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON |
 | `--ready-file PATH` | 兩個方向都在跑時建立，停止時刪除 |
 | `--ingress-port` / `--egress-host` / `--egress-port` | 覆寫依 node 的預設 |

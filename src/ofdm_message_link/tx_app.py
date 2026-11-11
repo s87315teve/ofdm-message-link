@@ -1097,6 +1097,9 @@ class TransmitWindow(QtWidgets.QWidget):
                 transport["uhd_faults"] = {k: v for k, v in faults.items() if k != "events"}
         record = {
             "t": round(now, 3),
+            # Wall clock (Unix seconds) beside the monotonic ``t``, so the line can be
+            # lined up with other machines' logs without a separate clock offset.
+            "wall_time": round(time.time(), 3),
             "elapsed_s": round(elapsed, 3),
             "messages_sent": self._messages,
             "bursts_sent": self._bursts,
@@ -1104,6 +1107,10 @@ class TransmitWindow(QtWidgets.QWidget):
             "application_bytes": self._bytes,
             "goodput_bps": round(view.goodput_bps, 1),
             "airtime": round(view.airtime, 4),
+            # Averages since the start (or the last stats reset).  The two fields above
+            # are 2 s windows and fall to 0 once traffic stops; these keep the run's value.
+            "goodput_avg_bps": round(8.0 * view.totals["sent_bytes"] / elapsed, 1),
+            "airtime_avg": round(view.totals["samples"] / self._sample_rate / elapsed, 4),
             "ingress_datagrams": (
                 self._worker.ingress_datagrams if self._ingress is None else self._ingress.datagrams
             ),

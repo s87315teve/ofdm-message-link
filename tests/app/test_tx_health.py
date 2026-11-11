@@ -98,3 +98,7 @@ def test_the_transmit_window_writes_tx_health_to_its_stats_log(tmp_path, monkeyp
     assert rows and rows[-1]["tx_health"]["ingress_dropped_queue_full"] == 3
     assert rows[-1]["tx_health"]["queue_datagrams"] == 0
     assert rows[-1]["tx_health"]["tx_late"] is None  # the udp transport has no UHD faults
+    import time as _time
+
+    assert abs(rows[-1]["wall_time"] - _time.time()) < 60
+    assert rows[-1]["goodput_avg_bps"] == 0.0 and rows[-1]["airtime_avg"] == 0.0

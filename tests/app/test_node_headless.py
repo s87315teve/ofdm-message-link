@@ -34,7 +34,7 @@ def _child_stats(bursts=0, delivered=0):
             "pending": 0,
             "ingress_datagrams": bursts,
             "ingress_dropped_queue_full": 0,
-            "transport": {"transport": "fake", "readback": {"x": 1}},
+            "transport": {"transport": "fake", "readback": {"x": 1, "bandwidth_hz": 25e6}},
         },
         "rx": {
             "receiver": ReceiveStats(
@@ -155,6 +155,26 @@ def test_ready_file_stats_lines_and_cleanup(tmp_path):
     assert last["rx"]["control_frames"] > 0 and last["rx"]["snr_2s"] == pytest.approx(15.0)
     assert last["feedback"] == {"sent": 3, "received": 2, "stale": 0}
     assert "readback" not in last["tx"]["transport"]
+    assert last["tx"]["bandwidth_hz"] == 25e6 and last["rx"]["bandwidth_hz"] is None
+    assert abs(last["wall_time"] - time.time()) < 60
+
+
+def test_stats_line_keeps_run_averages_after_traffic_stops():
+    """The 2 s windows fall to 0 when traffic stops; the run averages do not."""
+
+    now = [100.0]
+    monitor = node_app.NodeMonitor(1, "fdd", 5e6, clock=lambda: now[0],
+                                   wall_clock=lambda: 1.8e9 + now[0])
+    monitor.ready_at = 100.0
+    monitor.on_event("stats", _child_stats(bursts=0))
+    first = monitor.line(100.0)
+    assert first["tx"]["goodput_avg_bps"] is None and first["wall_time"] == 1.8e9 + 100.0
+    monitor.on_event("stats", _child_stats(bursts=100))  # 90 kB and 2e6 samples in 10 s
+    monitor.line(110.0)
+    stopped = monitor.line(120.0)  # nothing more was sent
+    assert stopped["tx"]["goodput_bps"] == 0.0 and stopped["tx"]["airtime_frac"] == 0.0
+    assert stopped["tx"]["goodput_avg_bps"] == 8 * 90_000 / 20
+    assert stopped["tx"]["airtime_avg_frac"] == round(2e6 / 5e6 / 20, 4)
 
 
 def _wait_for(path, timeout=3.0):
