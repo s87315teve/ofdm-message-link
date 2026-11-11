@@ -256,6 +256,46 @@ def add_common_arguments(
         ),
     )
 
+    add_performance_arguments(parser)
+
+
+def _cpu_affinity(value: str) -> str:
+    from ofdm_link.runtime.cpu_affinity import CpuAffinityError, check_spec
+
+    try:
+        return check_spec(value)
+    except CpuAffinityError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
+def add_performance_arguments(parser: argparse.ArgumentParser) -> None:
+    """CPU placement and scheduling switches; every one is off by default."""
+
+    group = parser.add_argument_group("CPU placement and scheduling (all off by default)")
+    group.add_argument(
+        "--cpu-affinity",
+        type=_cpu_affinity,
+        default=None,
+        metavar="CPUS",
+        help=(
+            "pin this app and every process it starts (engine, decode workers) to CPUS, "
+            "a list like 0-7 or 2,4-5, or p-cores for the list in "
+            "/sys/devices/cpu_core/cpus (pins nothing where that file does not exist). "
+            "Default: no pinning"
+        ),
+    )
+
+
+def apply_performance_options(args: argparse.Namespace) -> None:
+    """Apply the CPU switches in ``main``, before any engine or worker starts."""
+
+    from ofdm_link.runtime import cpu_affinity
+
+    try:
+        cpu_affinity.apply(getattr(args, "cpu_affinity", None))
+    except cpu_affinity.CpuAffinityError as error:
+        raise SystemExit(f"--cpu-affinity: {error}") from error
+
 
 def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
     """Transmit-side A-MPDU aggregation controls.
@@ -586,6 +626,8 @@ __all__ = [
     "TransportError",
     "add_aggregation_arguments",
     "add_common_arguments",
+    "add_performance_arguments",
+    "apply_performance_options",
     "aggregation_limits",
     "build_sink",
     "build_source",

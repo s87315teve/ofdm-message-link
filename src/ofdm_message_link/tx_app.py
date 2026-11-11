@@ -1211,6 +1211,7 @@ def main(argv: list[str] | None = None) -> int:
 
     apply_cpu_budget(1)
     resolved = options.resolve(args)
+    options.apply_performance_options(args)
     if resolved.uses_radio:
         # Taken before any window exists, so a process that was not authorised
         # to transmit cannot become one by clicking Start.

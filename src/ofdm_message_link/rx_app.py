@@ -1012,6 +1012,7 @@ def main(argv: list[str] | None = None) -> int:
     resolved = options.resolve(args)
     if args.snr_db is not None and resolved.uses_radio:
         raise SystemExit("--snr-db applies to the udp transport only; the radio has a real channel")
+    options.apply_performance_options(args)
 
     # The QApplication must stay referenced: collecting it before the first
     # QWidget is constructed aborts the process.

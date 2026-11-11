@@ -539,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
         options.require_rf_capability(args)
     spec = build_spec(args, setup)
     validate_algorithms(spec, setup.resolved.profile.sample_rate)
+    options.apply_performance_options(args)
     if args.headless:
         return run_headless(args, setup, spec)
     from .node_window import run_gui
