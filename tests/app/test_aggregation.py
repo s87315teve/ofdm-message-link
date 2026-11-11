@@ -79,7 +79,7 @@ def test_prefix_is_fifo_not_best_fit() -> None:
 
 def test_limits_validation_and_defaults() -> None:
     defaults = AggregationLimits()
-    assert (defaults.max_subframes, defaults.max_psdu_bytes) == (16, 8192)
+    assert (defaults.max_subframes, defaults.max_psdu_bytes) == (32, 16384)
     assert defaults.max_burst_airtime_s == 0.008
     with pytest.raises(ValueError):
         AggregationLimits(max_subframes=0)

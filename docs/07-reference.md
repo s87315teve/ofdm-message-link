@@ -11,7 +11,7 @@
 | `--config` / `--overlay` | 設定檔，預設 `configs/default.yaml` + `configs/profiles/ota_2p45ghz.yaml`；`--overlay` 可重複 |
 | `--transport {udp,uhd,pluto}` | 預設 `udp`（模擬）；`uhd` 是 USRP，`pluto` 是 ADALM-Pluto |
 | `--mcs {qpsk,qam16}` | TX 的簡寫：`qpsk` = MCS 8（QPSK 1/3）、`qam16` = MCS 12（16QAM 1/2）；同時給 `--mcs-index` 時後者優先。RX 僅作 display hint，不參與 decode |
-| `--mcs-index N` | TX 啟動時的 wire-v5 MCS，8–17，**預設 8**（給 `--mcs qam16` 時是 12）。11 是選單隱藏的實驗用 MCS。舊格式的 0–7 TX 會拒絕；RX 仍然解舊版 TX 送的 0–7 burst。RX 接受 0–17，僅作 display hint |
+| `--mcs-index N` | TX 啟動時的 wire-v5 MCS，8–17，**預設 8**（給 `--mcs qam16` 時是 12）。11 是選單隱藏的實驗用 MCS。舊格式的 0–7 TX 會拒絕；RX 要設 `phy.rx.legacy_acquisition: true`（v2.0 起預設關）才解舊版 TX 送的 0–7 burst。RX 接受 0–17，僅作 display hint |
 | `--frame-payload-bytes` | PHY frame payload 大小，預設 996 |
 | `--udp-host` / `--udp-port` | 模擬模式的 sample transport 位址，預設 `127.0.0.1:52101` |
 | `--serial` | 用 serial 預選 USRP 或 Pluto |
@@ -68,7 +68,8 @@
 | [`b210_ota_3p8ghz_10msps.yaml`](../configs/profiles/b210_ota_3p8ghz_10msps.yaml) | 選用。同上但 10 MS/s |
 | [`duplex_fdd_2420_2460.yaml`](../configs/profiles/duplex_fdd_2420_2460.yaml) | `node_app` 的預設。兩台 Pluto、5 MS/s；node 1 TX 2420／RX 2460 MHz，node 2 相反 |
 | [`duplex_fdd_2405_2475.yaml`](../configs/profiles/duplex_fdd_2405_2475.yaml) | `node_app` 的備用：70 MHz 間距，2405／2475 MHz |
-| [`b210_measurement.yaml`](../configs/profiles/b210_measurement.yaml) | **附加用**，接在上面任一個 profile 後面：只把 `phy.rx.legacy_acquisition` 關掉。B210 量測用（`run_duplex.sh --transport uhd` 會自動加），預設值仍是開 |
+| [`legacy_rx.yaml`](../configs/profiles/legacy_rx.yaml) | **附加用**：把 `phy.rx.legacy_acquisition` 打開，也收 v1.0／`improve-rx` 的 TX 送的舊格式 burst（v2.0 起預設不收） |
+| [`b210_measurement.yaml`](../configs/profiles/b210_measurement.yaml) | **附加用**，接在上面任一個 profile 後面：把 `phy.rx.legacy_acquisition` 關掉。v2.0 起預設本來就是關，它只在底下的設定把它打開時才有作用（`run_duplex.sh --transport uhd` 仍會自動加） |
 
 這個專案實際讀取的區段：
 
@@ -98,7 +99,8 @@
 
 | Key | 預設 | 說明 |
 |---|---|---|
-| `legacy_acquisition`、`v5_acquisition` | `true` | 實驗。關掉其中一種 acquisition |
+| `legacy_acquisition` | `false`（v2.0 起） | `true`：也收 v1–v4 的舊格式 burst（v1.0 的 TX 只送舊格式）。這個 repo 的 TX 只送 v5，開著只會讓 receive owner 多花 10–16%（有 DC 時 44–46%） |
+| `v5_acquisition` | `true` | 實驗。關掉 v5 acquisition |
 | `v5_detection_threshold` | 0.10 | v5 的 M128 門檻（0.02–1.0），只限制工作量 |
 | `v5_stf_threshold` | 0.20 | v5 STF 的 coherent 相關門檻。空中雜訊最高 0.084 |
 | `v5_correlation_threshold` | 0.25 | v5 LTF 兩個 symbol 的相關門檻。空中雜訊最高 0.067 |
@@ -126,8 +128,8 @@
 | `enabled` | `true` | `false`：一個 burst 一個 datagram |
 | `max_wait_ms` | 0.0 | 還有空間的 burst 最多等多久 |
 | `min_burst_interval_ms` | 4.0 | 兩個 burst 的開始時間至少隔多久（start 到 start，0–50，0 關閉）。短 datagram 時避免每個 datagram 一個 burst：Pluto 推送一次要 0.413 ms + 0.194 µs/sample，RX 每個 burst 也有成本。`AggregationLimits` 本身的預設是 0，直接呼叫的程式碼行為不變 |
-| `max_subframes` | 16 | 一個 burst 最多幾個 datagram |
-| `max_psdu_bytes` | 8192 | 一個 burst 的 PSDU 最多幾個 byte；不能超過 `phy.rx.max_psdu_bytes`，否則設定檔會被拒絕 |
+| `max_subframes` | 32（v2.0 起；之前 16） | 一個 burst 最多幾個 datagram |
+| `max_psdu_bytes` | 16384（v2.0 起；之前 8192） | 一個 burst 的 PSDU 最多幾個 byte；不能超過 `phy.rx.max_psdu_bytes`（16384），否則設定檔會被拒絕。B210 的最大吞吐測試（2026-11-11）在 10 MS/s MCS 17 用 16384／32 撐住 24.0 Mb/s，8192 時是 20.7 Mb/s |
 | `max_burst_airtime_ms` | 8.0 | 聚合後的 burst 最長多久。換算成 sample 不能超過 80 000（5 MS/s 是 16 ms、10 MS/s 是 8 ms、20 MS/s 是 4 ms），否則設定檔會被拒絕 |
 
 為什麼是 80 000 samples：兩個 ±25 ppm 的 crystal 最多差 50 ppm，RX 的 timing 修正最多 4 個 sample，
@@ -160,7 +162,7 @@ TX 送的 wire-v5 MCS：
 - 在 TX 視窗換 MCS 不必 Stop radio，下一則開始 encode 的 message 生效。同一則 fragmented message
   固定使用同一個 MCS。RX 不需跟著操作。
 
-舊格式（wire v1–v4）的 MCS，**只用在 RX 解 v1.0.0 或 `improve-rx` 的 TX 送的 burst**；現在的 TX 不送：
+舊格式（wire v1–v4）的 MCS，**只用在 RX 解 v1.0.0 或 `improve-rx` 的 TX 送的 burst**（需要 `phy.rx.legacy_acquisition: true`，v2.0 起預設關）；現在的 TX 不送：
 
 | Index | 格式 | Spectral efficiency | 996-byte airtime @ 5 MS/s |
 |---:|---|---:|---:|

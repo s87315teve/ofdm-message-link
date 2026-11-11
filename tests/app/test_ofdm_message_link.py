@@ -32,11 +32,13 @@ from ofdm_message_link.link import (
 
 CONFIG = "configs/default.yaml"
 OVERLAY = "configs/profiles/b210_ota_3p8ghz.yaml"
+LEGACY_RX = "configs/profiles/legacy_rx.yaml"
 
 
 @pytest.fixture(scope="module")
 def profile():
-    return build_phy_profile(load_link_config(CONFIG, [OVERLAY]))
+    # These tests cover the dual-family receiver: legacy bursts too (off by default since v2.0).
+    return build_phy_profile(load_link_config(CONFIG, [OVERLAY, LEGACY_RX]))
 
 
 def _awgn(samples, snr_db, seed):
@@ -483,7 +485,8 @@ def test_aggregation_options_default_to_opportunistic_without_waiting():
     limits = options.resolve(_tx_args([])).aggregation
     assert limits.enabled is True
     assert limits.max_wait_s == 0.0
-    assert (limits.max_subframes, limits.max_burst_airtime_s) == (16, 0.008)
+    assert (limits.max_subframes, limits.max_burst_airtime_s) == (32, 0.008)
+    assert limits.max_psdu_bytes == 16384
 
 
 def test_aggregation_options_reach_the_resolved_limits():

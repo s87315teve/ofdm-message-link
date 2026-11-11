@@ -392,7 +392,8 @@ def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
         "Several datagrams can share one v5 burst. The caps bound the burst's "
         "airtime (timing drift, decode latency) and the latency a datagram can "
         "wait for company. Each option overrides mac.aggregation in the "
-        "configuration (defaults: on, 16 subframes, 0 ms wait, 8 ms airtime, 4 ms burst interval).",
+        "configuration (defaults: on, 32 subframes in up to 16384 bytes, 0 ms wait, "
+        "8 ms airtime, 4 ms burst interval).",
     )
     group.add_argument(
         "--aggregation",

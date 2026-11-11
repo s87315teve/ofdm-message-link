@@ -36,7 +36,8 @@ SNR_DB = 22.0
 
 @pytest.fixture(scope="module")
 def profile():
-    return build_phy_profile(load_link_config(CONFIG))
+    # Legacy control frames too: the legacy detector is off by default since v2.0.
+    return build_phy_profile(load_link_config(CONFIG, ["configs/profiles/legacy_rx.yaml"]))
 
 
 def _awgn(samples, snr_db, seed):

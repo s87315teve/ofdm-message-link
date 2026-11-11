@@ -11,9 +11,9 @@
 # detected_legacy_candidates = 0, but a v5 STF still drives about 120 legacy
 # candidates through the coherent stage: offline (cpp_eval phase 2, n=2 per
 # point) it cost the receive owner 10-16% with signal and 44-46% under a DC
-# offset, with the same delivered count.  The library default stays on
-# (configs/default.yaml), because a v1.0 transmitter sends legacy frames only
-# and a receiver with this overlay cannot hear it.
+# offset, with the same delivered count.  Since v2.0 configs/default.yaml
+# has it off too, so this overlay changes nothing on its own; it stays so a
+# B210 measurement keeps the detector off even over a base that turns it on.
 phy:
   rx:
     legacy_acquisition: false

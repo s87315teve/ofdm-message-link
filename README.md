@@ -207,8 +207,10 @@ python -m pytest -q
 
 Acquisition、header probe、Turbo decoder 與發送端的 encode 有 C++ 版（`pip install -e .` 會編），每一塊都能用
 `--native-backend` 或 `OFDM_LINK_NATIVE*` 換回 Python 參考實作。`--cpu-affinity`、`--realtime[=PRIO]`、
-`--overload-protection` 都是選用的，**預設全部關閉**；過載保護在量測時一律不開。B210 量測另外加
-`configs/profiles/b210_measurement.yaml`（只關掉 legacy acquisition）。細節見
+`--overload-protection` 都是選用的，**預設全部關閉**；過載保護在量測時一律不開。
+
+**v2.0 的預設值：** aggregation 最多 32 個 subframe、PSDU 最多 16384 byte；RX 只找 wire v5（legacy acquisition 關）。
+要收 v1.0 的 TX，加 `--overlay configs/profiles/legacy_rx.yaml`。細節見
 [7.10 節](docs/07-reference.md#710-效能開關與-native-模組)。
 
 ## License

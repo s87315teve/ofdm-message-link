@@ -1,0 +1,10 @@
+# Add-on overlay: also receive wire v1-v4 (legacy) bursts, as v1.0 did.
+# Pass it after the profile, e.g.
+#   rx_app --overlay configs/profiles/ota_2p45ghz.yaml --overlay configs/profiles/legacy_rx.yaml
+# Since v2.0 the receiver looks for wire v5 only (phy.rx.legacy_acquisition
+# false): this repository's transmitters send v5, and the legacy detector
+# cost the receive owner 10-16% (44-46% under a DC offset) for nothing.  Use
+# this overlay only to hear a v1.0 or improve-rx transmitter.
+phy:
+  rx:
+    legacy_acquisition: true

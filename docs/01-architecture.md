@@ -76,7 +76,8 @@ TX 只送 wire v5 的 burst（單位：sample，5 MS/s 時 1 sample = 0.2 µs）
 header 裡：兩端 sample rate 不同，等於對「一個 sample 代表多少時間」有不同解讀，連 preamble 都
 對不上。所以兩端**必須一致的只有 sample rate**。
 
-舊的 wire v1–v4 burst（v1.0.0 與 `improve-rx` 的 TX 送的）長這樣，RX 仍然收：
+舊的 wire v1–v4 burst（v1.0.0 與 `improve-rx` 的 TX 送的）長這樣。v2.0 起 RX 預設不收它，
+設 `phy.rx.legacy_acquisition: true` 才收：
 
 ```
 │ guard 256 │ preamble 80 │ training 80 │ header × 3（QPSK，重複 3 次）│ payload × N │ guard 256 │
@@ -84,7 +85,8 @@ header 裡：兩端 sample rate 不同，等於對「一個 sample 代表多少�
 
 ## 1.4 RX 怎麼同時收兩種 burst
 
-RX 不知道下一個 burst 是 v5 還是舊格式，所以兩種都找。兩種 preamble 都有「相隔 32 個 sample 重複」
+`phy.rx.legacy_acquisition: true` 時（v2.0 起預設是 `false`，只找 v5），RX 不知道下一個 burst 是
+v5 還是舊格式，所以兩種都找。兩種 preamble 都有「相隔 32 個 sample 重複」
 的性質，所以 RX 只算一次 lag-32 的相關（最花時間的部分），再用兩個不同寬度的 window 去看：
 
 | | 舊格式（v1–v4） | v5 |

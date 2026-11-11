@@ -55,7 +55,7 @@ def test_burst_config_carries_every_receive_key() -> None:
     raw = _raw()
     raw["phy"]["rx"].update(
         {
-            "legacy_acquisition": False,
+            "legacy_acquisition": True,
             "v5_detection_threshold": 0.12,
             "v5_stf_threshold": 0.3,
             "v5_correlation_threshold": 0.35,
@@ -70,10 +70,11 @@ def test_burst_config_carries_every_receive_key() -> None:
         }
     )
 
+    raw["mac"]["aggregation"]["max_psdu_bytes"] = 9000
     burst = build_burst_config(validate_config(raw))
 
     rx = burst.v5
-    assert not rx.legacy_acquisition and rx.v5_acquisition
+    assert rx.legacy_acquisition and rx.v5_acquisition
     assert rx.acquisition.detection_threshold == 0.12
     assert rx.acquisition.stf_threshold == 0.3
     assert rx.acquisition.correlation_threshold == 0.35

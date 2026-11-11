@@ -390,6 +390,7 @@ guard +10 dB）每秒 300 個 burst：90% → 61%。`sim_acq.py` 修正前後輸
 | B210 量測關掉 legacy acquisition，只在附加的 overlay `b210_measurement.yaml` 裡，預設不變（使用者 2026-11-11） | v1.0 的 TX 只送 legacy frame，預設要能收；B210 run 的 `detected_legacy_candidates` 都是 0，離線關掉省 owner 10–16%（有 DC 44–46%），delivered 不變（4.8） |
 | Native 加速（acquisition、header probe、Turbo float32、TX encode）放在 Python 介面後面，各有 `auto／python／native` 開關，Python 版保留為參考與 fallback（使用者 2026-11-11） | 單一 node 的上限是 engine 的 GIL（cpp_eval phase 1/2）；等價性用容差測，不要求 bit-exact（4.8） |
 | `--cpu-affinity`、`--realtime[=PRIO]`、`--overload-protection` 都是選用、預設關閉；過載保護在量測時一律關閉（使用者 2026-11-11） | 低階機器與 Jetson 要能用；整棵 tree RT 在 2 核上有害；丟掉或放棄的 burst 會改變遺失與 BLER 的意義，所以另外計數（4.8） |
+| v2.0 預設值：`mac.aggregation.max_psdu_bytes` 16384、`max_subframes` 32（`phy.rx.max_psdu_bytes` 本來就是 16384）、`phy.rx.legacy_acquisition` false；workers 自動、RT 關、RX gain 不變（使用者 2026-11-11） | B210 最大吞吐測試：10 MS/s MCS 17 用 16384／32 撐住 24.0 Mb/s（8192 時 20.7）；不再需要相容 v1.0（要收 v1.0 的 TX 用 `legacy_rx.yaml`）。低階機器的影響見 4.8 |
 | 不做：native UHD 接收、把 TX 搬出 engine、IPC 縮減（先量剩下多少再決定）、20 MS/s 目標（使用者 2026-11-11） | 4.8 |
 | `split` layout 沒有實作（待定） | RX 修正之後 smoke2 0 overflow；M2 完整結果的雙向 run 每個 0–3 次／60 秒（最壞 MCS 12、−5／0 dB 的 3 次），碰到設計的 1 次／分鐘的線；M3 固定 15 的 node 2 有 42 次，原因是失敗的 burst 佔滿 decode workers（4.3、4.4）。仍沒有實作 |
 

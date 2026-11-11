@@ -122,7 +122,10 @@ def _start(profile, *, policy=None, limits=None, entry=None):
 
 
 def _bursts_without_a_policy(profile, index, messages):
-    worker, bridge = _start(profile, entry=mcs_entry(index))
+    # The golden digests were taken with the v1.x aggregation caps (16 subframes,
+    # 8192-byte PSDUs); v2.0 only changed the defaults, not how a burst is built.
+    limits = AggregationLimits(max_subframes=16, max_psdu_bytes=8192)
+    worker, bridge = _start(profile, entry=mcs_entry(index), limits=limits)
     for message in messages:
         assert worker.submit("t", message)
     sink = _Sink()

@@ -38,8 +38,8 @@ class AggregationLimits:
 
     enabled: bool = True
     max_wait_s: float = 0.0
-    max_subframes: int = 16
-    max_psdu_bytes: int = 8192
+    max_subframes: int = 32
+    max_psdu_bytes: int = 16384
     max_burst_airtime_s: float = 0.008
     min_burst_interval_s: float = 0.0
 

@@ -84,7 +84,10 @@ class RxConfigSection:
     confidence against the 0.20 / 0.25 thresholds.
     """
 
-    legacy_acquisition: bool = True
+    # Off since v2.0: this repository's transmitters send wire v5 only, and the
+    # legacy detector cost the owner 10-16% (44-46% under DC) for nothing.
+    # True still decodes v1-v4 bursts from a v1.0 transmitter.
+    legacy_acquisition: bool = False
     v5_acquisition: bool = True
     v5_detection_threshold: float = 0.10
     v5_stf_threshold: float = 0.20
@@ -155,8 +158,8 @@ class AggregationConfigSection:
 
     enabled: bool = True
     max_wait_ms: float = 0.0
-    max_subframes: int = 16
-    max_psdu_bytes: int = 8192
+    max_subframes: int = 32
+    max_psdu_bytes: int = 16384
     max_burst_airtime_ms: float = 8.0
     min_burst_interval_ms: float = 4.0
 

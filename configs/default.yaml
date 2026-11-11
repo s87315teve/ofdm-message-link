@@ -45,8 +45,10 @@ phy:
   # fft_backoff_samples is an experiment toggle or a threshold set from
   # signal-free air captures.
   rx:
-    # Switch either acquisition family off (CPU, cross-family A/B).
-    legacy_acquisition: true
+    # Switch either acquisition family off (CPU, cross-family A/B).  Legacy
+    # (v1-v4) acquisition is off since v2.0: these transmitters send v5 only.
+    # true still receives a v1.0 transmitter.
+    legacy_acquisition: false
     v5_acquisition: true
     # v5 detector: M128 gate, coherent STF check, LTF-pair correlation and the
     # L1/L2 balance test that keeps legacy bursts from being acquired as v5.
@@ -95,8 +97,11 @@ mac:
   aggregation:
     enabled: true
     max_wait_ms: 0.0
-    max_subframes: 16
-    max_psdu_bytes: 8192
+    # v2.0: 32 subframes in up to 16384-byte PSDUs (phy.rx.max_psdu_bytes is
+    # 16384 too).  The B210 maximum-throughput test (2026-11-11) sustained
+    # 24.0 Mb/s at 10 MS/s MCS 17 with these, against 20.7 Mb/s at 8192.
+    max_subframes: 32
+    max_psdu_bytes: 16384
     # At most 80 000 samples (8 ms at 10 MS/s, 16 ms at 5): the longest burst
     # whose drift at 50 ppm the receiver's timing correction covers.
     max_burst_airtime_ms: 8.0
