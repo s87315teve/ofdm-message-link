@@ -189,6 +189,8 @@ class NodeMonitor:
                     "airtime_frac": round(tx_view.airtime, 4),
                     "goodput_bps": round(tx_view.goodput_bps, 1),
                     "transport": _strip_readback(tx.get("transport")),
+                    # Flat TX health (tx_health.py): queues, drops, UHD faults.
+                    "health": tx.get("health"),
                 },
                 "rx": {
                     "receiver": receiver,

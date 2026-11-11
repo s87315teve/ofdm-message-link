@@ -124,6 +124,11 @@ def test_two_engines_exchange_datagrams_and_feedback(tmp_path):
         assert line is not None
         assert line["feedback"]["sent"] > 0 and line["feedback"]["received"] > 0
         assert line["rx"]["own_bursts_heard"] == 0
+        health = line["tx"]["health"]
+        assert health["ingress_dropped_queue_full"] == 0
+        assert health["queue_datagrams"] >= 0
+        # The udp transport has no radio burst queue or UHD fault counters.
+        assert health["tx_underflow"] is None and health["tx_late"] is None
         assert line["rx"]["control_frames"] > 0
         # Over UDP a node never hears itself, and nothing in the LA path failed.
         assert line["rx"]["own_seed_drops"] == 0

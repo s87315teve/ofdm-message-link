@@ -33,6 +33,7 @@
 
 | 選項 | 說明 |
 |---|---|
+| `--stats-log PATH` | 每次統計刷新附加一行 JSON：messages、bursts、goodput、airtime 與 `tx_health`（見下）。`--stats-log-max-mb`／`--stats-log-backups` 與接收端相同 |
 | `--ingress-port` | 接受 application bytes 的 UDP port，預設 52001 |
 | `--peak-amplitude` | 每個 burst 發射前正規化到的 peak，預設 0.7 |
 | `--aggregation {on,off}` | `on`：radio 可以接下一個 burst 時，把 queue 裡的 datagram 放進同一個 burst（在下面的上限內）。`off`：一個 burst 一個 datagram，供 A/B 量測。預設取 `mac.aggregation.enabled`（`on`） |
@@ -54,6 +55,18 @@
 | `--stats-log-max-mb MB` | `--stats-log` 的大小上限，預設 16 MiB，超過就輪替成 `PATH.1`；0 = 不設限 |
 | `--stats-log-backups N` | 保留幾份輪替後的舊檔，預設 1 |
 | `--overload-protection {off,drop,give-up,both}` | 過載保護，**預設 `off`，量測一律關閉**。`drop`：decode pool 滿時丟掉放不下的 burst，不讓 receiver 等；`give-up`：Turbo block 到第 4 次 iteration 還有超過 1/64 的 bit 在翻，就放棄。兩者各有自己的計數器，見 [7.10 節](#710-效能開關與-native-模組) |
+
+**TX health（`tx_health`，`tx_app --stats-log` 與 `node_app` 的 `tx.health`）。** 一個平的紀錄，發送端每個會掉東西的地方各有自己的計數器
+（累計值；深度是當下的值）。Transport 沒有的計數器寫 `null`，不寫 0：
+
+| 欄位 | 意義 |
+|---|---|
+| `queue_datagrams` | 發送端收下、還沒完全送上空中的 datagram 數 |
+| `queue_bursts` | Radio sink 裡等著送的 burst 數（UHD） |
+| `ingress_dropped_queue_full` | UDP ingress 收到、但發送 queue 滿了被拒絕的 datagram（以前 `tx_app` 默默丟掉） |
+| `bursts_rejected_queue_full` | Radio sink 的 burst queue 滿了而拒絕的 burst |
+| `tx_underflow`、`tx_underflow_in_packet` | UHD 在 burst 之前／之中沒有 sample 可送 |
+| `tx_late` | UHD 的 `tx_time_error`：burst 到 radio 時已經過了它的開始時間 |
 
 ## 7.2 設定檔
 
@@ -445,7 +458,7 @@ process 默默分流。
 | `--mcs-index N` | 起始的 MCS（`fixed` 時是固定的 MCS），預設 8 |
 | `--control-mcs-index N` | Control-only burst 的 MCS，預設 profile 的值（8） |
 | `--decode-workers N` | 1–64，預設 3（兩個 node 在同一台 PC 時的 CPU 預算） |
-| `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
+| `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`tx.health` 是 TX health（見 7.1 節的 `tx_health`）。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
 | `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON |
 | `--ready-file PATH` | 兩個方向都在跑時建立，停止時刪除 |
 | `--ingress-port` / `--egress-host` / `--egress-port` | 覆寫依 node 的預設 |

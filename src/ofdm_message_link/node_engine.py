@@ -43,6 +43,7 @@ from .engine import (
     _Signal,
 )
 from .transport import TransportError
+from .tx_health import tx_health
 
 SWITCH_INTERVAL_S = 0.002
 _GAIN_TIMEOUT_S = 5.0
@@ -608,15 +609,22 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
             tx_counts = asdict(counters)
         times = os.times()
         lag = worker.lag_monitor
+        tx_snapshot = None if tx_sink is None else tx_sink.snapshot()
+        pending = tx_worker.pending
         sink.put(
             "stats",
             {
                 "tx": {
                     **tx_counts,
-                    "pending": tx_worker.pending,
+                    "pending": pending,
                     "ingress_datagrams": ingress.datagrams,
                     "ingress_dropped_queue_full": submit_failures["count"],
-                    "transport": None if tx_sink is None else tx_sink.snapshot(),
+                    "transport": tx_snapshot,
+                    "health": tx_health(
+                        tx_snapshot,
+                        queue_datagrams=pending,
+                        ingress_dropped_queue_full=submit_failures["count"],
+                    ),
                 },
                 "rx": {
                     "receiver": receiver.stats,

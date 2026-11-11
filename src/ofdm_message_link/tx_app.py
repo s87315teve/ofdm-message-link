@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import json
 import queue
 import socket
 import threading
@@ -40,7 +41,7 @@ from ofdm_link.phy.mcs_table import (
 from ofdm_link.runtime.airtime import v5_burst_samples_with_guards
 
 from . import dashboard_widgets as widgets
-from . import options, qt_runtime
+from . import log_limits, options, qt_runtime
 from .aggregation import AggregationLimits
 from .dashboard import TxDashboard, TxView, tx_light
 from .datagram import Datagram
@@ -53,7 +54,9 @@ from .link import (
 )
 from .plots import PlotBuffers, SpectrumPlot, TrendPlot
 from .radio_panel import RadioPanel
+from .rx_app import _stats_log_backups, _stats_log_max_mb, open_stats_log
 from .transport import set_transport_gain
+from .tx_health import tx_health
 
 _SEND_QUEUE_DEPTH = 256
 # After a failed iteration the worker waits this long before the next one,
@@ -587,6 +590,9 @@ class IngressListener:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self.datagrams = 0
+        # Datagrams the transmit worker refused because its send queue was
+        # full: counted, where they used to vanish silently.
+        self.dropped_queue_full = 0
 
     @property
     def address(self) -> str:
@@ -616,7 +622,8 @@ class IngressListener:
             except OSError:
                 return
             self.datagrams += 1
-            self._submit("udp", payload)
+            if self._submit("udp", payload) is False:
+                self.dropped_queue_full += 1
 
     def stop(self) -> None:
         self._stop.set()
@@ -640,9 +647,11 @@ class TransmitWindow(QtWidgets.QWidget):
         log_lines: int = options.DEFAULT_LOG_LINES,
         process_engine: bool = False,
         ready_file: str | None = None,
+        stats_log=None,
     ) -> None:
         super().__init__()
         self._log_lines = log_lines
+        self._stats_log = stats_log
         self._resolved = resolved
         self._build_sink = build_sink
         self._panel = radio_panel
@@ -1034,6 +1043,9 @@ class TransmitWindow(QtWidgets.QWidget):
         self._airtime_card.set_value(f"{view.airtime * 100:.1f} %", "transmit duty")
         self._queue_card.set_value(f"{pending}", "messages queued to send")
         self._light_card.set_light(view.light)
+        health = self._tx_health(snapshot, pending)
+        if self._stats_log is not None:
+            self._write_stats_log(now, elapsed, view, health, snapshot)
         if self._resolved.uses_radio:
             self._light_card.set_badge(
                 *(("RF ON", "red") if sink is not None else ("RF OFF", "grey"))
@@ -1064,6 +1076,43 @@ class TransmitWindow(QtWidgets.QWidget):
             f"min interval {limits.min_burst_interval_s * 1e3:g} ms"
         )
 
+    def _ingress_dropped(self) -> int:
+        if self._ingress is None:
+            return int(getattr(self._worker, "ingress_dropped_queue_full", 0))
+        return self._ingress.dropped_queue_full
+
+    def _tx_health(self, snapshot, pending: int) -> dict:
+        return tx_health(
+            snapshot, queue_datagrams=pending, ingress_dropped_queue_full=self._ingress_dropped()
+        )
+
+    def _write_stats_log(self, now: float, elapsed: float, view: TxView, health, snapshot) -> None:
+        """One JSON line per stats refresh; every counter is cumulative."""
+
+        transport = None
+        if snapshot is not None:
+            transport = dict(snapshot)
+            faults = transport.get("uhd_faults")
+            if isinstance(faults, dict):
+                transport["uhd_faults"] = {k: v for k, v in faults.items() if k != "events"}
+        record = {
+            "t": round(now, 3),
+            "elapsed_s": round(elapsed, 3),
+            "messages_sent": self._messages,
+            "bursts_sent": self._bursts,
+            "subframes_sent": self._subframes,
+            "application_bytes": self._bytes,
+            "goodput_bps": round(view.goodput_bps, 1),
+            "airtime": round(view.airtime, 4),
+            "ingress_datagrams": (
+                self._worker.ingress_datagrams if self._ingress is None else self._ingress.datagrams
+            ),
+            "tx_health": health,
+            "transport": transport,
+        }
+        self._stats_log.write(json.dumps(record, default=str) + "\n")
+        self._stats_log.flush()
+
     def _hardware_rows(self, view: TxView, snapshot, elapsed: float) -> str:
         airtime = view.totals["samples"] / self._sample_rate
         bursts = self._bursts - self._bursts_base
@@ -1082,7 +1131,8 @@ class TransmitWindow(QtWidgets.QWidget):
             f"  ({airtime / elapsed * 100:.1f}% duty since reset)",
             f"offered goodput    {view.totals['sent_bytes'] * 8 / elapsed:10.0f} bit/s"
             "   (average since reset)",
-            f"udp ingress        {ingress:10d} datagrams",
+            f"udp ingress        {ingress:10d} datagrams"
+            f"   ({self._ingress_dropped()} dropped: send queue full)",
             f"active MCS         {describe_mcs_entry(self._worker.active_mcs_entry)}",
             "",
         ]
@@ -1127,6 +1177,9 @@ class TransmitWindow(QtWidgets.QWidget):
         if self._ingress is not None:
             self._ingress.stop()
         self._worker.stop()
+        stats_log, self._stats_log = self._stats_log, None
+        if stats_log is not None:
+            stats_log.close()
         options.clear_ready(self._ready_file)
         super().closeEvent(event)
 
@@ -1177,6 +1230,30 @@ def build_parser() -> argparse.ArgumentParser:
             "the GUI cannot stall them; thread keeps them in this process "
             "(default: process)"
         ),
+    )
+    app.add_argument(
+        "--stats-log",
+        default=None,
+        metavar="PATH",
+        help=(
+            "append one JSON line per stats refresh: messages, bursts, goodput, airtime and "
+            "tx_health (queue depths, ingress drops, bursts rejected, UHD underflow and late)"
+        ),
+    )
+    app.add_argument(
+        "--stats-log-max-mb",
+        type=_stats_log_max_mb,
+        default=log_limits.DEFAULT_MAX_MB,
+        metavar="MB",
+        help=f"rotate the stats log at this many MiB; 0 = no limit "
+        f"(default: {log_limits.DEFAULT_MAX_MB:g})",
+    )
+    app.add_argument(
+        "--stats-log-backups",
+        type=_stats_log_backups,
+        default=log_limits.DEFAULT_BACKUPS,
+        metavar="N",
+        help=f"rotated stats logs to keep (default: {log_limits.DEFAULT_BACKUPS})",
     )
     options.add_aggregation_arguments(parser)
     rf = parser.add_argument_group("RF safety gate")
@@ -1244,6 +1321,7 @@ def main(argv: list[str] | None = None) -> int:
         log_lines=args.log_lines,
         process_engine=args.engine == "process",
         ready_file=args.ready_file,
+        stats_log=open_stats_log(args),
     )
     return qt_runtime.run_window(window, application, args.geometry)
 

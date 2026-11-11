@@ -514,6 +514,7 @@ def _tx_main(
                 "pending": worker.pending,
                 "active_mcs_entry": transmitter.active_mcs_entry,
                 "ingress_datagrams": ingress.datagrams,
+                "ingress_dropped_queue_full": ingress.dropped_queue_full,
                 "transport": None if radio is None else radio.snapshot(),
                 "dropped_display_events": sink.dropped,
                 "max_lag_s": worker.lag_monitor.max_lag_s,
@@ -555,6 +556,7 @@ class ProcessTransmitWorker:
         self._submitted = 0
         self._active_mcs_entry = mcs_entry
         self._ingress_datagrams = 0
+        self._ingress_dropped = 0
         self._sink: _TransportView | None = None
         self._engine = _EngineProcess(
             _tx_main,
@@ -573,6 +575,7 @@ class ProcessTransmitWorker:
             self._pending = value["pending"]
             self._active_mcs_entry = value["active_mcs_entry"]
             self._ingress_datagrams = value["ingress_datagrams"]
+            self._ingress_dropped = value.get("ingress_dropped_queue_full", 0)
             sink = self._sink
             if sink is not None and value["transport"] is not None:
                 sink._snapshot = {
@@ -598,6 +601,10 @@ class ProcessTransmitWorker:
     @property
     def ingress_datagrams(self) -> int:
         return self._ingress_datagrams
+
+    @property
+    def ingress_dropped_queue_full(self) -> int:
+        return self._ingress_dropped
 
     def select_mcs_entry(self, entry) -> None:
         if not self._engine.post(("mcs", entry)):
