@@ -326,6 +326,30 @@ class BurstEventRecorder:
         self._lock_events.append(("lost", when, mono, wall, when_dev))
         self._locked = False
 
+    def _peer_header_pending(self, anchors: Sequence[tuple[int, float]],
+                             offsets: list[int]) -> bool:
+        """Whether a header that would still hold the lock is waiting for its payload.
+
+        A burst whose header decoded but whose outcome has not come back (a pool
+        decode, or samples still arriving) may be the peer's; until it finishes,
+        the stream end alone cannot say the peer went quiet.  Only headers within
+        the timeout of the last peer header count, and only while the stream is
+        less than one timeout past them, so a result that never comes cannot hold
+        a lost lock back for long.
+        """
+
+        for off in reversed(self._open):
+            if off <= self._last_peer_off:
+                break
+            if self._open[off].hdr != "ok":
+                continue
+            if self._stream_end - off > self.lock_timeout_samples:
+                continue
+            dev_t = self._device_time(off, anchors, offsets) if anchors else None
+            if not self._timed_out(off, dev_t):
+                return True
+        return False
+
     def _note_lock(self, record: _Open, dev_t: float | None,
                    anchors: Sequence[tuple[int, float]], offsets: list[int]) -> None:
         if record.hdr != "ok":
@@ -353,7 +377,9 @@ class BurstEventRecorder:
         seconds)`` sorted by offset (UHD ``rx_time`` tags); a record gets the
         device time of its offset from the last anchor at or before it.  A
         lock transition is ``(state, off, mono, wall, dev_t)``; the lock
-        timeout runs on device time when there is one (see :meth:`_timed_out`).
+        timeout runs on device time when there is one (see :meth:`_timed_out`),
+        and the stream end does not call a lock lost while a header from inside
+        the timeout still waits for its payload (see :meth:`_peer_header_pending`).
         """
 
         done, self._done = self._done, []
@@ -373,7 +399,8 @@ class BurstEventRecorder:
         if self._locked is True and self._last_peer_off is not None:
             end_dev = (self._device_time(self._stream_end, anchors, offsets)
                        if anchors else None)
-            if self._timed_out(self._stream_end, end_dev):
+            if (self._timed_out(self._stream_end, end_dev)
+                    and not self._peer_header_pending(anchors, offsets)):
                 self._lose(anchors, offsets, self._feed_mono, self._feed_wall)
         locks, self._lock_events = self._lock_events, []
         return events, locks

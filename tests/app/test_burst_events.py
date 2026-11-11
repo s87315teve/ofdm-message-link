@@ -338,6 +338,55 @@ def test_the_stall_replay_drains_the_bursts_the_bench_file_wrote():
                            for batch in batches if batch["bursts"]]
 
 
+@pytest.mark.parametrize("name", ["r1_stall1", "r1_stall2", "r2_stall1", "r2_stall2"])
+def test_a_receive_stall_is_one_lost_lock_even_with_headers_waiting_for_payload(name):
+    # v2.1.1 wrote 2 to 5 lost/acquired pairs for each of these stalls: a burst from
+    # before the gap whose payload result came back after the drain that saw the gap was
+    # taken as the peer heard again, then lost again.
+    segment = _stall_segments()[name]
+    rows = segment["rows"]
+    gap = segment["gap_off"]
+    assert segment["gap_lost_samples"] / segment["sample_rate"] > 1.0
+    written = [row for row in rows if row["k"] == "lock"]
+    assert [row["state"] for row in written].count("lost") >= 2  # the bug, as measured
+    peers = [row for row in rows if row["k"] == "burst" and row["kind"] != "own"]
+    last_before = max((row for row in peers if row["off"] < gap), key=lambda row: row["off"])
+    first_after = min((row for row in peers if row["off"] >= gap), key=lambda row: row["off"])
+    locks, _, _ = _replay_stall(segment)
+    assert [lock[0] for lock in locks] == ["acquired", "lost", "acquired"]
+    lost, regained = locks[1], locks[2]
+    assert lost[1] == gap
+    assert lost[4] == pytest.approx(last_before["dev_t"] + 1.0, abs=1e-9)
+    # The last lost line v2.1.1 wrote was the right one.
+    assert (lost[1], round(lost[4], 9)) == (written[-2]["off"], written[-2]["dev_t"])
+    assert regained[1] == first_after["off"] == written[-1]["off"]
+    assert regained[4] == pytest.approx(first_after["dev_t"], abs=1e-9)
+
+
+@pytest.mark.parametrize(("finishes_at", "lost_on"), [(170_000, 170_000), (None, 190_000)])
+def test_a_header_still_waiting_for_its_payload_delays_a_lost_lock_by_one_timeout_at_most(
+        finishes_at, lost_on):
+    # The peer's last header is at 100 000; a header at 140 000 (inside the 0.5 s
+    # timeout) waits for its payload.  It turns out to be this node's own burst, or
+    # its result never comes back: either way the lock is lost at 150 000, written
+    # once the wait is over (at most one timeout past that header).
+    now = [0.0]
+    recorder = BurstEventRecorder(_LOCK_RATE, lock_timeout_s=0.5, clock=lambda: now[0])
+    locks = _run_feeds(recorder, _steady_feeds(110_000), lambda off: [])
+    recorder.acquired(140_000, 20.0, 1e-3, 0.1)
+    recorder.header_ok()
+    recorder.segment(140_000, 0.5)
+    for off in range(140_000, 300_000, 10_000):
+        now[0] = off / _LOCK_RATE
+        recorder.on_feed(off, 10_000)
+        if off == finishes_at:
+            recorder.payload(None, True)
+            recorder.link(140_000, "own", 16, None, None, None, None, True)
+        locks.extend(recorder.drain()[1])
+    assert [lock[:3] for lock in locks] == [("acquired", 0, 0.0),
+                                            ("lost", 150_000, lost_on / _LOCK_RATE)]
+
+
 def test_a_half_second_receive_stall_is_not_a_lost_lock():
     segment = _stall_segments()["r2_stall3"]
     assert 0.0 < segment["gap_lost_samples"] / segment["sample_rate"] < 1.0
