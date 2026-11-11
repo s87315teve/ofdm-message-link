@@ -474,6 +474,7 @@ def uhd_factory(args, setup: node_options.NodeSetup, *, serial: str, tx_gain_db:
                 rx_antenna: str | None = None) -> UhdDuplexFactory:
     channel = args.channel if rx_channel is None else rx_channel
     antenna = args.antenna if rx_antenna is None else rx_antenna
+    lo_offset = DEFAULT_UHD_TX_LO_OFFSET_HZ if args.tx_lo_offset is None else args.tx_lo_offset
     factory = UhdDuplexFactory(
         serial=serial,
         sample_rate=int(setup.resolved.profile.sample_rate),
@@ -485,9 +486,8 @@ def uhd_factory(args, setup: node_options.NodeSetup, *, serial: str, tx_gain_db:
         rx_channel=DEFAULT_UHD_RX_CHANNEL if channel is None else int(channel),
         rx_antenna=antenna or "TX/RX",
         rx_bandwidth=args.rx_analog_bw,
-        tx_lo_offset=(DEFAULT_UHD_TX_LO_OFFSET_HZ if args.tx_lo_offset is None
-                      else args.tx_lo_offset),
-        tx_bandwidth=(default_uhd_tx_bandwidth(setup.resolved.profile.sample_rate)
+        tx_lo_offset=lo_offset,
+        tx_bandwidth=(default_uhd_tx_bandwidth(setup.resolved.profile.sample_rate, lo_offset)
                       if args.tx_analog_bw is None else args.tx_analog_bw),
         peak_amplitude=args.peak_amplitude,
     )

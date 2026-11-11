@@ -121,16 +121,14 @@ def test_other_adapters_still_refuse_it(tmp_path):
         pluto(RATE)
 
 
-def test_the_node_widens_the_tx_filter_only_at_15_36():
-    assert default_uhd_tx_bandwidth(RATE) == 40e6
-    for rate in (5_000_000, 10_000_000, 20_000_000):
-        assert default_uhd_tx_bandwidth(rate) == 25e6
+def test_the_node_tx_filter_covers_the_lo_shifted_signal_at_15_36():
+    assert default_uhd_tx_bandwidth(RATE) == 35e6
     tx, rx = UhdDuplexFactory(
         serial="30FE782", sample_rate=RATE, tx_frequency=2.42e9, rx_frequency=2.46e9,
         tx_gain_db=70.0, rx_gain_db=30.0, acknowledgement=RF_ENABLE_ACKNOWLEDGEMENT,
         tx_bandwidth=default_uhd_tx_bandwidth(RATE),
     ).settings()
     assert tx.sample_rate == rx.sample_rate == RATE
-    # The LO-offset signal reaches 8 + 7.68 MHz from the LO: inside a 40 MHz filter.
+    # The LO-offset signal reaches 8 + 7.68 MHz from the LO: inside a 35 MHz filter.
     assert tx.lo_offset + RATE / 2 < tx.bandwidth / 2
     assert rx.bandwidth == RATE

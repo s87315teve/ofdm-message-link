@@ -225,8 +225,8 @@ decimation（`ofdm_link.radio.uhd.MASTER_CLOCK_RATES`；30.72 MHz 也是 B210 �
 [`duplex_fdd_2420_2460_15p36.yaml`](../configs/profiles/duplex_fdd_2420_2460_15p36.yaml)（`node_app`）或
 [`b210_2p45ghz_15p36msps.yaml`](../configs/profiles/b210_2p45ghz_15p36msps.yaml)（`tx_app`／`rx_app`）。這個速率下：
 aggregate 的 airtime 上限要 ≤ 5.21 ms（80 000 samples），profile 設 5 ms，沿用 8 ms 預設值的設定檔會被拒絕；RX 的 UHD
-receive frames 與 chunk 依 sample rate 放大到 1024 個 frame 與 4 × 65536 samples；`node_app` 的 TX analog filter 預設改成
-40 MHz，讓偏移 8 MHz 的 LO 之外的信號（離 LO 最遠 15.68 MHz）仍在濾波器內。Pluto 不支援。還沒有在硬體上量過。12.5 MS/s 沒有開放。
+receive frames 與 chunk 依 sample rate 放大到 1024 個 frame 與 4 × 65536 samples；`node_app` 的 TX analog filter 預設是
+35 MHz（見 7.9 節的 `--tx-analog-bw`）。Pluto 不支援。還沒有在硬體上量過。12.5 MS/s 沒有開放。
 
 把 analog bandwidth 設成 Fs 會在 signal 兩側留下合理的 transition margin。設得太窄會先衰減外緣的
 subcarrier、提高 EVM；設得太寬則會收進更多帶外 noise 與鄰近 channel 的干擾。
@@ -452,7 +452,7 @@ process 默默分流。
 | `--overlay` | 預設 `configs/profiles/duplex_fdd_2420_2460.yaml`；必須有 `duplex` 段 |
 | `--serial` / `--auto-start` | `pluto`／`uhd`：選哪一台 Pluto 或 USRP；`--headless` 必須給 `--serial`，而且隱含 `--auto-start` |
 | `--channel` / `--antenna` | `uhd`：RX 的前端（0 = RF A，1 = RF B，預設 1；TX 用另一個）與 RX port（`TX/RX` 預設，或 `RX2`）；TX 一律 `TX/RX` |
-| `--tx-lo-offset HZ` / `--tx-analog-bw HZ` | `uhd`：TX LO 離載波的距離（預設 8e6，`tune_request`；0 = 不偏移）與 TX analog filter（預設 25e6）。沒有偏移時 TX 的 LO 洩漏落在對方 RX 中心約 2.4 kHz，淹沒 acquisition。其他 transport 給這兩個會被拒絕 |
+| `--tx-lo-offset HZ` / `--tx-analog-bw HZ` | `uhd`：TX LO 離載波的距離（預設 8e6，`tune_request`；0 = 不偏移）與 TX analog filter。沒有偏移時 TX 的 LO 洩漏落在對方 RX 中心約 2.4 kHz，淹沒 acquisition。其他 transport 給這兩個會被拒絕。TX filter 的預設值依 sample rate 與 LO offset 計算（見下表）；給 `--tx-analog-bw 25e6` 就是 v2.0 以前的設定 |
 | `--tx-freq` / `--rx-freq` | 覆寫 profile 的頻率；信號邊緣離開 2400–2483.5 MHz 時警告 |
 | `--tx-gain` / `--rx-gain` | Pluto／udp：TX −89.75–0 dB（衰減），預設 −89.75 / 15 dB。B210（`uhd`）：TX 0–89.75 dB、RX 0–76 dB，預設 0 / 30 dB；兩種尺度不能互用。`--gain` 會被拒絕（node 有兩個 gain） |
 | `--rx-analog-bw HZ` | AD9361 RX analog filter，預設 = sample rate |
@@ -479,6 +479,19 @@ process 默默分流。
 | Aggregation | `--aggregation`、`--aggregation-max-subframes`、`--aggregation-max-wait-ms`、`--min-burst-interval-ms`、`--max-burst-airtime-ms`，與 `tx_app` 相同（7.1 節） |
 | 其他共用的選項 | `--config`、`--mcs`、`--frame-payload-bytes`、`--ui-fps`、`--log-lines`、`--geometry`、`--channel`、`--antenna`，與 7.1 節相同 |
 | 效能開關 | `--cpu-affinity`、`--realtime[=PRIO]`、`--force`、`--native-backend`、`--overload-protection`，與 7.1 節相同（7.10 節）；全部預設關閉 |
+
+**TX analog filter 的預設值（`node_engine.default_uhd_tx_bandwidth`）。** LO 偏離載波 `lo` 時，取樣的頻帶離 LO 最遠是
+`|lo| + fs/2`，濾波器的半寬要蓋住它：頻寬 ≥ `2|lo| + fs`，再乘 1.1 的餘量（AD9361 濾波器的 roll-off），進位到整數 MHz，
+最小 25 MHz、最大 56 MHz。`tx_app` 不偏移 LO，頻寬等於 sample rate，沒有這個問題。
+
+| Sample rate | 信號離 LO 最遠（lo = 8 MHz） | 舊預設（v2.0 以前） | 新預設 |
+|---:|---:|---:|---:|
+| 5 MS/s | 10.5 MHz | 25 MHz | 25 MHz（不變） |
+| 10 MS/s | 13 MHz | 25 MHz（半寬 12.5 MHz，切到邊緣） | 29 MHz |
+| 15.36 MS/s | 15.68 MHz | —（之前不支援） | 35 MHz |
+| 20 MS/s | 18 MHz | 25 MHz（切到邊緣） | 40 MHz |
+
+10 MS/s 的結果因此可能與 2026-11-11 的 baseline 不同；硬體驗收會在最好的 10 MS/s 點比較 `--tx-analog-bw 25e6`（舊）與預設（新）。
 
 **Control socket**：每個 datagram 一個 JSON request，回一個 JSON answer。
 

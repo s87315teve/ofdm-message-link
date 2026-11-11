@@ -26,6 +26,7 @@ engine.py itself does not change.
 
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -213,22 +214,36 @@ class PlutoDuplexFactory:
 
 
 #: B210 node defaults (experiments/duplex_fdd/README.md, 4.6):
-#: the TX LO 8 MHz off its carrier and a 25 MHz TX analog filter.  Without the
+#: the TX LO 8 MHz off its carrier, and a TX analog filter of at least 25 MHz
+#: (wider at 10 MS/s and up, see default_uhd_tx_bandwidth).  Without the
 #: offset a node's TX LO leakage lands about 2.4 kHz from the peer's RX centre
 #: and floods its acquisition.
 DEFAULT_UHD_TX_LO_OFFSET_HZ = 8_000_000.0
 DEFAULT_UHD_TX_BANDWIDTH_HZ = 25_000_000.0
-#: Sample rates whose signal, shifted by the 8 MHz LO offset, needs a wider TX
-#: analog filter than 25 MHz.  At 15.36 MS/s the signal reaches 8 + 7.68 =
-#: 15.68 MHz from the LO, past a 25 MHz filter's 12.5 MHz half-width, so it
-#: gets 40 MHz (half-width 20 MHz).  5/10/20 MS/s keep the measured 25 MHz.
-UHD_TX_BANDWIDTH_BY_RATE_HZ = {15_360_000: 40_000_000.0}
+#: Margin over the band the shifted signal spans, for the AD9361 filter's
+#: roll-off; the widest TX analog filter is 56 MHz.
+UHD_TX_BANDWIDTH_MARGIN = 1.1
+_MAX_UHD_TX_BANDWIDTH_HZ = 56_000_000.0
 
 
-def default_uhd_tx_bandwidth(sample_rate: int) -> float:
-    """The node's default TX analog bandwidth at ``sample_rate``."""
+def default_uhd_tx_bandwidth(
+    sample_rate: float, lo_offset: float = DEFAULT_UHD_TX_LO_OFFSET_HZ
+) -> float:
+    """The node's default TX analog filter: wide enough for the LO-shifted signal.
 
-    return UHD_TX_BANDWIDTH_BY_RATE_HZ.get(int(sample_rate), DEFAULT_UHD_TX_BANDWIDTH_HZ)
+    With the LO ``lo_offset`` from the carrier, the sampled band reaches
+    ``|lo_offset| + sample_rate / 2`` from the LO, and the filter's half-width
+    must cover that: bandwidth >= 2 |lo_offset| + sample_rate, times
+    ``UHD_TX_BANDWIDTH_MARGIN``, rounded up to a whole MHz, never below the
+    measured 25 MHz.  With the 8 MHz offset: 5 MS/s 25 MHz (unchanged),
+    10 MS/s 29 MHz, 15.36 MS/s 35 MHz, 20 MS/s 40 MHz; before 2026-11-11 every
+    rate used 25 MHz, which cut the band edge at 10 and 20 MS/s
+    (``--tx-analog-bw 25e6`` reproduces it).
+    """
+
+    needed = (2.0 * abs(float(lo_offset)) + float(sample_rate)) * UHD_TX_BANDWIDTH_MARGIN
+    rounded = math.ceil(needed / 1e6) * 1e6
+    return min(max(rounded, DEFAULT_UHD_TX_BANDWIDTH_HZ), _MAX_UHD_TX_BANDWIDTH_HZ)
 #: RX on RF B, TX on RF A: device B's RF A received about 13 dB weaker at 2420 MHz.
 DEFAULT_UHD_RX_CHANNEL = 1
 

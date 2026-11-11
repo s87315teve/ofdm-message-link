@@ -877,6 +877,15 @@ GIL（acquisition、header probe、GNU Radio 的 Python block，duplex 時再加
 **量測規則。** JMS1 與其他量測 run：`--overload-protection` 一律 `off`（預設），`--realtime` 只有在要量 RT 本身時才開，
 並且記在 run 的 meta。B210 的量測用 `b210_measurement.yaml`；要和 4.6、4.7 的舊 run 對照時要記得它們的 legacy 偵測是開的。
 
+**TX analog filter（2026-11-11 晚，使用者決定）。** `node_app` 的 TX filter 預設改成依 sample rate 與 LO offset 計算
+（10 MS/s 25 → 29 MHz、20 MS/s 25 → 40 MHz、15.36 MS/s 35 MHz，5 MS/s 不變），舊的 25 MHz 在 10 與 20 MS/s 會切到信號邊緣。
+`--tx-analog-bw 25e6` 重現舊設定。表在 [`docs/07-reference.md` 7.9 節](../../docs/07-reference.md#79-node_app雙向-node-的命令列)。
+
+**5 分鐘離線檢查的判準。** 使用者的規則：遺失 ≤ 1%，偶發事件的每分鐘速率沒有持續上升，事件之後的資料不受影響。離線用的
+`soak_judge.py`（cpp_eval 的 scratch 腳本）把「最後三分之一的速率高於前三分之一」就算 FAIL，比使用者的規則嚴：S4（5 MS/s
+MCS 17 a0.8、TX 144/s）在 16-chunk（約 8 ms）的 queue 下最後一分鐘有一次 10 個 overflow 的尖峰（每分鐘 3、2、3、0、10，
+遺失 0.023%，CPU 平穩），依使用者的規則算通過；改成接近 UHD 的約 0.1 s queue 時 overflow 是 0。
+
 **等價性（離線，固定 seed，全部是正確性測試）。** Acquisition：測試語料（−6 到 30 dB、背靠背、±20 ppm、DC、tone、
 兩種 family 混合、純雜訊、全零；整個 buffer 與 8192-sample 視窗）起點全部相同，|ΔCFO| ≤ 1.2e-9，confidence 相對差
 ≤ 1e-9。Header probe：74 個 acquisition 加上 toggle 組合，結果與 header 欄位全部相同，SIG LLR 差 ≤ 2.7e-5。Turbo：60
