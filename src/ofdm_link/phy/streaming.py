@@ -19,6 +19,7 @@ from .burst import (
     SymbolDemapper,
     _decode_burst_with_acquisition,
 )
+from .burst_v5 import probe_v5_burst
 from .codec import DEFAULT_DUAL_VERSION_FRAME_DECODER, demap_symbols
 from .mcs_table import V5_WIRE_VERSION
 from .ofdm import OfdmNumerology
@@ -539,6 +540,20 @@ class StreamingBurstDecoder:
                     self._pending_acquisition, V5Acquisition
                 ):
                     probe_end = min(probe_end, self._next_candidate_start + timing_margin)
+                if isinstance(self._pending_acquisition, V5Acquisition):
+                    # The native header probe, when it applies; it raises and
+                    # returns exactly what the full decoder's probe would.
+                    try:
+                        required = probe_v5_burst(
+                            self._buffer[:probe_end], self._pending_acquisition, self._config
+                        )
+                    except BurstDecodeError as error:
+                        self._reject_acquisition(error)
+                        continue
+                    if required is not None and required > probe_end:
+                        self._record_header_success()
+                        self._required_sample_count = required
+                        continue
                 try:
                     _decode_burst_with_acquisition(
                         self._buffer[:probe_end],

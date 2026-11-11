@@ -38,6 +38,7 @@ from functools import lru_cache
 import numpy as np
 from numpy.typing import NDArray
 
+from . import native_backend
 from .burst import (
     BurstConfig,
     BurstDecodeError,
@@ -51,8 +52,12 @@ from .burst import (
     _require_config,
 )
 from .channel import (
+    _TRAINING_BPSK_V1,
+    SMOOTHING_RESIDUAL_LIMIT,
     EqualizedBatch,
     RefinedChannel,
+    _numerology_indices,
+    _smoothing_projection,
     equalize_with_pilots,
     refine_channel_estimate,
 )
@@ -73,7 +78,7 @@ from .mcs_table import (
     v5_entries,
     v5_payload_geometry,
 )
-from .ofdm import modulate_ofdm
+from .ofdm import OfdmNumerology, modulate_ofdm, pilot_symbols
 from .psdu_codec import PsduDecodeResult, RateMatchedTurboCodec
 from .scrambler import descramble_llrs, scramble_bits
 from .soft import SoftDemapResult, soft_demap_symbols
@@ -102,6 +107,7 @@ V5_MAX_TRACKED_BURST_SAMPLES = round(
 )
 # Header LLRs are clipped like every other LLR before the Viterbi sees them.
 _SIG_LLR_CLIP = 64.0
+_DEFAULT_NUMEROLOGY = OfdmNumerology()
 
 
 @dataclass(frozen=True, slots=True)
@@ -493,6 +499,88 @@ def _decode_v5_acquired(
         diagnostics=diagnostics,
         payload_symbols=payload_symbols,
         scrambler_seed=header.scrambler_seed,
+    )
+
+
+def probe_v5_burst(
+    values: NDArray[np.complex64],
+    acquisition: V5Acquisition,
+    settings: BurstConfig,
+) -> int | None:
+    """The receive owner's header probe on the native path: the burst's signalled end.
+
+    Returns the sample count the whole burst needs (``required_sample_count``
+    of the :func:`_decode_v5_acquired` "wait for more samples" error), or
+    raises the :class:`BurstDecodeError` that function raises for an
+    unusable LTF pair, a failed SIG or a signalled burst that is too long, so
+    the stream counts both paths alike.  ``None`` means the native probe does
+    not apply here (header backend ``python``, a custom numerology, or the
+    payload already in ``values``); the caller then runs the full decoder.
+    The LTF measurement, smoothing and SIG equalization run in
+    ``_header_native``; :func:`decode_v5_header` (native Viterbi) reads the
+    LLRs.  The decode workers keep the Python functions.
+    """
+
+    native = native_backend.module("header")
+    stf_start = acquisition.stf_start
+    if (
+        native is None
+        or settings.numerology != _DEFAULT_NUMEROLOGY
+        or stf_start < 0
+        or stf_start + V5_FIXED_LENGTH > values.size
+    ):
+        return None
+    rx = settings.v5
+    status, payload = native.sig_llrs(
+        np.ascontiguousarray(values, dtype=np.complex64),
+        stf_start,
+        acquisition.ltf_start,
+        float(acquisition.normalized_cfo),
+        rx.fft_backoff_samples,
+        rx.ltf_average,
+        rx.channel_smoothing,
+        _native_header_constants(settings.pilot_version),
+    )
+    if status == 1:
+        raise BurstDecodeError("fixed signaling header decode failed: the LTF pair is unusable")
+    if status != 0:
+        raise BurstDecodeError(f"fixed signaling header decode failed: {payload}")
+    try:
+        header = decode_v5_header(
+            np.frombuffer(payload, dtype=np.float32),
+            valid_mcs=_valid_mcs(),
+            max_psdu_bytes=rx.max_psdu_bytes,
+        )
+    except (V5HeaderDecodeError, ValueError) as error:
+        raise BurstDecodeError(f"fixed signaling header decode failed: {error}") from error
+    entry = mcs_entry(header.mcs_index)
+    geometry = v5_payload_geometry(entry, header.psdu_length)
+    logical_burst_end = stf_start + V5_FIXED_LENGTH + _BLOCK_LENGTH * geometry.ofdm_symbol_count
+    if logical_burst_end - stf_start > settings.max_burst_samples:
+        raise BurstDecodeError("signaled burst exceeds max_burst_samples")
+    timing_margin = int(np.ceil(settings.sample_clock_tracking.max_abs_timing_shift_samples)) + 1
+    if logical_burst_end - values.size > timing_margin:
+        return logical_burst_end
+    return None
+
+
+@lru_cache(maxsize=2)
+def _native_header_constants(pilot_version: int) -> tuple:
+    """The default numerology's carrier tables and smoothing projection, as buffers."""
+
+    indices = _numerology_indices(_DEFAULT_NUMEROLOGY)
+    projection, residual_dof = _smoothing_projection(_DEFAULT_NUMEROLOGY)
+    expected = pilot_symbols(V5_HEADER_OFDM_SYMBOL_COUNT, first_symbol_index=0,
+                             version=pilot_version)
+    return (
+        np.ascontiguousarray(indices.active_bins, dtype=np.int64).tobytes(),
+        np.asarray(_TRAINING_BPSK_V1, dtype=np.float64).tobytes(),
+        np.ascontiguousarray(projection, dtype=np.complex128).tobytes(),
+        int(residual_dof),
+        float(SMOOTHING_RESIDUAL_LIMIT),
+        np.ascontiguousarray(indices.pilot_indices, dtype=np.int64).tobytes(),
+        np.ascontiguousarray(indices.data_indices, dtype=np.int64).tobytes(),
+        np.ascontiguousarray(expected, dtype=np.complex128).tobytes(),
     )
 
 

@@ -38,5 +38,11 @@ setup(
             language="c++",
             extra_compile_args=NATIVE_FLAGS,
         ),
+        Extension(
+            "ofdm_link.phy._header_native",
+            ["src/ofdm_link/phy/header_native.cpp"],
+            language="c++",
+            extra_compile_args=NATIVE_FLAGS,
+        ),
     ],
 )
