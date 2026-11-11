@@ -34,6 +34,9 @@ usage: experiments/duplex_fdd/run_duplex.sh --enable-rf --out DIR [options]
   --enable-rf            required: both nodes key their transmitters
   --dry-run              print the commands and exit (no lock, gate or hardware)
   --overlay PATH         profile overlay (default configs/profiles/duplex_fdd_2420_2460.yaml)
+  --legacy-acquisition   uhd only: keep the legacy (v1-v4) detector on; by default a uhd run adds
+                         the B210 measurement overlay configs/profiles/b210_measurement.yaml after
+                         --overlay, which switches it off (the library default stays on)
   --transport T          pluto (default) or uhd (two USRP B210s; B210 gains, see below)
   --serial1 S --serial2 S   radio serials (defaults: the two Plutos or the two B210s on this bench)
   --rate-ab R  --rate-ba R  datagrams/s per direction (default 450 / 450; 0 = direction idle)
@@ -57,8 +60,9 @@ usage: experiments/duplex_fdd/run_duplex.sh --enable-rf --out DIR [options]
 EOF2
 }
 
-ENABLE_RF=0 DRY=0 OUT="" TRANSPORT=pluto SER_GIVEN=(0 "" "") TXG_GIVEN=0 RXG_GIVEN=0
+ENABLE_RF=0 DRY=0 OUT="" TRANSPORT=pluto EXTRA_OVERLAY= SER_GIVEN=(0 "" "") TXG_GIVEN=0 RXG_GIVEN=0
 OVERLAY=configs/profiles/duplex_fdd_2420_2460.yaml
+MEASUREMENT_OVERLAY=configs/profiles/b210_measurement.yaml KEEP_LEGACY=0
 RATE_AB=450 RATE_BA=450 SIZE=900 DURATION=60
 MCS=(0 8 8) LA=(0 fixed fixed) TXG=(0 -20 -20) PROFILE=(0 "" "")
 RX_GAIN=15 WORKERS=3 GATE_LOAD=4 GATE_WAIT=600 SETTLE=3 TAIL=4 READY_TIMEOUT=90
@@ -69,6 +73,7 @@ while [ $# -gt 0 ]; do
         --enable-rf) ENABLE_RF=1 ;;
         --dry-run) DRY=1 ;;
         --overlay) OVERLAY="$2"; shift ;;
+        --legacy-acquisition) KEEP_LEGACY=1 ;;
         --transport) TRANSPORT="$2"; shift ;;
         --serial1) SER_GIVEN[1]="$2"; shift ;;
         --serial2) SER_GIVEN[2]="$2"; shift ;;
@@ -112,9 +117,11 @@ case "$TRANSPORT" in
         SERIAL=("${UHD_SERIAL[@]}")
         if [ "$TXG_GIVEN" -eq 0 ]; then TXG=(0 65 65); fi
         if [ "$RXG_GIVEN" -eq 0 ]; then RX_GAIN=30; fi
+        if [ "$KEEP_LEGACY" -eq 0 ]; then EXTRA_OVERLAY="$MEASUREMENT_OVERLAY"; fi
         export UHD_IMAGES_DIR=${UHD_IMAGES_DIR:-/usr/share/uhd/images} ;;
     *) echo "--transport must be pluto or uhd" >&2; exit 2 ;;
 esac
+OVERLAYS="$OVERLAY${EXTRA_OVERLAY:+ $EXTRA_OVERLAY}"   # meta.json: every overlay, in order
 for n in 1 2; do if [ -n "${SER_GIVEN[$n]}" ]; then SERIAL[n]="${SER_GIVEN[$n]}"; fi; done
 if [ "$ENABLE_RF" -ne 1 ] && [ "$DRY" -ne 1 ]; then
     echo "refusing to transmit: pass --enable-rf" >&2; exit 2
@@ -137,6 +144,7 @@ node_cmd() {  # node id -> prints the command, one word per line
         "$F_LA_LOG" "$OUT/la_$n.jsonl" "$F_LA" "${LA[$n]}" "$F_MCS" "${MCS[$n]}" \
         "$F_WORKERS" "$WORKERS" "$F_TX_GAIN" "${TXG[$n]}" "$F_RX_GAIN" "$RX_GAIN" \
         "$F_DURATION" "$NODE_DURATION" "$F_ENABLE_RF" "$F_ACK" "$ACK_TEXT"
+    if [ -n "$EXTRA_OVERLAY" ]; then printf '%s\n' "$F_OVERLAY" "$EXTRA_OVERLAY"; fi
     if [ -n "${PROFILE[$n]}" ]; then printf '%s\n' "$F_GAIN_PROFILE" "${PROFILE[$n]}"; fi
     while IFS= read -r line; do
         if [ -n "$line" ]; then printf '%s\n' "$F_LA_ARG" "$line"; fi
@@ -221,7 +229,7 @@ SAMPLER_PID=$!
 
 # meta.json before the load, so a killed run still has its description.
 OUT="$OUT" REPO="$REPO" LOAD_START="$LOAD_START" PID1="${NODE_PID[1]}" PID2="${NODE_PID[2]}" \
-TRANSPORT="$TRANSPORT" SER1="${SERIAL[1]}" SER2="${SERIAL[2]}" OVERLAY="$OVERLAY" RATE_AB="$RATE_AB" RATE_BA="$RATE_BA" \
+TRANSPORT="$TRANSPORT" SER1="${SERIAL[1]}" SER2="${SERIAL[2]}" OVERLAY="$OVERLAYS" RATE_AB="$RATE_AB" RATE_BA="$RATE_BA" \
 SIZE="$SIZE" DURATION="$DURATION" MCS1="${MCS[1]}" MCS2="${MCS[2]}" LA1="${LA[1]}" LA2="${LA[2]}" \
 LAARGS1="${LA_ARGS[1]}" LAARGS2="${LA_ARGS[2]}" TXG1="${TXG[1]}" TXG2="${TXG[2]}" RX_GAIN="$RX_GAIN" \
 PROF1="${PROFILE[1]}" PROF2="${PROFILE[2]}" WORKERS="$WORKERS" ARGV="$*" \

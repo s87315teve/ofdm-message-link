@@ -1,0 +1,19 @@
+# Add-on overlay for USRP B210 measurement runs.  It is not a profile on its
+# own: pass it AFTER the profile that sets frequencies, rates and gains, e.g.
+#   node_app --overlay configs/profiles/duplex_fdd_2420_2460.yaml \
+#            --overlay configs/profiles/b210_measurement.yaml
+#   rx_app   --overlay configs/profiles/ota_2p45ghz.yaml \
+#            --overlay configs/profiles/b210_measurement.yaml
+# experiments/duplex_fdd/run_duplex.sh adds it by itself with --transport uhd.
+#
+# It switches the legacy (v1-v4) preamble detector off.  This repository's
+# transmitters send wire v5 only, and every B210 retest run counted
+# detected_legacy_candidates = 0, but a v5 STF still drives about 120 legacy
+# candidates through the coherent stage: offline (cpp_eval phase 2, n=2 per
+# point) it cost the receive owner 10-16% with signal and 44-46% under a DC
+# offset, with the same delivered count.  The library default stays on
+# (configs/default.yaml), because a v1.0 transmitter sends legacy frames only
+# and a receiver with this overlay cannot hear it.
+phy:
+  rx:
+    legacy_acquisition: false
