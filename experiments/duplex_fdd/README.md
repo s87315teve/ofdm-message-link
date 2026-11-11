@@ -842,6 +842,12 @@ UHD 這時拿不到 real-time priority：重測的 agent 回報該 session 的 `
   15 秒點、gain 尺度也不同。所以只能說這次 5 MS/s 的 B210 不比 Pluto 差，不能說它比較好。10 MS/s 是 Pluto 在 USB 2 上
   做不到的（1 節〈其他結論〉）。
 
+**B210 桌上測試的 TX gain 程序**（使用者 2026-11-11 決定）：一般的桌上空中測試，TX gain 從最大值（89.75 dB）開始，
+再一步一步往下調。這只適用沒有接實驗室功率放大器的桌上空中測試。接上放大器或到戶外時不從最大值開始，要先登記
+放大器的規格、量過 TX gain 80–85 dB 時實際的發射功率（兩件都還沒做）。桌上距離短，RX 的 ADC 可能飽和：看到
+clipping（收到的樣本頂到滿刻度，或 gain 往上時 SNR 反而變差）就往下調。第一次接天線或改了接線時，仍照
+[`docs/04-ota-hardware.md`](../../docs/04-ota-hardware.md) 4.1 的步驟從低 gain 開始。
+
 ## 5. ARQ 提案（沒有實作）
 
 Owner 只要求提案。下面是 LTE RLC AM（TS 36.322）式的設計，以及它與這個 link 已有的 A-MPDU、feedback

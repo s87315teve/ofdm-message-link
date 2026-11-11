@@ -17,6 +17,8 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
    損壞 radio。
 3. **確認可以發射之後，才換成 antenna。** 用最低的 TX gain 開始，慢慢往上調到 RX 的 `Link` light
    變綠就停。兩支 antenna 放近一點，比把 gain 調高好。
+   已經接好、確認過的 B210 桌上 setup 做例行測試時，另有從最大 TX gain 往下調的程序，範圍與限制見
+   [`experiments/duplex_fdd/README.md`](../experiments/duplex_fdd/README.md) 4.7。
 
 程式裡對應的保護機制：
 
