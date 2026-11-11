@@ -1299,7 +1299,9 @@ def measure_quality(
 
 
 @lru_cache(maxsize=4)
-def _reference_grid(mcs: MCS) -> tuple[NDArray[np.complex128], NDArray[np.float64], NDArray[np.intp]]:
+def _reference_grid(
+    mcs: MCS,
+) -> tuple[NDArray[np.complex128], NDArray[np.float64], NDArray[np.intp]]:
     """The reference points, their axis levels, and the index of each level pair.
 
     Every constellation here is square (QPSK, 16QAM, 64QAM): point ``index[i, q]``

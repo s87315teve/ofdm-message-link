@@ -92,7 +92,7 @@ def uses_native(piece: str) -> bool:
 
 
 def set_choice(value: str, piece: str | None = None) -> None:
-    """Set the choice for one piece or (``piece=None``) for all, in this process and its children."""
+    """Set the choice for one piece, or for all with ``piece=None``; children inherit it."""
 
     if value not in CHOICES:
         raise ValueError(f"backend must be one of {CHOICES}, not {value!r}")

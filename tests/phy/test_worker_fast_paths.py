@@ -50,7 +50,10 @@ def _qam16_full_search(symbols, variances):
     return output.reshape(-1)
 
 
-def _received(mcs, count, snr_db, seed, gain=3.2 * np.exp(0.2j)):
+_OTA_GAIN = 3.2 * np.exp(0.2j)
+
+
+def _received(mcs, count, snr_db, seed, gain=_OTA_GAIN):
     rng = np.random.default_rng(seed)
     reference = np.asarray(_constellation(mcs), dtype=np.complex128)
     sent = reference[rng.integers(0, reference.size, count)]
