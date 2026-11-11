@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 import socket
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
 from stream_fixtures import profile as build_profile
 from stream_fixtures import v5_stream
 
-from ofdm_link.phy.streaming import link_snr_db  # noqa: F401  (the SNR the events repeat)
+from ofdm_link.phy.streaming import (
+    PayloadFailure,
+    link_snr_db,  # noqa: F401  (the SNR the events repeat)
+)
 from ofdm_link.phy.sync_v5 import V5_FIXED_LENGTH, V5_PREAMBLE_LENGTH
 from ofdm_message_link import node_options
 from ofdm_message_link.burst_events import (
@@ -227,6 +231,117 @@ def test_a_short_receive_overflow_is_not_a_lost_lock():
     recorder = BurstEventRecorder(_LOCK_RATE, lock_timeout_s=0.5)
     locks = _run_feeds(recorder, feeds,
                        lambda off: after if off >= 110_000 else [(0, 10.0)])
+    assert [lock[0] for lock in locks] == ["acquired"]
+
+
+# Windows of node 2's events file from the B210 bench (PRISM experiments/jms1_bench,
+# v211_stalltree_r1 and r2): node 2's receive process tree was SIGSTOPped for 2.0 s
+# (stalls 1 and 2) and 0.5 s (r2 stall 3) while node 1 kept sending.  Each window keeps
+# the rx_time, overflow, burst and lock lines in file order, the bursts cut to
+# off, dev_t, mono, hdr, pl and kind; the lock lines are what v2.1.1 wrote.
+_STALL_FIXTURE = Path(__file__).with_name("stall_events_v211.jsonl")
+
+
+def _stall_segments():
+    segments: dict[str, dict] = {}
+    for row in read_events(str(_STALL_FIXTURE)):
+        if row["k"] == "segment":
+            segments[row["seg"]] = {**row, "rows": []}
+        else:
+            segments[row["seg"]]["rows"].append(row)
+    return segments
+
+
+def _file_batches(rows):
+    """The tap's batches as the writer wrote them: anchors, bursts, then locks."""
+
+    batches: list[dict] = []
+    for row in rows:
+        open_batch = batches[-1] if batches else None
+        if (open_batch is None or (row["k"] == "rx_time" and (open_batch["bursts"]
+                                                               or open_batch["locks"]))
+                or (row["k"] == "burst" and open_batch["locks"])):
+            open_batch = {"anchors": [], "bursts": [], "locks": []}
+            batches.append(open_batch)
+        if row["k"] == "rx_time":
+            open_batch["anchors"].append((row["off"], row["dev_t"]))
+        elif row["k"] == "burst":
+            open_batch["bursts"].append(row)
+        elif row["k"] == "lock":
+            open_batch["locks"].append(row)
+    return batches
+
+
+def _replay_stall(segment, lock_timeout_s=1.0):
+    """Drive a recorder with the receiver calls that produced ``segment``'s file lines.
+
+    Each burst is acquired (header ok, then a pool segment) on the feed of its ``mono``
+    and finished on the feed whose drain wrote it; that drain is the first feed at or
+    after every ``mono`` in its batch.  The stream end of a feed is not in the file:
+    the preamble offset of the next burst acquired later stands in for it.  Returns the
+    recorder's lock transitions and the burst offsets of each non-empty drain.
+    """
+
+    batches = _file_batches(segment["rows"])
+    bursts = sorted((b for batch in batches for b in batch["bursts"]), key=lambda b: b["off"])
+    feeds = sorted({b["mono"] for b in bursts} | {lock["mono"] for batch in batches
+                                                  for lock in batch["locks"]})
+    drain_at: dict[float, dict] = {}
+    previous = -np.inf
+    for batch in batches:
+        latest = max([b["mono"] for b in batch["bursts"]]
+                     + [lock["mono"] for lock in batch["locks"]], default=previous)
+        feed = next((t for t in feeds if t >= latest and t > previous), None)
+        if feed is None:  # the drain came on a feed after the window's last burst
+            feed = max(latest, previous) + 1e-6
+            feeds.append(feed)
+        drain_at[feed] = batch
+        previous = feed
+    now = [feeds[0]]
+    recorder = BurstEventRecorder(segment["sample_rate"], lock_timeout_s=lock_timeout_s,
+                                  clock=lambda: now[0], wall_clock=lambda: now[0])
+    anchors = [tuple(anchor) for anchor in segment["anchors_before"]]
+    locks, drained = [], []
+    for t in feeds:
+        now[0] = t
+        later = [b["off"] for b in bursts if b["mono"] > t]
+        recorder.on_feed(later[0] if later else bursts[-1]["off"] + 10_000, 0)
+        for burst in (b for b in bursts if b["mono"] == t):
+            recorder.acquired(burst["off"], 20.0, 1e-3, 0.1)
+            assert burst["hdr"] == "ok"
+            recorder.header_ok()
+            recorder.segment(burst["off"], 0.5)
+        batch = drain_at.get(t)
+        if batch is not None:
+            anchors.extend(batch["anchors"])
+            for burst in batch["bursts"]:
+                assert burst["pl"] in ("ok", "fcs_fail")
+                failure = None if burst["pl"] == "ok" else PayloadFailure(
+                    diagnosed=True, crc_failed=True)
+                recorder.payload(failure, True)
+                recorder.link(burst["off"], burst["kind"], 16, None, None, None, None,
+                              burst["pl"] == "ok")
+        events, lock = recorder.drain(anchors)
+        if events:
+            drained.append([event.off for event in events])
+            if batch is not None:
+                assert [event.dev_t for event in events] == pytest.approx(
+                    [b["dev_t"] for b in batch["bursts"]], abs=1e-9)
+        locks.extend(lock)
+    return locks, drained, batches
+
+
+def test_the_stall_replay_drains_the_bursts_the_bench_file_wrote():
+    for segment in _stall_segments().values():
+        _, drained, batches = _replay_stall(segment)
+        assert drained == [[b["off"] for b in batch["bursts"]]
+                           for batch in batches if batch["bursts"]]
+
+
+def test_a_half_second_receive_stall_is_not_a_lost_lock():
+    segment = _stall_segments()["r2_stall3"]
+    assert 0.0 < segment["gap_lost_samples"] / segment["sample_rate"] < 1.0
+    locks, _, _ = _replay_stall(segment)
     assert [lock[0] for lock in locks] == ["acquired"]
 
 
