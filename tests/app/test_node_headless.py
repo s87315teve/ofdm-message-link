@@ -261,3 +261,19 @@ def test_sigterm_cleans_up_a_real_headless_process(tmp_path):
     assert not ready.exists()
     lines = [json.loads(line) for line in stats.read_text().splitlines()]
     assert lines and lines[-1]["tx"]["control_bursts"] > 0
+
+
+def test_events_writer_gets_every_stats_line_and_is_closed(tmp_path):
+    from ofdm_message_link.burst_events import EventLogWriter, read_events
+
+    writer = EventLogWriter(str(tmp_path / "events.jsonl"), node_id=1, sample_rate=5e6)
+    writer.start({"transport": "fake"})
+    node, worker = _node(tmp_path, duration_s=1.3, events=writer)
+    assert node.run() == 0
+    rows = read_events(str(tmp_path / "events.jsonl"))
+    kinds = [row["k"] for row in rows]
+    assert kinds[0] == "start" and kinds[-1] == "stop"
+    stats_lines = [line for line in _lines(tmp_path) if "tx" in line]
+    assert kinds.count("status") == len(stats_lines) and kinds.count("radio") == 1
+    assert [row["tx"]["bursts"] for row in rows if row["k"] == "status"] == [
+        line["tx"]["bursts"] for line in stats_lines]

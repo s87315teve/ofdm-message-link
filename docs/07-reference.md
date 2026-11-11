@@ -477,6 +477,8 @@ process 默默分流。
 | `--decode-workers N` | 1–64，預設 3（兩個 node 在同一台 PC 時的 CPU 預算） |
 | `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`tx.health` 是 TX health（見 7.1 節的 `tx_health`）。`wall_time` 是 Unix 時間（秒），`monotonic_s` 是 monotonic 時間。`tx.goodput_bps`、`tx.airtime_frac` 是 2 秒視窗，`tx.goodput_avg_bps`、`tx.airtime_avg_frac` 是第一行以來的平均。`tx.bandwidth_hz`、`rx.bandwidth_hz` 是 UHD 讀回的類比濾波器頻寬（沒有讀回值時是 `null`）。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
 | `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON |
+| `--events PATH` | 只有 `--headless`：逐 burst 的接收事件，一行一個 JSON（preamble SNR、雜訊變異數、clipping、header／payload／FCS 結果、裝置時間與主機時間），加上 gain、頻率、失鎖、overflow 與每 0.5 s 的計數器。**預設關閉**，關閉時接收端的程式路徑不變。格式見 [7.11 節](#711-逐-burst-的接收事件--events) |
+| `--events-lock-timeout S` | 配合 `--events`：串流時間連續 S 秒沒有收到 peer 的 header 就算失鎖，預設 1.0 |
 | `--ready-file PATH` | 兩個方向都在跑時建立，停止時刪除 |
 | `--ingress-port` / `--egress-host` / `--egress-port` | 覆寫依 node 的預設 |
 | `--udp-listen-port` / `--udp-peer-port` | `--transport udp` 的 sample ports，預設自己與 peer 的 base+4 |
@@ -569,5 +571,60 @@ Turbo BLER 差 ≤ 0.1 dB 且 iteration ±1、固定 seed 的端到端 delivered
 
 被丟掉或放棄的 burst **不算**進 `payload_decode_attempts`、`payload_decode_failure`、`crc_failures`、`psdu_fcs_failures`，
 所以遺失與 BLER 的定義在保護關閉時不變。**量測（包含 JMS1 的 SNR／EVM 與遺失量測）一律關閉**；打開時程式會印一行提醒。
+
+## 7.11 逐 burst 的接收事件（`--events`）
+
+給量測用的正式輸出（v2.1.0 起）。`node_app --headless --events node2_events.jsonl` 把接收端看到的每一個
+preamble 寫成一行 `burst`，同時配上這個 burst 的解碼結果，另外寫 gain、頻率、失鎖、overflow 與計數器。
+**預設關閉**；關閉時 decoder 與 receiver 每個 burst 只多一次屬性檢查（`burst_observer is None`），沒有其他程式
+路徑改變。程式在 `src/ofdm_message_link/burst_events.py`：子 process 的 `BurstEventRecorder`（接在 decoder 與
+`MessageReceiver` 上）與 `BurstEventTap`（接收 observer），母 process 的 `EventLogWriter`（寫檔）。
+同一份資料也可以不寫檔、直接拿：`NodeSpec(burst_events=True)` 的 `ProcessNodeWorker` 會把 `bursts` 事件交給
+listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程式裡呼叫
+`MessageReceiver.enable_burst_events(recorder)`。讀檔用 `burst_events.read_events(path)`（最後一行寫到一半時跳過）。
+
+**每一行**都有 `k`（種類）、`node`、`mono`（主機 `time.monotonic()`）、`wall`（主機 `time.time()`）。格式版本在
+`start` 行的 `schema`（`ofdm-message-link/events`）與 `version`（目前 1）；欄位只會增加，改名或改意思時版本加一。
+
+| `k` | 什麼時候 | 欄位 |
+|---|---|---|
+| `start` | 開檔時 | `version`、`sample_rate`、`burst_fields`、`package_version`、`argv`、`peer_id`、`transport`、`serial`、`tx_freq_hz`、`rx_freq_hz`、`tx_gain_db`、`rx_gain_db`、`tx_lo_offset_hz`、`tx_bandwidth_hz`、`mcs_index`、`link_adaptation`、`lock_timeout_s`、`clipping_level` |
+| `burst` | 每個 preamble 一行（下表） | |
+| `lock` | 失鎖與重新鎖定 | `state`（`acquired`／`lost`）、`off`、`stream_t`（= `off / sample_rate`） |
+| `rx_time` | UHD 的 `rx_time` tag（開始時一個，每次 overflow 或 retune 一個） | `off`、`dev_t`：這個 sample 的裝置時間 |
+| `overflow` | 接收串流有缺口 | `source = "rx_time"`：`off`、`dev_t`、`lost`（遺失的 samples，由 `rx_time` 算出）；`source = "counter"`：`counter`（`uhd_rx_overflow`、`chunks_dropped_overflow`、`rx_overflow_events`）、`delta`、`total` |
+| `gain` | 每次 gain 變更（control socket、`--gain-profile`） | `dir`、`db`（要求值）、`readback`（裝置讀回）；`mono` 是子 process 套用的時間 |
+| `radio` / `readback` / `freq` | 第一行 stats 時記下 TX／RX 頻率、gain、類比濾波器；`readback` 是 UHD 讀回的設定；之後頻率改變時寫 `freq` | |
+| `status` | 每 0.5 s（跟 stats log 同一行的時間） | `tx`（`bursts`、`control_bursts`、`subframes`、`payload_bytes`、`active_mcs`）、`rx.decoder`、`rx.receiver`、`rx_samples_lost`、`rx_time_discontinuities`、`uhd_faults`、`dropped_events`、`lost_batches` |
+| `mark` / `failed` | control socket 的 `mark`、引擎回報的錯誤 | `text` |
+| `gap` | 子 process 到母 process 的事件 queue 滿了，掉了幾批 burst | `lost_batches`、`next_seq` |
+| `stop` | 關檔時 | 各種行的數量、`lost_batches`、`write_errors` |
+
+**`burst` 的欄位**（順序同 `burst_events.BURST_FIELDS`）：
+
+| 欄位 | 意思 |
+|---|---|
+| `off` | preamble 第一個 sample 在接收串流中的位置（從 RX 開始算的 sample 數） |
+| `dev_t` | 那個 sample 的裝置時間（秒）：最近一個不晚於它的 `rx_time` anchor 加上 `(off − anchor) / sample_rate`。只有 UHD 有；B210 的裝置時鐘從開機起算，沒有對主機或 GNSS 對時 |
+| `mono`、`wall` | 接收 thread 把含有這個 preamble 的 chunk 交給 decoder 時的主機時間。比 burst 在空中的時間晚一段 queue 與 USB 的延遲（沒有量） |
+| `snr_db` | preamble（v5 是 LTF pair）量到的 SNR，換算到 payload samples，和 `link_snr` 事件同一個值 |
+| `noise_var`、`signal_power` | 同一個量測的複數雜訊變異數（每個 sample）與 active carriers 上的平均 `|H|²`；都是線性值，接收的 full scale 是 1.0 |
+| `peak`、`clip` | burst 的 samples 裡最大的 `|I|` 或 `|Q|`（header 失敗時只看 fixed header 那一段）；`clip = peak ≥ 1900/2048`（與 `rx_app` 相同） |
+| `hdr` | `ok`（CRC 檢查過的 header）、`fail`（header 解碼失敗）、`invalid`（找到 preamble，但因為其他原因沒有可用的 header） |
+| `pl` | `ok`、`fcs_fail`（v5 PSDU 的 FCS 失敗，CRC 正確的 subframes 仍會交付）、`fail`（沒有 payload）、`abandoned`（過載保護放棄）、`dropped`（過載保護沒有解）、`null`（header 不是 `ok`，沒有嘗試 payload） |
+| `kind` | payload 解出來時：`data`（至少一個自己 link 的 DATA frame）、`control`（只有 control frame）、`own`（自己 TX 的洩漏，被丟掉）、`foreign`（CRC 正確但不是我們的）、`other` |
+| `mcs`、`seq`、`sf_ok`、`sf_bad`、`lost`、`fcs` | burst 的 MCS、第一個 DATA sequence、CRC 正確與錯誤的 subframes、這個 burst 之前不見的 DATA sequence 數、PSDU 的 FCS 是否通過。header 失敗或 payload 沒解出來時是 `null`（MCS 也是，header 的 MCS 沒有往外送） |
+
+**失鎖的定義**：串流時間（不是主機時間）連續 `--events-lock-timeout`（預設 1 s）沒有一個 `hdr = ok` 且 `kind` 不是
+`own` 的 burst，就在 `最後一個 burst 的 off + timeout` 寫一行 `lock lost`；下一個這樣的 burst 寫 `lock acquired`。
+peer 沒有負載時每 0.5 s 左右仍送一個 control burst，所以 1 s 不會把閒置的 link 算成失鎖。
+
+**順序與完整性**：同一批（一次 receive feed）裡的 `burst` 依 `off` 排序；decode pool 的 payload 比較晚回來，所以
+跨批次時要再依 `off` 排一次。每批有編號，queue 滿而掉的批次寫成 `gap`，不會默默消失。停止時（detach）會把還沒有
+結果的 burst 照當時的狀態寫出。
+
+**對效能的影響（2026-11-12，同一台電腦、一個 CPU、同一段 240 個 MCS 16 burst 的串流，`MessageReceiver.feed` 的
+CPU 時間，各 5 次的中位數，兩輪）**：關閉時 0.412 與 0.398 s，改動前 0.411 與 0.410 s，差異在雜訊內；打開時
+0.415 與 0.399 s。還沒有在 B210 上用 `--realtime` 量過打開時的遺失與 overflow。
 
 回到 [README](../README.md)。

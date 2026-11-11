@@ -52,6 +52,14 @@ LINK_SNR_HISTORY = 4096
 SNR_AT_HISTORY = 512
 
 
+def peak_amplitude(samples: NDArray[np.complex64]) -> float | None:
+    """Largest ``|I|`` or ``|Q|`` in ``samples`` (full scale 1.0), None if empty."""
+
+    if samples.size == 0:
+        return None
+    return float(max(np.max(np.abs(samples.real)), np.max(np.abs(samples.imag))))
+
+
 def link_snr_db(
     measurement: PreambleMeasurement | LtfMeasurement | None,
     numerology: OfdmNumerology,
@@ -235,6 +243,12 @@ class StreamingBurstDecoder:
         self._link_snrs: deque[float] = deque(maxlen=LINK_SNR_HISTORY)
         self._last_snr_start: int | None = None
         self._snr_by_start: deque[tuple[int, float]] = deque(maxlen=SNR_AT_HISTORY)
+        # Optional per-burst observer (``ofdm_message_link.burst_events``):
+        # None keeps every path exactly as it was, one attribute test per
+        # burst stage.  It is told each new preamble (stream offset, SNR,
+        # noise variance), its header outcome, the burst's peak sample and
+        # its payload outcome, in stream order.
+        self.burst_observer = None
 
     @property
     def config(self) -> BurstConfig:
@@ -334,6 +348,14 @@ class StreamingBurstDecoder:
         if snr is not None:
             self._link_snrs.append(snr)
             self._snr_by_start.append((start, snr))
+        observer = self.burst_observer
+        if observer is not None:
+            observer.acquired(
+                start,
+                snr,
+                None if measurement is None else float(measurement.noise_variance),
+                None if measurement is None else float(measurement.signal_power),
+            )
 
     def feed(self, complex_chunk: ArrayLike) -> tuple[AnyDecodedBurst, ...]:
         """Consume one contiguous sample chunk and emit every complete burst.
@@ -423,19 +445,33 @@ class StreamingBurstDecoder:
                     self._record_header_success()
                     self._required_sample_count = error.required_sample_count
                     continue
+                observer = self.burst_observer
                 if error.diagnostics is not None:
                     self._record_header_success()
+                    if observer is not None:
+                        observer.peak(peak_amplitude(self._buffer[:segment_end]))
                     self.record_payload_outcome(PayloadFailure.from_error(error))
                 elif self._header_validated:
                     self._payload_decode_attempts += 1
                     self._payload_decode_failure += 1
                     self._unclassified_decode_failures += 1
+                    if observer is not None:
+                        observer.peak(peak_amplitude(self._buffer[:segment_end]))
+                        observer.payload(PayloadFailure(diagnosed=False, crc_failed=False), False)
                 elif str(error).startswith("fixed signaling header decode failed:") or str(
                     error
                 ).startswith("signaled "):
                     self._header_decode_failure += 1
+                    if observer is not None:
+                        observer.header_failed(
+                            "fail", peak_amplitude(self._buffer[:fixed_sample_count])
+                        )
                 else:
                     self._unclassified_decode_failures += 1
+                    if observer is not None:
+                        observer.header_failed(
+                            "invalid", peak_amplitude(self._buffer[:fixed_sample_count])
+                        )
                 # A fixed header or complete payload that fails validation is
                 # not a boundary oracle.  Advance one sample and reacquire so
                 # the next real preamble can resynchronize the stream, and
@@ -454,6 +490,8 @@ class StreamingBurstDecoder:
                 continue
 
             self._record_header_success()
+            if self.burst_observer is not None:
+                self.burst_observer.peak(peak_amplitude(self._buffer[: burst.burst_end]))
             self.record_payload_outcome(PayloadFailure.from_burst(burst), burst)
             absolute = replace(
                 burst,
@@ -508,6 +546,8 @@ class StreamingBurstDecoder:
         ``PayloadFailure.from_burst(burst)`` as ``failure``.
         """
 
+        if self.burst_observer is not None:
+            self.burst_observer.payload(failure, burst is not None)
         if failure is not None and failure.abandoned:
             self._payload_abandoned += 1
             return
@@ -597,13 +637,16 @@ class StreamingBurstDecoder:
             wanted = self._required_sample_count + timing_margin
             if self._buffer.size < wanted:
                 return segments
-            segments.append(
-                BurstSegment(
-                    samples=self._buffer[:wanted].copy(),
-                    acquisition=self._pending_acquisition,
-                    stream_offset=self._buffer_start,
-                )
+            segment = BurstSegment(
+                samples=self._buffer[:wanted].copy(),
+                acquisition=self._pending_acquisition,
+                stream_offset=self._buffer_start,
             )
+            if self.burst_observer is not None:
+                self.burst_observer.segment(
+                    segment.stream_offset, peak_amplitude(segment.samples)
+                )
+            segments.append(segment)
             self._discard(self._required_sample_count)
             self._pending_acquisition = None
             self._required_sample_count = None
@@ -631,12 +674,18 @@ class StreamingBurstDecoder:
         return True
 
     def _reject_acquisition(self, error: BurstDecodeError) -> None:
-        if str(error).startswith("fixed signaling header decode failed:") or str(
+        header_failed = str(error).startswith("fixed signaling header decode failed:") or str(
             error
-        ).startswith("signaled "):
+        ).startswith("signaled ")
+        if header_failed:
             self._header_decode_failure += 1
         else:
             self._unclassified_decode_failures += 1
+        if self.burst_observer is not None:
+            self.burst_observer.header_failed(
+                "fail" if header_failed else "invalid",
+                peak_amplitude(self._buffer[: self._fixed_sample_count]),
+            )
         bound = self._next_candidate_start
         self._discard(min(bound if bound else 1, self._buffer.size))
         self._pending_acquisition = None
@@ -648,6 +697,8 @@ class StreamingBurstDecoder:
         if not self._header_validated:
             self._header_validated = True
             self._header_decode_success += 1
+            if self.burst_observer is not None:
+                self.burst_observer.header_ok()
 
     @property
     def _fixed_sample_count(self) -> int:

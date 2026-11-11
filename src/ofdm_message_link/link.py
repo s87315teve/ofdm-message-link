@@ -830,6 +830,8 @@ class MessageReceiver:
         self._clock = clock
         self._burst_reports: deque[BurstReport] = deque(maxlen=BURST_REPORT_HISTORY)
         self._peer_snrs: deque[float] = deque(maxlen=BURST_REPORT_HISTORY)
+        # Per-burst events (node_app --events): None unless enable_burst_events.
+        self._burst_recorder = None
         # One worker keeps the original inline decoder untouched.  More move
         # each burst's payload decode, and its quality measurement, to worker
         # processes while acquisition and headers stay on this owner.
@@ -853,6 +855,17 @@ class MessageReceiver:
     @property
     def profile(self) -> PhyProfile:
         return self._profile
+
+    def enable_burst_events(self, recorder) -> None:
+        """Report every acquired preamble and its outcome to ``recorder``.
+
+        ``recorder`` is a :class:`~.burst_events.BurstEventRecorder` (or
+        anything with its methods).  Off unless this is called; it costs one
+        attribute test per burst stage when off.
+        """
+
+        self._burst_recorder = recorder
+        self._decoder.burst_observer = recorder
 
     @property
     def decode_workers(self) -> int:
@@ -927,6 +940,9 @@ class MessageReceiver:
         its samples; the order is still the stream's.
         """
 
+        recorder = self._burst_recorder
+        if recorder is not None:
+            recorder.on_feed(self._stats.samples_consumed, int(np.asarray(samples).size))
         self._stats = replace(
             self._stats,
             samples_consumed=self._stats.samples_consumed + int(np.asarray(samples).size),
@@ -950,12 +966,24 @@ class MessageReceiver:
         for piece in pieces:
             waiting.extend(self._decoder.feed_segments(piece))
             if len(waiting) >= self._pool.max_batch:
-                results.extend(self._pool.submit_many(waiting))
+                results.extend(self._submit(waiting))
                 waiting.clear()
         if waiting:
-            results.extend(self._pool.submit_many(waiting))
+            results.extend(self._submit(waiting))
         results.extend(self._pool.collect())
         return self._accept_results(results)
+
+    def _submit(self, segments: list) -> tuple:
+        """Hand segments to the pool; tell the burst recorder of any it dropped (opt-in)."""
+
+        if self._burst_recorder is None or not self._overload.drop_when_full:
+            return self._pool.submit_many(segments)
+        before = self._pool.snapshot().dropped_full
+        ready = self._pool.submit_many(segments)
+        dropped = self._pool.snapshot().dropped_full - before
+        if dropped:
+            self._burst_recorder.dropped(dropped)
+        return ready
 
     def flush(self, timeout: float | None = None) -> tuple[ReceivedMessage, ...]:
         """Wait for payloads still being decoded and return their messages."""
@@ -996,9 +1024,50 @@ class MessageReceiver:
 
         if quality is None:
             quality = burst_quality(burst)
+        if self._burst_recorder is not None:
+            return self._accept_recorded(burst, quality)
         if isinstance(burst, DecodedBurst):
             return self._accept_legacy(burst, quality)
         return self._accept_psdu(burst, quality)
+
+    def _accept_recorded(self, burst: AnyDecodedBurst, quality) -> list[ReceivedMessage]:
+        """:meth:`_accept`, then what the burst carried, read off the counters, to the recorder."""
+
+        before = self._stats
+        last_report = self._burst_reports[-1] if self._burst_reports else None
+        legacy = isinstance(burst, DecodedBurst)
+        delivered = (self._accept_legacy(burst, quality) if legacy
+                     else self._accept_psdu(burst, quality))
+        after = self._stats
+        report = self._burst_reports[-1] if self._burst_reports else None
+        report = None if report is last_report else report
+        if after.dropped_bursts > before.dropped_bursts:
+            kind = "own"
+        elif after.bursts_decoded > before.bursts_decoded:
+            kind = "data"
+        elif after.control_frames > before.control_frames:
+            kind = "control"
+        elif after.foreign_bursts > before.foreign_bursts:
+            kind = "foreign"
+        else:
+            kind = "other"
+        if legacy:
+            try:
+                mcs = mcs_index_for_wire(burst.frame.mcs, burst.diagnostics.wire_version)
+            except McsTableError:
+                mcs = None
+            sf_ok, sf_bad, fcs = (1 if kind != "own" else 0), 0, None
+        else:
+            mcs = burst.mcs_index
+            sf_ok = after.subframes_ok - before.subframes_ok
+            sf_bad = after.subframes_bad - before.subframes_bad
+            fcs = bool(burst.result.fcs_ok)
+        self._burst_recorder.link(
+            getattr(burst, "burst_start", None), kind, mcs,
+            None if report is None else report.first_sequence, sf_ok, sf_bad,
+            None if report is None else report.subframes_lost, fcs,
+        )
+        return delivered
 
     def _accept_legacy(self, burst: DecodedBurst, quality) -> list[ReceivedMessage]:
         frame = burst.frame

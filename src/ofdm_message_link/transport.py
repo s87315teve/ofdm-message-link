@@ -25,6 +25,7 @@ import socket
 import struct
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -55,6 +56,8 @@ _MAX_RX_RECV_FRAMES = 1024
 # 1.9 million back-pressure returns and ~20 % of samples lost in 190 s).  The
 # blocking put releases the GIL while it waits.
 _RX_QUEUE_WAIT_S = 0.005
+# rx_time tags kept for device time: one at start and one per overflow or retune.
+ANCHOR_HISTORY = 64
 
 
 def _rx_rate_scale(sample_rate: float) -> int:
@@ -635,6 +638,19 @@ class UhdSampleSource:
         self._async_block = None
         self._fault_collector = None
 
+    def time_anchors(self) -> tuple[int, tuple[tuple[int, float, int], ...]]:
+        """Device-time anchors of the receive stream from its UHD ``rx_time`` tags.
+
+        Returns (tags seen since start, the most recent ones as (stream offset,
+        device seconds, samples lost just before)).  Stream offsets count the
+        samples handed to :meth:`recv` since :meth:`start`.  The device clock
+        is the B210's own; nothing here sets it to host or GNSS time.
+        """
+
+        if self._gaps is None:
+            return 0, ()
+        return self._gaps.anchors()
+
     def snapshot(self) -> dict[str, object]:
         faults = (
             None
@@ -686,8 +702,15 @@ class RxTimeGapCounter:
         self._anchor: tuple[int, float] | None = None
         self.discontinuities = 0
         self.samples_lost = 0
+        # Every tag as (stream offset, device seconds, samples lost before it),
+        # the last ANCHOR_HISTORY of them, and how many there were in all: the
+        # device time of any later sample is anchor seconds + offset / rate.
+        self._anchors: deque[tuple[int, float, int]] = deque(maxlen=ANCHOR_HISTORY)
+        self._anchors_total = 0
+        self._anchor_lock = threading.Lock()
 
     def observe(self, offset: int, seconds: float) -> None:
+        lost = 0
         if self._anchor is not None:
             anchor_offset, anchor_seconds = self._anchor
             expected = anchor_seconds + (offset - anchor_offset) / self._rate
@@ -696,6 +719,15 @@ class RxTimeGapCounter:
                 self.discontinuities += 1
                 self.samples_lost += lost
         self._anchor = (int(offset), float(seconds))
+        with self._anchor_lock:
+            self._anchors.append((int(offset), float(seconds), max(lost, 0)))
+            self._anchors_total += 1
+
+    def anchors(self) -> tuple[int, tuple[tuple[int, float, int], ...]]:
+        """(tags seen in all, the most recent ones as (offset, seconds, lost))."""
+
+        with self._anchor_lock:
+            return self._anchors_total, tuple(self._anchors)
 
 
 def _device_time_now(sink_block: Any) -> float:

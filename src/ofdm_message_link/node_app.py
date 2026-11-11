@@ -40,6 +40,15 @@ datagram, one answer)::
     {"cmd": "mark", "text": "phase 2"}            copied into the stats and LA logs
     {"cmd": "stats"}                              the latest stats line
     {"cmd": "stop"}
+
+Per-burst receive events for measurements (headless, off by default)::
+
+    python -m ofdm_message_link.node_app ... --headless --events node2_events.jsonl
+
+writes one JSON line per acquired preamble (stream offset, device and host
+time, SNR, noise variance, peak and clipping, header/payload/FCS outcome)
+plus gain, frequency, lock, overflow and status lines: :mod:`.burst_events`,
+``docs/07-reference.md`` section 7.11.
 """
 
 from __future__ import annotations
@@ -355,8 +364,10 @@ class HeadlessNode:
         gain_profile: tuple[tuple[float, float], ...] = (),
         clock: Callable[[], float] = time.monotonic,
         out=sys.stderr,
+        events=None,
     ) -> None:
         self.worker = worker
+        self.events = events
         self.monitor = monitor
         self.factory = factory
         self.stats_log = stats_log
@@ -431,6 +442,8 @@ class HeadlessNode:
                     line = self.monitor.line(now)
                     if line is not None:
                         self._write(line)
+                        if self.events is not None:
+                            self.events.status(line)
                 wait = max(0.0, min(next_line - self.clock(), 0.05))
                 if self.control is not None:
                     self.control.poll(wait)
@@ -448,6 +461,8 @@ class HeadlessNode:
                 self.control.close()
             if self.stats_log is not None:
                 self.stats_log.close()
+            if self.events is not None:
+                self.events.stop()
 
 
 def build_spec(args, setup: node_options.NodeSetup) -> NodeSpec:
@@ -466,6 +481,8 @@ def build_spec(args, setup: node_options.NodeSetup) -> NodeSpec:
         la_log_path=args.la_log,
         tx_gain_db=args.tx_gain,
         mode=setup.mode,
+        burst_events=getattr(args, "events", None) is not None,
+        lock_timeout_s=float(getattr(args, "events_lock_timeout", 1.0)),
     )
 
 
@@ -577,6 +594,40 @@ def main(argv: list[str] | None = None) -> int:
     return run_gui(args, setup, spec)
 
 
+def open_events(args, setup: node_options.NodeSetup, spec: NodeSpec, factory):
+    """The ``--events`` writer with its ``start`` line, or None when the option is off."""
+
+    path = getattr(args, "events", None)
+    if path is None:
+        return None
+    from ofdm_link import __version__
+
+    from .burst_events import CLIPPING_LEVEL, EventLogWriter
+
+    writer = EventLogWriter(path, node_id=setup.node_id,
+                            sample_rate=setup.resolved.profile.sample_rate)
+    writer.start({
+        "package_version": __version__,
+        "argv": list(sys.argv[1:]),
+        "peer_id": setup.peer_id,
+        "mode": setup.mode,
+        "transport": setup.resolved.transport,
+        "serial": getattr(args, "serial", None),
+        "tx_freq_hz": setup.tx_frequency,
+        "rx_freq_hz": setup.rx_frequency,
+        "tx_gain_db": args.tx_gain,
+        "rx_gain_db": args.rx_gain,
+        "tx_lo_offset_hz": getattr(factory, "tx_lo_offset", None),
+        "tx_bandwidth_hz": getattr(factory, "tx_bandwidth", None),
+        "mcs_index": spec.mcs_index,
+        "control_mcs_index": spec.control_mcs_index,
+        "link_adaptation": spec.la_spec,
+        "lock_timeout_s": spec.lock_timeout_s,
+        "clipping_level": CLIPPING_LEVEL,
+    })
+    return writer
+
+
 def run_headless(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:
     if setup.resolved.transport == "uhd":
         try:
@@ -593,10 +644,16 @@ def run_headless(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:
         factory = udp_factory(args, setup)
     monitor = NodeMonitor(setup.node_id, setup.mode if setup.resolved.uses_radio else "udp",
                           setup.resolved.profile.sample_rate)
+    events = open_events(args, setup, spec, factory)
+    listener = monitor.on_event
+    if events is not None:
+        def listener(kind: str, value: Any) -> None:
+            monitor.on_event(kind, value)
+            events.on_event(kind, value)
     worker = ProcessNodeWorker(
         setup.resolved.profile,
         spec,
-        monitor.on_event,
+        listener,
         ui_fps=args.ui_fps,
         decode_workers=args.decode_workers,
         aggregation=setup.resolved.aggregation,
@@ -610,6 +667,7 @@ def run_headless(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:
         control_port=setup.control_port,
         duration_s=args.duration,
         gain_profile=setup.gain_profile,
+        events=events,
     )
     signal.signal(signal.SIGTERM, node.request_stop)
     signal.signal(signal.SIGINT, node.request_stop)

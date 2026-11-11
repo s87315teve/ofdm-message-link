@@ -323,6 +323,14 @@ def build_parser() -> argparse.ArgumentParser:
     files.add_argument("--stats-log-backups", type=int, default=log_limits.DEFAULT_BACKUPS,
                        metavar="N",
                        help=f"rotated stats logs to keep (default: {log_limits.DEFAULT_BACKUPS})")
+    files.add_argument("--events", default=None, metavar="PATH",
+                       help=("headless: append per-burst receive events as JSON lines (preamble "
+                             "SNR, noise variance, clipping, header/payload/FCS outcome, device "
+                             "and host time), plus gain, frequency, lock and overflow events; "
+                             "off by default (docs/07-reference.md 7.11)"))
+    files.add_argument("--events-lock-timeout", type=_positive, default=1.0, metavar="S",
+                       help=("with --events: no header from the peer for S seconds of stream "
+                             "time is a lost lock (default 1.0)"))
     files.add_argument("--ingress-port", type=_port, default=None,
                        help="localhost UDP port with bytes to send (default: per node)")
     files.add_argument("--egress-host", default="127.0.0.1",
@@ -376,6 +384,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         args.auto_start = True
         if args.transport in ("pluto", "uhd") and not args.serial:
             parser.error(f"--headless with --transport {args.transport} needs --serial")
+    if args.events is not None and not args.headless:
+        parser.error("--events needs --headless")
     if args.snr_db is not None and args.transport != "udp":
         parser.error("--snr-db applies to the udp transport only")
     _resolve_gains(parser, args)
@@ -472,7 +482,7 @@ def warn(setup: NodeSetup) -> None:
 
 
 def check_paths(args: argparse.Namespace) -> None:
-    for path in (args.stats_log, args.la_log, args.ready_file):
+    for path in (args.stats_log, args.la_log, args.ready_file, getattr(args, "events", None)):
         if path and not Path(path).parent.exists():
             raise SystemExit(f"directory of {path} does not exist")
 

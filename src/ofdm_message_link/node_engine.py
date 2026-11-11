@@ -377,6 +377,9 @@ class NodeSpec:
     tx_gain_db: float | None = None
     mode: str = "fdd"
     ingress_host: str = "127.0.0.1"
+    # Per-burst receive events (node_app --events); off by default.
+    burst_events: bool = False
+    lock_timeout_s: float = 1.0
 
 
 def la_context(spec: NodeSpec, sample_rate: float):
@@ -473,6 +476,8 @@ class NodeWorker:
         self.endpoint: DuplexEndpoint | None = None
         self.lag_monitor = None
         self._failed = failed or (lambda message: None)
+        # Called after every detach (node_app --events flushes its last records).
+        self.after_detach: Callable[[], None] | None = None
 
     def start(self) -> None:
         self.tx.start()
@@ -505,6 +510,8 @@ class NodeWorker:
         self.rx.detach()
         if endpoint is not None:
             endpoint.close()
+        if self.after_detach is not None:
+            self.after_detach()
 
     def set_gain(self, direction: str, gain_db: float) -> float:
         if direction == "tx":
@@ -569,7 +576,20 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
         own_seed_range=tuple(spec.seed_range),
     )
     egress = EgressForwarder(*spec.egress)
-    rx_worker = ReceiveWorker(receiver, sink, sink, egress=egress, observer=controller)
+    observer = controller
+    tap = None
+    if spec.burst_events:
+        from .burst_events import BurstEventRecorder, BurstEventTap
+
+        recorder = BurstEventRecorder(profile.sample_rate, lock_timeout_s=spec.lock_timeout_s)
+        receiver.enable_burst_events(recorder)
+        workers: dict[str, Any] = {}
+        tap = BurstEventTap(controller, recorder, sink.put,
+                            lambda: getattr(workers.get("rx"), "source", None))
+        observer = tap
+    rx_worker = ReceiveWorker(receiver, sink, sink, egress=egress, observer=observer)
+    if tap is not None:
+        workers["rx"] = rx_worker
     submit_failures = {"count": 0, "last_report": 0.0}
 
     def submit_counted(source: str, payload: bytes) -> bool:
@@ -591,11 +611,14 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
         sink.failed.emit(ingress_error)
     worker = NodeWorker(tx_worker, rx_worker, controller=controller,
                         ingress_error=ingress_error, failed=sink.failed.emit)
+    if tap is not None:
+        worker.after_detach = lambda: tap.emit(final=True)
     worker.start()
 
     def apply_gain(direction: str, gain_db: float) -> float:
         readback = worker.set_gain(direction, gain_db)
-        sink.put("gain", {"dir": direction, "readback": readback, "t": time.monotonic()})
+        sink.put("gain", {"dir": direction, "db": float(gain_db), "readback": readback,
+                          "t": time.monotonic()})
         return readback
 
     def handle(command: tuple) -> None:
@@ -707,7 +730,11 @@ class ProcessNodeWorker:
     ``listener(kind, value)`` receives every event on the engine's pump
     thread: ``message``, ``sent``, ``level``, ``failed``, ``link_snr``,
     ``samples``, ``symbols``, ``stats``, ``la``, ``feedback``, ``gain``,
-    ``mark``.
+    ``mark``, and with ``spec.burst_events`` also ``bursts`` (numbered
+    batches of :class:`~.burst_events.BurstEvent` tuples, lock transitions
+    and device-time anchors; :class:`~.burst_events.EventLogWriter` writes
+    them).  ``gain`` carries ``dir``, the requested ``db``, the device
+    ``readback`` and the child's monotonic time ``t``.
     """
 
     def __init__(
