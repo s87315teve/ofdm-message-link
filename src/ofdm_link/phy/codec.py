@@ -16,6 +16,7 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from . import native_backend
 from .fec import (
     ConvolutionalFecAdapter,
     FecCodec,
@@ -696,6 +697,23 @@ def map_symbols(bits: ArrayLike, mcs: MCS) -> NDArray[np.complex64]:
     """
 
     mode = _require_mcs(mcs)
+    raw = np.asarray(bits)
+    native = native_backend.module("tx")
+    if native is not None and raw.ndim == 1 and raw.dtype in (np.uint8, np.bool_):
+        if raw.size % mode.bits_per_symbol:
+            raise PhyCodecError(
+                f"{mode.name} mapping requires a multiple of {mode.bits_per_symbol} bits"
+            )
+        symbols = np.empty(raw.size // mode.bits_per_symbol, dtype=np.complex64)
+        if raw.size:
+            axis_bits, levels, scale = _native_axis(mode)
+            try:
+                native.map_bits(
+                    np.ascontiguousarray(raw).view(np.uint8), axis_bits, levels, scale, symbols
+                )
+            except ValueError as error:
+                raise PhyCodecError("bits must contain only 0 and 1") from error
+        return symbols
     values = _as_bits(bits, "bits")
     if values.size % mode.bits_per_symbol:
         raise PhyCodecError(
@@ -723,6 +741,20 @@ def map_symbols(bits: ArrayLike, mcs: MCS) -> NDArray[np.complex64]:
             _QAM64_AXIS_LEVELS[real_index] + 1j * _QAM64_AXIS_LEVELS[imag_index]
         ) / _QAM64_SCALE
     return symbols.astype(np.complex64, copy=False)
+
+
+def _native_axis(mode: MCS) -> tuple[int, NDArray[np.float32], float]:
+    """Bits per axis, the axis level table indexed by those bits, and the scale."""
+
+    if mode is MCS.QPSK:
+        return 1, _QPSK_AXIS_LEVELS, float(np.sqrt(2.0))
+    if mode is MCS.QAM16:
+        return 2, _QAM16_AXIS_LEVELS, float(_QAM16_SCALE)
+    return 3, _QAM64_AXIS_LEVELS, float(_QAM64_SCALE)
+
+
+# QPSK's axis value is 1 - 2 b.
+_QPSK_AXIS_LEVELS = np.array([1.0, -1.0], dtype=np.float32)
 
 
 def demap_symbols(symbols: ArrayLike, mcs: MCS) -> NDArray[np.uint8]:

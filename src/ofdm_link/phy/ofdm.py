@@ -7,9 +7,12 @@ number ``k`` maps to NumPy FFT bin ``k % fft_size``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+
+from . import native_backend
 
 
 class OfdmError(ValueError):
@@ -148,6 +151,31 @@ def modulate_ofdm(
     symbol_count = (payload.size + data_per_symbol - 1) // data_per_symbol
     padded_count = symbol_count * data_per_symbol
     padding_count = padded_count - payload.size
+    native = native_backend.module("tx")
+    if native is not None and numerology.fft_size == 64:
+        # Validate the pilot request exactly as the Python path does.
+        pilot_symbols(0, first_symbol_index=first_symbol_index, version=pilot_version)
+        data_bins, pilot_bins = _native_bins(numerology)
+        samples = np.empty(
+            symbol_count * (numerology.fft_size + numerology.cp_length), dtype=np.complex64
+        )
+        native.modulate(
+            np.ascontiguousarray(payload),
+            first_symbol_index,
+            numerology.cp_length,
+            data_bins,
+            pilot_bins,
+            _NATIVE_PILOT_BASE,
+            _NATIVE_PILOT_POLARITY,
+            samples,
+        )
+        samples.setflags(write=False)
+        return OfdmWaveform(
+            samples=samples,
+            payload_symbol_count=payload.size,
+            padding_symbol_count=padding_count,
+            ofdm_symbol_count=symbol_count,
+        )
     padded = np.pad(payload, (0, padding_count))
 
     grid = np.zeros((symbol_count, numerology.fft_size), dtype=np.complex64)
@@ -170,6 +198,19 @@ def modulate_ofdm(
         padding_symbol_count=padding_count,
         ofdm_symbol_count=symbol_count,
     )
+
+
+_NATIVE_PILOT_BASE = np.asarray(_PILOT_BASE, dtype=np.float32)
+_NATIVE_PILOT_POLARITY = np.asarray(_PILOT_POLARITY_V1, dtype=np.float32)
+
+
+@lru_cache(maxsize=8)
+def _native_bins(numerology: OfdmNumerology) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    data = np.asarray(numerology.data_carriers, dtype=np.int64) % numerology.fft_size
+    pilots = np.asarray(numerology.pilot_carriers, dtype=np.int64) % numerology.fft_size
+    data.setflags(write=False)
+    pilots.setflags(write=False)
+    return data, pilots
 
 
 def demodulate_ofdm(

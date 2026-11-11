@@ -29,6 +29,7 @@ from functools import lru_cache
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from . import native_backend
 from .turbo import TurboSegmentationPlan, turbo_segmentation_plan
 
 SUBBLOCK_COLUMNS = 32
@@ -208,6 +209,12 @@ def rate_match(native_coded: ArrayLike, plan: RateMatchPlan) -> NDArray[np.uint8
         raise RateMatchError(
             f"native coded input must hold {plan.native_bit_count} bits"
         )
+    native = native_backend.module("tx")
+    if native is not None and coded.dtype == np.uint8:
+        result = np.empty(plan.available_bits, dtype=np.uint8)
+        native.gather(np.ascontiguousarray(coded), _global_read_index(plan), result)
+        result.setflags(write=False)
+        return result
     pieces = []
     offset = 0
     for block in plan.blocks:
@@ -216,6 +223,30 @@ def rate_match(native_coded: ArrayLike, plan: RateMatchPlan) -> NDArray[np.uint8
     result = np.concatenate(pieces).astype(np.uint8, copy=False)
     result.setflags(write=False)
     return result
+
+
+# Concatenated read index of each plan seen, kept with the plan so its id
+# cannot be reused while cached.  Plans come from an LRU cache of 64.
+_GLOBAL_INDEX: dict[int, tuple[RateMatchPlan, NDArray[np.int32]]] = {}
+_GLOBAL_INDEX_LIMIT = 64
+
+
+def _global_read_index(plan: RateMatchPlan) -> NDArray[np.int32]:
+    """Every block's read index offset to its place in the whole native output."""
+
+    cached = _GLOBAL_INDEX.get(id(plan))
+    if cached is not None and cached[0] is plan:
+        return cached[1]
+    offsets = np.cumsum([0] + [block.native_bit_count for block in plan.blocks[:-1]])
+    index = np.concatenate(
+        [block.read_index.astype(np.int32) + np.int32(offset)
+         for block, offset in zip(plan.blocks, offsets, strict=True)]
+    )
+    index.setflags(write=False)
+    if len(_GLOBAL_INDEX) >= _GLOBAL_INDEX_LIMIT:
+        _GLOBAL_INDEX.pop(next(iter(_GLOBAL_INDEX)))
+    _GLOBAL_INDEX[id(plan)] = (plan, index)
+    return index
 
 
 def rate_dematch(
