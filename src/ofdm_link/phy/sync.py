@@ -19,10 +19,11 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from numpy.typing import ArrayLike, NDArray
 
+from . import native_backend
 from ._arrays import all_finite
 
 if TYPE_CHECKING:
-    from .sync_v5 import AnyAcquisition, V5SyncConfig
+    from .sync_v5 import AnyAcquisition, V5Acquisition, V5SyncConfig
 
 # Floor on the preamble noise estimate, as a fraction of the signal power:
 # caps the reported SNR at 60 dB when the input carries no noise at all.
@@ -700,7 +701,6 @@ def acquire_all(
         V5_FIXED_LENGTH,
         V5_PREAMBLE_LENGTH,
         V5Acquisition,
-        _v5_candidates,
         prefilter_for_acquisition,
     )
 
@@ -709,22 +709,13 @@ def acquire_all(
     values = _as_complex_samples(samples, "samples")
     if v5 is not None and v5.prefilter:
         values = prefilter_for_acquisition(values)
-    lag = 32 if legacy is None else legacy.half_length
-    shared = (
-        _shared_correlation(values, lag)
-        if values.size > lag and np.any(values)
-        else None
-    )
-    legacy_found: tuple[AcquisitionResult, ...] = ()
-    if legacy is not None:
-        legacy_found = separated_candidates(
-            _acquisition_candidates(values, legacy, shared=shared),
-            legacy.preamble_length,
-        )
+    native = native_backend.module("acq")
+    if native is not None and (legacy is None or _native_legacy_supported(legacy)):
+        legacy_found, v5_found = _native_family_candidates(native, values, legacy, v5)
+    else:
+        legacy_found, v5_found = _family_candidates(values, legacy, v5)
     if v5 is None:
         return legacy_found
-    # ``values`` is already checked and ``shared`` is its correlation.
-    v5_found = () if shared is None or lag != 32 else _v5_candidates(values, shared, v5)
     if not v5_found:
         return legacy_found
     if not legacy_found:
@@ -750,6 +741,114 @@ def acquire_all(
         ):
             selected.append(candidate)
     return tuple(sorted(selected, key=lambda item: item.preamble_start))
+
+
+def _family_candidates(
+    values: NDArray[np.complex64],
+    legacy: SyncConfig | None,
+    v5: V5SyncConfig | None,
+) -> tuple[tuple[AcquisitionResult, ...], tuple[V5Acquisition, ...]]:
+    """Each family's separated candidates, by start: the Python reference."""
+
+    from .sync_v5 import _v5_candidates
+
+    lag = 32 if legacy is None else legacy.half_length
+    shared = (
+        _shared_correlation(values, lag)
+        if values.size > lag and np.any(values)
+        else None
+    )
+    legacy_found: tuple[AcquisitionResult, ...] = ()
+    if legacy is not None:
+        legacy_found = separated_candidates(
+            _acquisition_candidates(values, legacy, shared=shared),
+            legacy.preamble_length,
+        )
+    if v5 is None:
+        return legacy_found, ()
+    # ``values`` is already checked and ``shared`` is its correlation.
+    v5_found = () if shared is None or lag != 32 else _v5_candidates(values, shared, v5)
+    return legacy_found, v5_found
+
+
+def _native_legacy_supported(legacy: SyncConfig) -> bool:
+    """The native detector is built for the project's 64-point, 16-sample-CP preamble."""
+
+    return legacy.fft_size == 64 and legacy.cyclic_prefix_length == 16
+
+
+def _native_family_candidates(
+    native,
+    values: NDArray[np.complex64],
+    legacy: SyncConfig | None,
+    v5: V5SyncConfig | None,
+) -> tuple[tuple[AcquisitionResult, ...], tuple[V5Acquisition, ...]]:
+    """:func:`_family_candidates` from ``_acq_native``, which releases the GIL."""
+
+    from .sync_v5 import V5Acquisition
+
+    found_legacy, found_v5 = native.acquire(
+        np.ascontiguousarray(values),
+        None if legacy is None else _native_legacy_parameters(legacy),
+        None if v5 is None else _native_v5_parameters(v5),
+    )
+    legacy_found = tuple(
+        AcquisitionResult(
+            preamble_start=start,
+            useful_start=useful_start,
+            normalized_cfo=cfo,
+            amplitude_gain=amplitude,
+            signal_power=amplitude * amplitude,
+            metric=metric,
+            confidence=confidence,
+        )
+        for start, useful_start, cfo, amplitude, metric, confidence in found_legacy
+    )
+    v5_found = tuple(
+        V5Acquisition(
+            stf_start=stf_start,
+            ltf_start=ltf_start,
+            normalized_cfo=cfo,
+            coarse_cfo=coarse,
+            metric=metric,
+            stf_confidence=stf_confidence,
+            confidence=confidence,
+        )
+        for stf_start, ltf_start, cfo, coarse, metric, stf_confidence, confidence in found_v5
+    )
+    return legacy_found, v5_found
+
+
+@lru_cache(maxsize=8)
+def _native_legacy_parameters(settings: SyncConfig) -> tuple:
+    reference, energy, _ = _coherent_reference(settings)
+    return (
+        float(settings.detection_threshold),
+        float(settings.correlation_threshold),
+        float(settings.minimum_power),
+        np.ascontiguousarray(reference, dtype=np.complex128).tobytes(),
+        float(energy),
+    )
+
+
+@lru_cache(maxsize=8)
+def _native_v5_parameters(config: V5SyncConfig) -> tuple:
+    from .sync_v5 import _ltf_symbol, _stf_phase_matrix
+
+    phases, stf_energy = _stf_phase_matrix()
+    ltf = _ltf_symbol()
+    return (
+        float(config.detection_threshold),
+        float(config.stf_threshold),
+        float(config.correlation_threshold),
+        float(config.balance_ratio),
+        int(config.fine_timing_search),
+        float(config.minimum_power),
+        np.ascontiguousarray(phases, dtype=np.complex128).tobytes(),
+        float(stf_energy),
+        np.ascontiguousarray(np.conj(ltf), dtype=np.complex128).tobytes(),
+        64.0 * float(np.mean(np.abs(ltf) ** 2)),
+    )
 
 
 @lru_cache(maxsize=8)

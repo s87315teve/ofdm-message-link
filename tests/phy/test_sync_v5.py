@@ -267,7 +267,14 @@ def test_no_candidate_survives_inside_a_v5_fixed_part() -> None:
     assert separated_v5_candidates((v5, inside_v5, beyond_v5)) == (v5, beyond_v5)
 
 
-def test_shared_correlation_leaves_the_legacy_scan_bit_identical() -> None:
+def test_shared_correlation_leaves_the_legacy_scan_bit_identical(monkeypatch) -> None:
+    # A property of the Python reference; the native scan is held to
+    # tolerances in test_acq_native.py.
+    from ofdm_link.phy import native_backend
+
+    monkeypatch.setenv(native_backend.env_name("acq"), "python")
+    native_backend.reset()
+    monkeypatch.setattr(native_backend, "_resolved", {})
     rng = np.random.default_rng(15)
     stream = np.concatenate(
         (np.zeros(100), _legacy_burst(2), np.zeros(80), _v5_burst(), np.zeros(500))
