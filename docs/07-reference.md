@@ -209,6 +209,11 @@ v4 = uncoded。它和 modulation 一起決定 MCS index。v5 的 SIG 直接帶 M
 
 Radio 的 analog filter bandwidth 設成等於 sample rate。這和 OFDM signal 實際佔用的寬度不一樣。
 
+這條規則適用 `tx_app` 的 TX 與 `rx_app` 的 RX（`options.radio_settings`），不能調：overlay 的 `radio.bandwidth` 對它們
+**沒有作用**，B210 讀回的值仍等於 sample rate。這樣切換 sample rate 時 filter 一定跟著變。`node_app` 的 TX 因為 LO 偏離載波，
+預設較寬，可以用 `--tx-analog-bw` 調（見 7.9 節）。2026-11-12 評估過讓 `tx_app` 也可調：沒有量測顯示需要（`node_app` 用
+5 MHz 的 TX filter 也正常），設太寬只會增加帶外發射，所以不做。
+
 這個 PHY 使用 64-point FFT，佔用的 subcarrier 是 −26…−1 與 +1…+26（48 data + 4 pilots，DC 為空），
 所以 occupied bandwidth 是 `52/64 × Fs = 0.8125 Fs`：
 
@@ -226,7 +231,7 @@ decimation（`ofdm_link.radio.uhd.MASTER_CLOCK_RATES`；30.72 MHz 也是 B210 �
 [`b210_2p45ghz_15p36msps.yaml`](../configs/profiles/b210_2p45ghz_15p36msps.yaml)（`tx_app`／`rx_app`）。這個速率下：
 aggregate 的 airtime 上限要 ≤ 5.21 ms（80 000 samples），profile 設 5 ms，沿用 8 ms 預設值的設定檔會被拒絕；RX 的 UHD
 receive frames 與 chunk 依 sample rate 放大到 1024 個 frame 與 4 × 65536 samples；`node_app` 的 TX analog filter 預設是
-35 MHz（見 7.9 節的 `--tx-analog-bw`）。Pluto 不支援。還沒有在硬體上量過。12.5 MS/s 沒有開放。
+35 MHz（見 7.9 節的 `--tx-analog-bw`）。Pluto 不支援。2026-11-11 在兩台 B210 上量過單向 MCS 17：約 35.5 Mb/s，上限是 TX airtime。12.5 MS/s 沒有開放。
 
 把 analog bandwidth 設成 Fs 會在 signal 兩側留下合理的 transition margin。設得太窄會先衰減外緣的
 subcarrier、提高 EVM；設得太寬則會收進更多帶外 noise 與鄰近 channel 的干擾。
