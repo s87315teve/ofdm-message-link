@@ -67,6 +67,8 @@ from ofdm_link.phy.mcs_table import (
 from ofdm_link.phy.streaming import StreamingBurstDecoder
 from ofdm_link.runtime.airtime import v5_burst_samples_with_guards
 from ofdm_link.runtime.factory import build_burst_config, select_frame_decoder
+from ofdm_link.runtime.overload import OverloadProtection
+from ofdm_link.runtime.overload import from_environment as overload_from_environment
 
 from . import datagram
 from .aggregation import AggregationLimits, plan_aggregate
@@ -789,6 +791,7 @@ class MessageReceiver:
         own_seed_range: tuple[int, int] | None = None,
         max_sequence_gap: int | None = None,
         clock=time.monotonic,
+        overload: OverloadProtection | None = None,
     ) -> None:
         if not isinstance(profile, PhyProfile):
             raise TypeError("profile must be a PhyProfile")
@@ -830,6 +833,8 @@ class MessageReceiver:
         # One worker keeps the original inline decoder untouched.  More move
         # each burst's payload decode, and its quality measurement, to worker
         # processes while acquisition and headers stay on this owner.
+        # Opt-in overload protection, off unless --overload-protection set it.
+        self._overload = overload_from_environment() if overload is None else overload
         self._pool = None
         if decode_workers > 1:
             from ofdm_link.runtime.segment_decode_pool import SegmentDecodePool
@@ -838,7 +843,12 @@ class MessageReceiver:
                 profile.config,
                 workers=decode_workers,
                 annotate=burst_quality,
+                overload=self._overload,
             )
+        elif self._overload.give_up_after:
+            from ofdm_link.phy.turbo import set_hopeless_block_give_up
+
+            set_hopeless_block_give_up(self._overload.give_up_after)
 
     @property
     def profile(self) -> PhyProfile:

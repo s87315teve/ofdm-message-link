@@ -286,15 +286,45 @@ def add_performance_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def apply_performance_options(args: argparse.Namespace) -> None:
-    """Apply the CPU switches in ``main``, before any engine or worker starts."""
+def add_overload_argument(parser: argparse.ArgumentParser) -> None:
+    """``--overload-protection`` for the apps that receive (rx_app, node_app)."""
 
-    from ofdm_link.runtime import cpu_affinity
+    from ofdm_link.runtime.overload import MODES
+
+    group = parser.add_argument_group("receive overload protection (off by default)")
+    group.add_argument(
+        "--overload-protection",
+        choices=MODES,
+        default="off",
+        help=(
+            "off (default) for every measurement run. drop: drop a burst segment when the "
+            "decode pool is full instead of stalling the receiver; give-up: stop a hopeless "
+            "Turbo block after 4 iterations; both. Each has its own counter (decode_pool "
+            "dropped_full, decoder payload_abandoned), apart from ordinary loss and BLER"
+        ),
+    )
+
+
+def apply_performance_options(args: argparse.Namespace) -> None:
+    """Apply the CPU and receive switches in ``main``, before any engine or worker starts."""
+
+    import sys
+
+    from ofdm_link.runtime import cpu_affinity, overload
 
     try:
         cpu_affinity.apply(getattr(args, "cpu_affinity", None))
     except cpu_affinity.CpuAffinityError as error:
         raise SystemExit(f"--cpu-affinity: {error}") from error
+    mode = getattr(args, "overload_protection", "off")
+    if mode != "off":
+        overload.request(mode)
+        print(
+            f"[overload] protection {mode}: dropped and abandoned bursts are counted apart "
+            "from ordinary loss; do not use it for measurement runs",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
@@ -626,6 +656,7 @@ __all__ = [
     "TransportError",
     "add_aggregation_arguments",
     "add_common_arguments",
+    "add_overload_argument",
     "add_performance_arguments",
     "apply_performance_options",
     "aggregation_limits",

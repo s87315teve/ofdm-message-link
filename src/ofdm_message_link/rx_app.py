@@ -963,6 +963,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="One-way OFDM message receiver with a Qt demo window.",
     )
     options.add_common_arguments(parser, receiver_display_only=True)
+    options.add_overload_argument(parser)
     app = parser.add_argument_group("receiver")
     app.add_argument(
         "--egress-host",

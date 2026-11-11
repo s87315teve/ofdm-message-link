@@ -38,6 +38,7 @@ from .sync_v5 import (
     V5Acquisition,
     measure_ltf_pair,
 )
+from .turbo import ABANDONED_REASON
 
 if TYPE_CHECKING:
     from .burst_v5 import AnyDecodedBurst
@@ -97,6 +98,9 @@ class PayloadFailure:
     diagnosed: bool
     crc_failed: bool
     v5: bool = False
+    # A Turbo block was given up on (opt-in overload protection), so the
+    # failure is not an ordinary one and has its own counter.
+    abandoned: bool = False
 
     @classmethod
     def from_error(cls, error: BurstDecodeError) -> PayloadFailure:
@@ -105,6 +109,8 @@ class PayloadFailure:
             diagnosed=diagnostics is not None,
             crc_failed=diagnostics is not None and diagnostics.outer_crc_ok is False,
             v5=diagnostics is not None and diagnostics.wire_version == V5_WIRE_VERSION,
+            abandoned=diagnostics is not None
+            and ABANDONED_REASON in tuple(diagnostics.early_stop_reasons or ()),
         )
 
     @classmethod
@@ -117,7 +123,9 @@ class PayloadFailure:
 
         if getattr(burst, "fcs_ok", True):
             return None
-        return cls(diagnosed=True, crc_failed=True, v5=True)
+        reasons = tuple(getattr(burst.diagnostics, "early_stop_reasons", ()) or ())
+        return cls(diagnosed=True, crc_failed=True, v5=True,
+                   abandoned=ABANDONED_REASON in reasons)
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +155,10 @@ class StreamingDecoderSnapshot:
     bursts_legacy: int = 0
     bursts_v5: int = 0
     psdu_fcs_failures: int = 0
+    # Payloads whose Turbo decoder gave up on a block (opt-in overload
+    # protection).  Counted here only: not an attempt, failure or CRC failure,
+    # so payload BLER keeps its meaning.  Always 0 with protection off.
+    payload_abandoned: int = 0
 
 
 class StreamingBurstDecoder:
@@ -215,6 +227,7 @@ class StreamingBurstDecoder:
         self._bursts_legacy = 0
         self._bursts_v5 = 0
         self._psdu_fcs_failures = 0
+        self._payload_abandoned = 0
         rx = config.v5
         self._legacy_sync = config.sync if rx.legacy_acquisition else None
         self._v5_sync = rx.acquisition if rx.v5_acquisition else None
@@ -252,6 +265,7 @@ class StreamingBurstDecoder:
             bursts_legacy=self._bursts_legacy,
             bursts_v5=self._bursts_v5,
             psdu_fcs_failures=self._psdu_fcs_failures,
+            payload_abandoned=self._payload_abandoned,
         )
 
     def drain_link_snr_db(self) -> tuple[float, ...]:
@@ -494,6 +508,9 @@ class StreamingBurstDecoder:
         ``PayloadFailure.from_burst(burst)`` as ``failure``.
         """
 
+        if failure is not None and failure.abandoned:
+            self._payload_abandoned += 1
+            return
         self._payload_decode_attempts += 1
         is_v5 = (
             failure.v5

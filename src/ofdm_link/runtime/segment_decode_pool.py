@@ -39,6 +39,9 @@ from ofdm_link.phy.burst import BurstDecodeError
 from ofdm_link.phy.burst_v5 import AnyDecodedBurst
 from ofdm_link.phy.streaming import BurstSegment, PayloadFailure, decode_burst_segment
 
+from .overload import OFF as OVERLOAD_OFF
+from .overload import OverloadProtection
+
 # Never fork this process. By the time a pool is built the parent has loaded
 # NumPy and its BLAS, and may have loaded GNU Radio or CUDA, so it is
 # multi-threaded; forking it copies threads' locks in whatever state they were
@@ -95,12 +98,19 @@ class SegmentDecodePoolSnapshot:
     submitted: int
     completed: int
     backpressure_waits: int
+    # Segments dropped because the pool was full (opt-in overload
+    # protection); never decoded and never counted as payload attempts.
+    dropped_full: int = 0
 
 
 _WORKER: dict[str, Any] = {}
 
 
-def _initialize_worker(config: LinkConfig, annotate: Annotate | None) -> None:
+def _initialize_worker(
+    config: LinkConfig, annotate: Annotate | None, give_up_after: int = 0
+) -> None:
+    from ofdm_link.phy.turbo import set_hopeless_block_give_up
+
     from .allocator import keep_freed_memory
     from .cpu_budget import apply_cpu_budget
     from .factory import build_burst_config, select_frame_decoder
@@ -108,6 +118,7 @@ def _initialize_worker(config: LinkConfig, annotate: Annotate | None) -> None:
     # One numeric thread per worker; the parallelism is the worker count.
     apply_cpu_budget(1)
     keep_freed_memory()
+    set_hopeless_block_give_up(give_up_after)
     selection = select_frame_decoder(config)
     _WORKER["burst_config"] = build_burst_config(config)
     _WORKER["frame_decoder"] = selection.frame_decoder
@@ -171,6 +182,7 @@ class SegmentDecodePool:
         max_in_flight: int | None = None,
         max_batch: int = DEFAULT_MAX_BATCH,
         annotate: Annotate | None = None,
+        overload: OverloadProtection = OVERLOAD_OFF,
     ) -> None:
         if not isinstance(config, LinkConfig):
             raise TypeError("config must be a LinkConfig")
@@ -183,6 +195,10 @@ class SegmentDecodePool:
             raise ValueError("max_batch must be a positive integer")
         if annotate is not None and not callable(annotate):
             raise TypeError("annotate must be a module-level callable or None")
+        if not isinstance(overload, OverloadProtection):
+            raise TypeError("overload must be an OverloadProtection")
+        self._overload = overload
+        self._dropped_full = 0
         self._workers = workers
         self._max_in_flight = limit
         self._max_batch = max_batch
@@ -197,7 +213,7 @@ class SegmentDecodePool:
             max_workers=workers,
             mp_context=_safe_context(),
             initializer=_initialize_worker,
-            initargs=(config, annotate),
+            initargs=(config, annotate, overload.give_up_after),
         )
         self._start_workers()
 
@@ -246,6 +262,13 @@ class SegmentDecodePool:
         ready: list[SegmentDecodeResult] = []
         cursor = 0
         while cursor < len(batch):
+            if self._overload.drop_when_full:
+                # Opt-in: take what is already done, then drop what still
+                # does not fit instead of making the owner wait.
+                ready.extend(self.collect())
+                if self._in_flight >= self._max_in_flight:
+                    self._dropped_full += len(batch) - cursor
+                    break
             while self._in_flight >= self._max_in_flight:
                 self._backpressure_waits += 1
                 ready.extend(self._take_oldest(timeout=None))
@@ -319,6 +342,7 @@ class SegmentDecodePool:
             submitted=self._submitted,
             completed=self._completed,
             backpressure_waits=self._backpressure_waits,
+            dropped_full=self._dropped_full,
         )
 
     def close(self) -> None:

@@ -253,6 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     options.add_common_arguments(parser)
+    options.add_overload_argument(parser)
     _set_help(parser, _NODE_HELP)
     node = parser.add_argument_group("node")
     node.add_argument("--node-id", type=int, choices=NODE_IDS, required=True,
