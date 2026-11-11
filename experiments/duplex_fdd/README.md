@@ -886,6 +886,14 @@ GIL（acquisition、header probe、GNU Radio 的 Python block，duplex 時再加
 MCS 17 a0.8、TX 144/s）在 16-chunk（約 8 ms）的 queue 下最後一分鐘有一次 10 個 overflow 的尖峰（每分鐘 3、2、3、0、10，
 遺失 0.023%，CPU 平穩），依使用者的規則算通過；改成接近 UHD 的約 0.1 s queue 時 overflow 是 0。
 
+**`judge_run.py`（2026-11-11 晚，使用者決定）。** `python judge_run.py RUN_DIR ...` 判 `run_duplex.sh` 的 run，寫出
+`RUN_DIR/judge.json`。看每分鐘的趨勢，不再比首尾三分之一：遺失 > 1%、缺 load 結果或 stats（crash 或 hang）就 FAIL。
+計數器（RX overflow、RX backpressure、TX underflow、TX late、TX queue 滿而被拒的 burst、ingress 因 queue 滿丟掉的 datagram）
+最後 3 個完整分鐘嚴格上升、倒數第二分鐘已高於前面各分鐘的中位數，而且最後一分鐘超過該中位數的 2 倍、多 3 個以上，才算
+「持續上升」而 FAIL。延遲 p50 用同樣的測試，門檻是 1.25 倍且多 20 ms。只有一分鐘高的尖峰不判 FAIL，列在 `spikes`。不完整的
+最後一分鐘不算。用 2026-11-11 驗收的 7 個 duplex run 對照：和人工判定只差一個，10 MS/s 900/s、29 MHz 那次（node 2 的
+ingress drop 每分鐘 31、130、67、84、190）判 FAIL，使用者確認維持這個規則。
+
 **等價性（離線，固定 seed，全部是正確性測試）。** Acquisition：測試語料（−6 到 30 dB、背靠背、±20 ppm、DC、tone、
 兩種 family 混合、純雜訊、全零；整個 buffer 與 8192-sample 視窗）起點全部相同，|ΔCFO| ≤ 1.2e-9，confidence 相對差
 ≤ 1e-9。Header probe：74 個 acquisition 加上 toggle 組合，結果與 header 欄位全部相同，SIG LLR 差 ≤ 2.7e-5。Turbo：60
