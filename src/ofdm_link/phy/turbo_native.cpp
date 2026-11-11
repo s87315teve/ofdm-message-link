@@ -534,6 +534,267 @@ BlockDecode decode_block(
     return {std::move(candidate), used_iterations, std::move(reason), crc_ok};
 }
 
+// --- float32 Max-Log-MAP kernel ----------------------------------------------
+//
+// The same decoder as decode_block (same trellis, branch metric, extrinsic
+// clip, CRC early stop and iteration loop), in float32 with every buffer
+// kept per thread across calls.  The 8-state recursions are written as the
+// LTE trellis' butterflies: destination states 2j and 2j+1 have the
+// predecessors j and j+4, so each step is two 4-wide max-plus operations on
+// contiguous halves with constant branch-metric signs, which compilers turn
+// into SIMD on any target (SSE2 on baseline x86-64, NEON on aarch64) with no
+// intrinsics, no ISA flag and no branches.  decode_block (double) stays as
+// the reference kernel.
+
+constexpr float kNegativeInfinityF = -std::numeric_limits<float>::infinity();
+
+// Branch metric signs per butterfly lane j (0..3).  For predecessor state
+// s = j + 4 s2 and feedback bit fb (= destination & 1): input u = fb ^ s1 ^ s2
+// and parity p = fb ^ s0 ^ s2, with s0 = j & 1, s1 = (j >> 1) & 1.
+struct ButterflySigns {
+    // [s2][fb][j] -> +1 for bit 0, -1 for bit 1
+    float input[2][2][4];
+    float parity[2][2][4];
+    ButterflySigns() {
+        for (int s2 = 0; s2 < 2; ++s2) {
+            for (int fb = 0; fb < 2; ++fb) {
+                for (int j = 0; j < 4; ++j) {
+                    const int s0 = j & 1;
+                    const int s1 = (j >> 1) & 1;
+                    const int u = fb ^ s1 ^ s2;
+                    const int p = fb ^ s0 ^ s2;
+                    input[s2][fb][j] = u ? -1.0F : 1.0F;
+                    parity[s2][fb][j] = p ? -1.0F : 1.0F;
+                }
+            }
+        }
+    }
+};
+
+const ButterflySigns& signs() {
+    static const ButterflySigns table;
+    return table;
+}
+
+struct FastWorkspace {
+    std::vector<float> sys_one, par_one, sys_two, par_two;
+    std::vector<float> prior_one, prior_two, extrinsic, posterior;
+    std::vector<float> alpha;  // (steps + 1) x 8
+    std::vector<uint8_t> candidate, previous;
+    std::vector<int> permutation;
+    int permutation_size = 0, permutation_f1 = 0, permutation_f2 = 0;
+
+    void reserve(size_t block_size) {
+        const size_t steps = block_size + 3;
+        for (auto* v : {&sys_one, &par_one, &sys_two, &par_two}) v->resize(steps);
+        for (auto* v : {&prior_one, &prior_two, &extrinsic, &posterior}) v->resize(block_size);
+        alpha.resize((steps + 1) * 8);
+        candidate.resize(block_size);
+        previous.resize(block_size);
+    }
+
+    const std::vector<int>& qpp(int block_size, int f1, int f2) {
+        if (permutation_size != block_size || permutation_f1 != f1 || permutation_f2 != f2) {
+            permutation = qpp_permutation(block_size, f1, f2);
+            permutation_size = block_size;
+            permutation_f1 = f1;
+            permutation_f2 = f2;
+        }
+        return permutation;
+    }
+};
+
+FastWorkspace& workspace() {
+    thread_local FastWorkspace instance;
+    return instance;
+}
+
+inline void normalize8(float* values) {
+    float maximum = values[0];
+    for (int k = 1; k < 8; ++k) maximum = std::max(maximum, values[k]);
+    if (std::isfinite(maximum)) {
+        for (int k = 0; k < 8; ++k) values[k] -= maximum;
+    }
+}
+
+// One constituent decoder: writes posterior and clipped extrinsic LLRs.
+void constituent_fast(
+    const float* systematic,
+    const float* parity,
+    const float* prior,
+    size_t block_size,
+    FastWorkspace& w,
+    float* posterior,
+    float* extrinsic
+) {
+    const ButterflySigns& sg = signs();
+    const size_t steps = block_size + 3;
+    float* alpha = w.alpha.data();
+    for (int k = 0; k < 8; ++k) alpha[k] = kNegativeInfinityF;
+    alpha[0] = 0.0F;
+
+    for (size_t time = 0; time < steps; ++time) {
+        const float a_priori = time < block_size ? prior[time] : 0.0F;
+        const float a = 0.5F * (systematic[time] + a_priori);
+        const float b = 0.5F * parity[time];
+        const float* current = alpha + time * 8;
+        float* next = alpha + (time + 1) * 8;
+        float even[4], odd[4];
+        for (int j = 0; j < 4; ++j) {
+            const float from_low = current[j];
+            const float from_high = current[j + 4];
+            const float e0 = from_low + (sg.input[0][0][j] * a + sg.parity[0][0][j] * b);
+            const float e1 = from_high + (sg.input[1][0][j] * a + sg.parity[1][0][j] * b);
+            const float o0 = from_low + (sg.input[0][1][j] * a + sg.parity[0][1][j] * b);
+            const float o1 = from_high + (sg.input[1][1][j] * a + sg.parity[1][1][j] * b);
+            even[j] = std::max(e0, e1);
+            odd[j] = std::max(o0, o1);
+        }
+        for (int j = 0; j < 4; ++j) {
+            next[2 * j] = even[j];
+            next[2 * j + 1] = odd[j];
+        }
+        normalize8(next);
+    }
+
+    float beta[8];
+    for (int k = 0; k < 8; ++k) beta[k] = kNegativeInfinityF;
+    beta[0] = 0.0F;
+    // The three tail steps carry no information bit and no prior.
+    for (size_t time = steps; time-- > block_size;) {
+        const float a = 0.5F * systematic[time];
+        const float b = 0.5F * parity[time];
+        float updated[8];
+        for (int s2 = 0; s2 < 2; ++s2) {
+            for (int j = 0; j < 4; ++j) {
+                const float via_even =
+                    (sg.input[s2][0][j] * a + sg.parity[s2][0][j] * b) + beta[2 * j];
+                const float via_odd =
+                    (sg.input[s2][1][j] * a + sg.parity[s2][1][j] * b) + beta[2 * j + 1];
+                updated[j + 4 * s2] = std::max(via_even, via_odd);
+            }
+        }
+        for (int k = 0; k < 8; ++k) beta[k] = updated[k];
+        normalize8(beta);
+    }
+    // Information steps: the beta update and the bit LLR share every sum.
+    // For predecessor j + 4 s2 the branch into destination 2j + fb carries
+    // input bit fb ^ s1 ^ s2, so the "bit 0" path is the even branch exactly
+    // where s1 == s2 (zero_even below).
+    for (size_t time = block_size; time-- > 0;) {
+        const float a = 0.5F * (systematic[time] + prior[time]);
+        const float b = 0.5F * parity[time];
+        const float* current = alpha + time * 8;
+        float updated[8], zero[8], one[8];
+        for (int s2 = 0; s2 < 2; ++s2) {
+            for (int j = 0; j < 4; ++j) {
+                const float via_even =
+                    (sg.input[s2][0][j] * a + sg.parity[s2][0][j] * b) + beta[2 * j];
+                const float via_odd =
+                    (sg.input[s2][1][j] * a + sg.parity[s2][1][j] * b) + beta[2 * j + 1];
+                updated[j + 4 * s2] = std::max(via_even, via_odd);
+                const bool zero_even = ((j >> 1) & 1) == s2;
+                const float path_even = current[j + 4 * s2] + via_even;
+                const float path_odd = current[j + 4 * s2] + via_odd;
+                zero[j + 4 * s2] = zero_even ? path_even : path_odd;
+                one[j + 4 * s2] = zero_even ? path_odd : path_even;
+            }
+        }
+        float best0 = zero[0], best1 = one[0];
+        for (int k = 1; k < 8; ++k) {
+            best0 = std::max(best0, zero[k]);
+            best1 = std::max(best1, one[k]);
+        }
+        const float value = best0 - best1;
+        posterior[time] = value;
+        extrinsic[time] = std::clamp(value - systematic[time] - prior[time], -64.0F, 64.0F);
+        for (int k = 0; k < 8; ++k) beta[k] = updated[k];
+        normalize8(beta);
+    }
+}
+
+BlockDecode decode_block_fast(
+    const float* llrs,
+    int block_size,
+    int f1,
+    int f2,
+    int filler_bits,
+    int max_iterations,
+    bool segmented,
+    int give_up_after
+) {
+    FastWorkspace& w = workspace();
+    const size_t k = static_cast<size_t>(block_size);
+    w.reserve(k);
+    const std::vector<int>& permutation = w.qpp(block_size, f1, f2);
+    for (size_t index = 0; index < k; ++index) {
+        w.sys_one[index] = llrs[3 * index];
+        w.par_one[index] = llrs[3 * index + 1];
+        w.sys_two[index] = llrs[3 * static_cast<size_t>(permutation[index])];
+        w.par_two[index] = llrs[3 * index + 2];
+    }
+    const size_t tail = 3 * k;
+    for (size_t index = 0; index < 3; ++index) {
+        w.sys_one[k + index] = llrs[tail + 2 * index];
+        w.par_one[k + index] = llrs[tail + 2 * index + 1];
+        w.sys_two[k + index] = llrs[tail + 6 + 2 * index];
+        w.par_two[k + index] = llrs[tail + 7 + 2 * index];
+    }
+    std::fill(w.prior_one.begin(), w.prior_one.end(), 0.0F);
+    for (int index = 0; index < filler_bits; ++index) {
+        w.prior_one[static_cast<size_t>(index)] = kKnownZeroLlr;
+    }
+    std::fill(w.candidate.begin(), w.candidate.end(), 0);
+    bool crc_ok = false;
+    std::string reason = "max_iterations";
+    int used_iterations = max_iterations;
+    for (int iteration = 1; iteration <= max_iterations; ++iteration) {
+        constituent_fast(w.sys_one.data(), w.par_one.data(), w.prior_one.data(), k, w,
+                         w.posterior.data(), w.extrinsic.data());
+        for (size_t index = 0; index < k; ++index) {
+            const int source = permutation[index];
+            w.prior_two[index] = w.extrinsic[static_cast<size_t>(source)]
+                + (source < filler_bits ? kKnownZeroLlr : 0.0F);
+        }
+        constituent_fast(w.sys_two.data(), w.par_two.data(), w.prior_two.data(), k, w,
+                         w.posterior.data(), w.extrinsic.data());
+        w.previous.swap(w.candidate);
+        size_t changed = 0;
+        for (size_t index = 0; index < k; ++index) {
+            const uint8_t bit = static_cast<uint8_t>(w.posterior[index] < 0.0F);
+            const size_t target = static_cast<size_t>(permutation[index]);
+            w.candidate[target] = bit;
+        }
+        for (size_t index = 0; index < k; ++index) {
+            changed += static_cast<size_t>(w.candidate[index] != w.previous[index]);
+        }
+        crc_ok = segmented ? crc24b_ok(w.candidate)
+                           : outer_crc32_ok(w.candidate, static_cast<size_t>(filler_bits));
+        if (crc_ok) {
+            used_iterations = iteration;
+            reason = segmented ? "code_block_crc24b" : "outer_crc32";
+            break;
+        }
+        // Opt-in overload protection: a block whose hard decisions still move
+        // in more than 1/64 of its bits this late is treated as hopeless.
+        if (give_up_after > 0 && iteration >= give_up_after && iteration < max_iterations
+            && changed * 64 > k) {
+            used_iterations = iteration;
+            reason = "abandoned";
+            break;
+        }
+        std::fill(w.prior_one.begin(), w.prior_one.end(), 0.0F);
+        for (size_t index = 0; index < k; ++index) {
+            w.prior_one[static_cast<size_t>(permutation[index])] = w.extrinsic[index];
+        }
+        for (int index = 0; index < filler_bits; ++index) {
+            w.prior_one[static_cast<size_t>(index)] += kKnownZeroLlr;
+        }
+    }
+    return {std::vector<uint8_t>(w.candidate.begin(), w.candidate.end()), used_iterations,
+            std::move(reason), crc_ok};
+}
+
 PyObject* bytes_from_bits(const std::vector<uint8_t>& bits) {
     return PyBytes_FromStringAndSize(
         reinterpret_cast<const char*>(bits.data()),
@@ -638,26 +899,34 @@ PyObject* native_encode(PyObject*, PyObject* args) {
     }
 }
 
-PyObject* native_decode(PyObject*, PyObject* args) {
+PyObject* decode_frame(PyObject* args, bool fast) {
     PyObject* observations_object = nullptr;
     PyObject* block_sizes_object = nullptr;
     PyObject* qpp_object = nullptr;
     Py_ssize_t information_bits = 0;
     int filler_bits = 0;
     int max_iterations = 0;
+    int give_up_after = 0;
     if (!PyArg_ParseTuple(
             args,
-            "OnOiOi",
+            "OnOiOi|i",
             &observations_object,
             &information_bits,
             &block_sizes_object,
             &filler_bits,
             &qpp_object,
-            &max_iterations
+            &max_iterations,
+            &give_up_after
         )) {
         return nullptr;
     }
     try {
+        if (give_up_after < 0) {
+            throw std::runtime_error("give_up_after must be non-negative");
+        }
+        if (give_up_after != 0 && !fast) {
+            throw std::runtime_error("give_up_after needs the float32 kernel");
+        }
         if (information_bits < 0) {
             throw std::runtime_error("information_bit_count must be non-negative");
         }
@@ -691,20 +960,34 @@ PyObject* native_decode(PyObject*, PyObject* args) {
             for (size_t index = 0; index < plan.block_sizes.size(); ++index) {
                 const int block_size = plan.block_sizes[index];
                 const size_t coded_size = static_cast<size_t>(3 * (block_size + 4));
-                const std::vector<float> block_llrs(
-                    observations.begin() + static_cast<ptrdiff_t>(offset),
-                    observations.begin() + static_cast<ptrdiff_t>(offset + coded_size)
-                );
+                BlockDecode decoded;
+                if (fast) {
+                    decoded = decode_block_fast(
+                        observations.data() + offset,
+                        block_size,
+                        plan.qpp[index].first,
+                        plan.qpp[index].second,
+                        index == 0 ? plan.filler_bits : 0,
+                        max_iterations,
+                        plan.segmented(),
+                        give_up_after
+                    );
+                } else {
+                    const std::vector<float> block_llrs(
+                        observations.begin() + static_cast<ptrdiff_t>(offset),
+                        observations.begin() + static_cast<ptrdiff_t>(offset + coded_size)
+                    );
+                    decoded = decode_block(
+                        block_llrs,
+                        block_size,
+                        plan.qpp[index].first,
+                        plan.qpp[index].second,
+                        index == 0 ? plan.filler_bits : 0,
+                        max_iterations,
+                        plan.segmented()
+                    );
+                }
                 offset += coded_size;
-                BlockDecode decoded = decode_block(
-                    block_llrs,
-                    block_size,
-                    plan.qpp[index].first,
-                    plan.qpp[index].second,
-                    index == 0 ? plan.filler_bits : 0,
-                    max_iterations,
-                    plan.segmented()
-                );
                 iterations.push_back(decoded.iterations);
                 reasons.push_back(decoded.reason);
                 crc_outcomes.push_back(decoded.crc_ok);
@@ -772,6 +1055,12 @@ PyObject* native_decode(PyObject*, PyObject* args) {
         }
         return nullptr;
     }
+}
+
+PyObject* native_decode(PyObject*, PyObject* args) { return decode_frame(args, true); }
+
+PyObject* native_decode_reference(PyObject*, PyObject* args) {
+    return decode_frame(args, false);
 }
 
 // --- Terminated K=7 rate-1/N convolutional Viterbi ---------------------------
@@ -896,7 +1185,11 @@ PyObject* native_viterbi(PyObject*, PyObject* args) {
 
 PyMethodDef methods[] = {
     {"encode", native_encode, METH_VARARGS, "Encode one complete information frame."},
-    {"decode", native_decode, METH_VARARGS, "Decode one complete positive-for-zero LLR frame."},
+    {"decode", native_decode, METH_VARARGS,
+     "Decode one complete positive-for-zero LLR frame (float32 kernel; optional "
+     "give_up_after iteration for hopeless blocks, 0 = never)."},
+    {"decode_reference", native_decode_reference, METH_VARARGS,
+     "Decode one frame with the original double-precision reference kernel."},
     {"viterbi", native_viterbi, METH_VARARGS, "Decode one terminated rate-1/N convolutional frame."},
     {nullptr, nullptr, 0, nullptr},
 };

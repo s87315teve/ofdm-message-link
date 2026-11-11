@@ -22,6 +22,7 @@ from functools import lru_cache
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from . import native_backend
 from .fec import FecError, FecProfile, _generators_for
 
 TURBO_MAX_CODE_BLOCK_BITS = 6_144
@@ -246,7 +247,7 @@ class NativeTurboFecAdapter:
             )
         try:
             native = _native_module()
-            decoded, raw_report = native.decode(
+            arguments = (
                 llrs.tobytes(),
                 count,
                 plan.block_sizes,
@@ -254,6 +255,13 @@ class NativeTurboFecAdapter:
                 _qpp_for_plan(plan),
                 self.max_iterations,
             )
+            if native_backend.requested("turbo") == "python":
+                # The original double-precision kernel: the reference.
+                decoded, raw_report = native.decode_reference(*arguments)
+            elif _GIVE_UP["after"]:
+                decoded, raw_report = native.decode(*arguments, _GIVE_UP["after"])
+            else:
+                decoded, raw_report = native.decode(*arguments)
         except (ImportError, ValueError, RuntimeError) as error:
             raise FecError(f"native Turbo decode failed: {error}") from error
         report = TurboDecodeReport(
@@ -290,6 +298,34 @@ class NativeTurboFecAdapter:
             )
         result.setflags(write=False)
         return TurboDecodeResult(result, report)
+
+
+#: Opt-in overload protection (off by default): from this iteration on, a
+#: code block whose hard decisions still change in more than 1/64 of its
+#: bits stops early with reason "abandoned".  0 = never.  Set per process
+#: (the decode workers) through :func:`set_hopeless_block_give_up`.
+_GIVE_UP: dict[str, int] = {"after": 0}
+#: The iteration the overload switch uses: half the default cap of 8.
+DEFAULT_GIVE_UP_AFTER = 4
+ABANDONED_REASON = "abandoned"
+
+
+def set_hopeless_block_give_up(after: int) -> None:
+    """Give up on hopeless blocks from iteration ``after`` (2-7), or never with 0.
+
+    Overload protection only, never for measurement runs: an abandoned block
+    is a block error the iteration cap might have recovered, so the PSDU is
+    counted as abandoned, not as an ordinary FCS failure.  Needs the float32
+    kernel (``OFDM_LINK_NATIVE_TURBO`` not ``python``).
+    """
+
+    if type(after) is not int or not (after == 0 or 2 <= after <= 7):
+        raise ValueError("after must be 0 or an iteration in [2, 7]")
+    _GIVE_UP["after"] = after
+
+
+def hopeless_block_give_up() -> int:
+    return _GIVE_UP["after"]
 
 
 def _native_module():
