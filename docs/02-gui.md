@@ -52,7 +52,8 @@ GUI 的文字全部是英文。這篇說明每個區域在顯示什麼，以及�
 （≥ 1%），或是畫面持續破圖。模擬環境沒有干擾，所以在模擬裡看到黃燈就值得追查。
 
 SNR 門檻來自 Pluto 對 Pluto 的實測，規則是「遺失 < 1% 的最低 SNR + 1 dB，四捨五入到 0.5 dB」。
-門檻定義在 `dashboard.py` 的 `SNR_THRESHOLD_DB`：
+門檻寫在 [`configs/la/thresholds_pluto_v5.yaml`](../configs/la/thresholds_pluto_v5.yaml)，`dashboard.py` 的 `SNR_THRESHOLD_DB`
+與 link adaptation 讀的是同一張表：
 
 | MCS | 格式 | 門檻 | 來源 |
 |---:|---|---:|---|
@@ -92,7 +93,7 @@ TX 不知道 RX 有沒有收到（單向），所以不顯示遺失或 SNR。
 | `TX` | 燈號，旁邊是 `RF ON`（真的 radio）或 `SIMULATED`（udp） |
 
 `Send` tab 的 MCS 說明列出 spectral efficiency、一個完整 frame 的 burst 長度，以及 aggregation 的上限
-（例如 `up to 16 datagrams share a burst of at most 8 ms`）。`Hardware` tab 的 `subframes/burst` 是
+（例如 `up to 32 datagrams share a burst of at most 8 ms`）。`Hardware` tab 的 `subframes/burst` 是
 平均每個 burst 帶幾個 datagram，後面括號是目前的上限與 `max_wait`。負載低時接近 1；送得越快，
 queue 越長，這個數字越大（見[參考資料 7.2](07-reference.md#72-設定檔)的 `mac.aggregation`）。
 

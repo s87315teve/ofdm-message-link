@@ -6,6 +6,8 @@
 
 **TX 只送 wire v5；RX 同時收 v5 與 v1–v4。** 舊版 TX 送出的 burst，新 RX 照樣收（錄音重解的結果
 與舊 RX 完全相同，見 4.3）。新 TX 送出的 burst，舊 RX 收不到。
+（v2.0 起 RX 預設只找 v5（`phy.rx.legacy_acquisition: false`）；要收舊格式，在 profile 之後再加
+`--overlay configs/profiles/legacy_rx.yaml`。）
 
 表裡的數字分三種，每張表都會標明：
 
@@ -212,7 +214,8 @@ datagram 放進同一個 burst：
 - RX 照 delimiter 一個一個拆。Delimiter 壞了就每 4 byte 找下一個合法的 delimiter。**FCS 失敗時，
   CRC-32 正確的 subframe 照樣交付**，一個壞掉的 subframe 只損失它自己。
 - TX 的規則是 opportunistic：radio 可以接下一個 burst 時，把排隊中的 datagram（FIFO）放進去，
-  上限是 16 個 subframe、8192 byte、8 ms airtime。`max_wait_ms` 預設 0，所以負載低時不會多等。
+  上限是 16 個 subframe、8192 byte、8 ms airtime（v2.0 起預設改為 32 個 subframe、16384 byte，
+  airtime 仍是 8 ms）。`max_wait_ms` 預設 0，所以負載低時不會多等。
   Radio 忙的時候 queue 變長，下一個 burst 就自動帶比較多。
 
 **為什麼 airtime 上限是 8 ms。** 長 burst 有三個代價：
@@ -392,6 +395,8 @@ cd $BASE && PYTHONPATH=src python experiments/rx_improvement/offline_decode.py c
    由附近的嘗試判斷它掉在哪一關：preamble 沒抓到、SIG 失敗、payload 失敗。`--set key=value`
    可以改設定（RX 的 ablation 用這個）。
 3. `decode_all_v5.sh` 跑全部的離線解碼；`analyze_v5.py` 產生 `results/v5/summary.md`。
+   （v2.0 起 `configs/default.yaml` 的 `phy.rx.legacy_acquisition` 是 `false`：在現在的 tree 重解 baseline
+   的 legacy 錄音要另加 `--set phy.rx.legacy_acquisition=true`，`decode_all_v5.sh` 沒有加。）
 4. `noise_scan_v5.py record` 錄 TX 關閉時的空中訊號，`analyze` 離線算每個 offset 的 M128 與每個 peak
    的 `c_stf`／`c_pair`。
 5. `tx_power_compare.py`：在兩個 tree 各跑一次，算 peak 縮放後的平均功率與 PAPR。
@@ -619,7 +624,7 @@ RX 修正之後這些點不再需要間隔，但間隔沒有害處，而且 MCS 
 
 預測的上限（**沒有量**）：只算 Pluto 的推送時間（H0 的模型），不算 Python 的 TX worker 與 RX 的 CPU。
 Baseline MCS 4 用同一個模型算出每秒 408 個，實測在約 335 個飽和，所以實際值會比下表低。
-Aggregation 依預設上限（16 個、8192 B、8 ms）把 900-byte datagram 放滿一個 burst：
+Aggregation 依當時的預設上限（16 個、8192 B、8 ms；v2.0 起是 32 個、16384 B）把 900-byte datagram 放滿一個 burst：
 
 | MCS | 一個 burst 一個：samples／datagram 每秒／Mbit/s | 放滿：datagram 數／airtime | 放滿：datagram 每秒／Mbit/s |
 |---:|---|---|---|

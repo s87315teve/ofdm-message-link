@@ -37,7 +37,8 @@ TX 和 RX 是**兩個各自啟動的 process**，彼此只透過 sample transpor
 | **v1.0** | branch [`v1.0`](https://github.com/s87315teve/ofdm-message-link/tree/v1.0)，tag [`v1.0.0`](https://github.com/s87315teve/ofdm-message-link/releases/tag/v1.0.0) | 只支援單向 link（TX → RX）。已凍結，不再更新 |
 
 v2.0 的 RX 預設不收 v1.0 TX 送的舊格式；兩端版本要一致，或在 v2.0 的 RX 加
-`--overlay configs/profiles/legacy_rx.yaml`。切換版本：
+`--overlay configs/profiles/ota_2p45ghz.yaml --overlay configs/profiles/legacy_rx.yaml`
+（給了 `--overlay` 就不再自動套用預設 profile，所以兩個都要寫）。切換版本：
 
 ```bash
 git fetch --tags origin
@@ -48,7 +49,7 @@ pip install -e .       # 切換後重新安裝，C++ 模組才會跟著版本
 
 ## 這個範例是什麼、不是什麼
 
-這是**單向** link：只有 TX → RX，沒有回傳路徑。所以：
+`tx_app` 與 `rx_app` 這兩個視窗是**單向** link：只有 TX → RX，沒有回傳路徑。所以：
 
 - **沒有 ACK、沒有重傳（ARQ）、沒有 TDD**。掉的 packet 就是掉了，不會自己回來。
 - 這讓你可以直接觀察「channel 變差時會發生什麼事」，不會被重傳機制蓋掉。
@@ -231,7 +232,7 @@ Acquisition、header probe、Turbo decoder 與發送端的 encode 有 C++ 版（
 `--overload-protection` 都是選用的，**預設全部關閉**；過載保護在量測時一律不開。
 
 **v2.0 的預設值：** aggregation 最多 32 個 subframe、PSDU 最多 16384 byte；RX 只找 wire v5（legacy acquisition 關）。
-要收 v1.0 的 TX，加 `--overlay configs/profiles/legacy_rx.yaml`。細節見
+要收 v1.0 的 TX，RX 加 `--overlay configs/profiles/ota_2p45ghz.yaml --overlay configs/profiles/legacy_rx.yaml`。細節見
 [7.10 節](docs/07-reference.md#710-效能開關與-native-模組)。
 
 ## License

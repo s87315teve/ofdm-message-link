@@ -16,7 +16,7 @@
 |---|---|---|
 | `python -m ofdm_message_link.rx_app` 說 `No module named ofdm_message_link` | 沒有啟用環境，或沒有安裝 | `conda activate ofdm-message-link`，然後 `pip install -e .` |
 | `configuration file not found: configs/default.yaml` | 不是從 repository root 執行 | `cd` 到 clone 下來的資料夾再執行 |
-| `ImportError` 提到 `_turbo_native` | C++ decoder 沒有編譯 | 在環境裡重新 `pip install -e .`，看編譯有沒有錯誤訊息 |
+| `TurboNativeUnavailableError`（`the native Turbo core is not built`），或 `RuntimeWarning: native … module … is not built; using the Python implementation` | C++ 模組沒有編譯。Turbo decoder 一定要有；acquisition、header、TX 的模組沒有時改走較慢的 Python 版 | 在環境裡重新 `pip install -e .`，看編譯有沒有錯誤訊息 |
 | 訊息時有時無，或完全沒到新開的 RX | 上一個 RX 還在跑。兩個 process 可以同時 bind 同一個 UDP port，不會報錯 | `pgrep -af ofdm_message_link` 找出舊的 process 並關掉 |
 | TX 送了但 RX 沒反應 | RX 比 TX 晚開，或兩邊的 `--udp-port` 不同 | 先開 RX；兩邊用同一個 port |
 | 視窗開不起來，訊息提到 `xcb` 或 display | 沒有圖形桌面（例如純 SSH） | 在有桌面的機器上執行，或用 `ssh -X` |
@@ -41,6 +41,7 @@
 | 10 | Pluto：probe 失敗，訊息說 `is Pluto …, not …` | 兩台 Pluto 都在出廠位址 `192.168.2.1`，而且沒有 USB 存取權 | 裝 udev rule 後重新插拔，見 [ADALM-Pluto](04-ota-hardware.md#43-adalm-pluto) |
 | 11 | Pluto：Device 清單是空的 | USB 沒列舉到（`lsusb` 看不到 `0456:b673`） | 重新插拔、換線或換 port；Pluto 開機約 20 秒 |
 | 12 | Pluto：`rx_overflow_events` 一直增加、大量掉包 | RX gain 太高，或同一台 Pluto 同時收發 | RX 降到 15 dB 左右；收發各用一台 |
+| 13 | Spectrum 在動，但一個 burst 都解不出來；TX 是 v1.0（或 `improve-rx`）的版本 | v2.0 起 RX 預設只找 wire v5，不收舊格式（`phy.rx.legacy_acquisition: false`） | 兩端用同一版；或 RX 加 `--overlay configs/profiles/ota_2p45ghz.yaml --overlay configs/profiles/legacy_rx.yaml` |
 
 ## 6.4 TX gain 為什麼預設是最低值
 

@@ -115,8 +115,9 @@ PSDU = │ delimiter │ frame 1 │ pad │ delimiter │ frame 2 │ pad │ �
          4 B         序號 + CRC-32               序號 + CRC-32                               CRC-32
 ```
 
-- TX 的 radio 可以接下一個 burst 時，把 queue 裡的 datagram 依序放進去，最多 16 個、8192 bytes、
-  8 ms airtime。Queue 只有一個 datagram 時不會等，直接送。
+- TX 的 radio 可以接下一個 burst 時，把 queue 裡的 datagram 依序放進去，最多 32 個、16384 bytes、
+  8 ms airtime（`configs/default.yaml` 的 `mac.aggregation`）。Queue 只有一個 datagram 時不會等，直接送；
+  只有前一個 burst 開始還不到 4 ms（`min_burst_interval_ms`）時才會等到 4 ms，等的期間繼續裝進 datagram。
 - 每個 frame 保留自己的 sequence number 與 CRC-32，所以 RX 仍然以 datagram 計算遺失。
 - 整個 burst 的 FCS 失敗時，CRC-32 正確的 frame **照樣交付**；一個壞掉的 frame 只損失它自己。
 - Delimiter 帶下一個 frame 的長度、CRC-8 與固定的 signature。Delimiter 壞了，RX 每 4 byte 找下一個。
@@ -131,7 +132,7 @@ PSDU = │ delimiter │ frame 1 │ pad │ delimiter │ frame 2 │ pad │ �
   header（SIG）仍由單一 owner 依序處理，交付順序不變。一個 burst 由一個 worker 解，所以 burst 越長，
   交付越一陣一陣的；這是 aggregation 有 airtime 上限的原因之一。
 
-雙向的 `node_app` 一個 Pluto 一個 process，TX 與 RX 在**同一個** engine 子 process，payload decode
+雙向的 `node_app` 一個 Pluto（或一台 B210）一個 process，TX 與 RX 在**同一個** engine 子 process，payload decode
 預設 3 個 process。見下一節。
 
 為什麼用 process 而不是 thread：Python 的 interpreter lock 讓多個 thread 無法同時跑 Python 程式碼，
@@ -149,9 +150,10 @@ decode 分到 thread 上幾乎不會變快；分到 process 才能真的用到�
 - **一個 engine 子 process 跑兩個方向。** TX chain 與 RX chain 和單向 app 是同一份程式碼
   （`TransmitWorker`、`ReceiveWorker`、v5 PHY、decode pool），只是 scrambler seed 分成兩半：node 1 用
   1–63、node 2 用 64–127。一個 Pluto 只能開一個 libiio context（第二個回 EBUSY），所以 TX 與 RX
-  共用一個 `pluto.SharedPlutoContext`。TX 先開、先停。TX 經過 `DutyCappedSink`，duty 不超過 0.7：
-  再高的話，USB 2.0 帶不動同時進來的 5 MS/s RX stream。`--transport udp`（預設）時兩個 UDP sample
-  socket 取代 Pluto，一台 PC 上就有完整的雙向 link。
+  共用一個 `pluto.SharedPlutoContext`。TX 先開、先停。Pluto 的 TX 經過 `DutyCappedSink`，duty 不超過 0.7：
+  再高的話，USB 2.0 帶不動同時進來的 5 MS/s RX stream。`--transport uhd` 時一台 USRP B210 用 RF A 發、
+  RF B 收（`UhdDuplexFactory`）。`--transport udp`（預設）時兩個 UDP sample
+  socket 取代 radio，一台 PC 上就有完整的雙向 link。
 - **`LinkController`**（`la/controller.py`）把 link adaptation 接到 link layer，實作三個 hook：
   **BurstPolicy**（TX worker 每個 data burst 之前問它 MCS 與 CONTROL payload）、**ControlHandler**
   （receiver 把每個收到的 CONTROL frame 交給它）、**ReceiveObserver**（RX worker 每個 chunk 之後把
@@ -200,6 +202,7 @@ decode 分到 thread 上幾乎不會變快；分到 process 才能真的用到�
 | `node_app.py` / `node_options.py` | 雙向 node：命令列、headless 迴圈、control socket、stats line |
 | `node_engine.py` | 雙向 node 的子 process：TX 與 RX 共用一個 radio、TX duty cap、link controller |
 | `node_window.py` | 雙向 node 的視窗：TX、RX、LA 三排 cards 與 MCS 軌跡 |
+| `burst_events.py` | `node_app --events` 的逐 burst 接收事件（[7.11 節](07-reference.md#711-逐-burst-的接收事件--events)） |
 | `control.py` | CONTROL frame 的 payload（LCP）：header 與 FEEDBACK body |
 | `la/` | `LinkController`、可替換的 `LinkAdaptation`（`olla`、`fixed`、`arf`）與 `FeedbackReporter`、loader、threshold 表 |
 | `udp_send.py` / `udp_recv.py` | 最小的 socket 生產者／消費者範例 |
@@ -210,6 +213,7 @@ PHY library，在 `src/ofdm_link/`：
 |---|---|
 | `phy/codec.py` | Frame 的格式與 CRC；symbol mapping（QPSK、16QAM、64QAM） |
 | `phy/fec.py` / `phy/turbo.py` / `phy/turbo_native.cpp` | Convolutional code 與 Turbo code；C++ 寫的 decoder |
+| `phy/acq_native.cpp` / `phy/header_native.cpp` / `phy/tx_native.cpp` / `phy/native_backend.py` | Acquisition、SIG probe 與 TX encode 的 C++ 版；`native_backend.py` 決定用 C++ 或 Python 參考實作（[7.10 節](07-reference.md#710-效能開關與-native-模組)） |
 | `phy/ofdm.py` | Subcarrier 配置、IFFT／FFT、cyclic prefix、pilot |
 | `phy/sync.py` | 舊格式 preamble 的產生與偵測、CFO 估計；兩種 acquisition 共用的掃描（`acquire_all`） |
 | `phy/sync_v5.py` | v5 的 STF／LTF、acquisition、LTF 的 channel 與 SNR 量測 |

@@ -60,7 +60,7 @@ window.GUIDE_CONTENT = (function () {
           does: ["這個 block 把排隊中的 frames 放進同一個 burst。這個格式叫 A-MPDU。",
             "每個 frame 前面有 4-byte delimiter。Delimiter 內有 frame 的 length 與 CRC-8。",
             "Burst 的最後有 4-byte FCS。FCS 是整個 PSDU 的 CRC-32。",
-            "Radio 可以接受下一個 burst 時，這個 block 放入 queue 裡的 frames。上限是 16 個 frames、8192 bytes 與 8 ms airtime。",
+            "Radio 可以接受下一個 burst 時，這個 block 放入 queue 裡的 frames。上限是 32 個 frames、16384 bytes 與 8 ms airtime。",
             "兩個 burst 的開始時間至少相隔 4 ms。等待時，這個 block 把新的 frames 放進同一個 burst。所以 burst 數最多每秒 250 個。",
             "比 4 ms 長的 burst 不等待。閒置之後的第一個 burst 也不等待。滿的 burst 不等待。"],
           input: "一個或多個 PHY frames", output: "一個 PSDU",
@@ -82,7 +82,7 @@ window.GUIDE_CONTENT = (function () {
             "然後 LTE rate matching（TS 36.212）刪除或重複一些 bits。所以 code rate 可以是 1/3、1/2、2/3 或 3/4。",
             "Rate matching 讓 coded bits 剛好填滿整數個 OFDM symbols。Payload 沒有 padding。"],
           input: "PSDU bits", output: "Coded bits",
-          code: ["<code>ofdm_link.phy.psdu_codec</code>：<code>RateMatchedTurboCodec</code>", "<code>ofdm_link.phy.rate_match</code>"],
+          code: ["<code>ofdm_link.phy.psdu_codec</code>：<code>RateMatchedTurboCodec</code>", "<code>ofdm_link.phy.rate_match</code>", "<code>ofdm_link/phy/tx_native.cpp</code>（rate matching、mapping 與 OFDM modulation 的 C++ 版，<code>--native-backend</code>）"],
           opts: ["由 MCS 決定"],
           gui: "TX 的 <code>MCS for next message</code> 選單顯示 code rate。"
         },
@@ -184,7 +184,7 @@ window.GUIDE_CONTENT = (function () {
         },
         input: "TX 的 samples", output: "含 noise 的 samples",
         code: { sim: ["<code>transport.py</code>：<code>UdpSampleSource</code>（加上 AWGN）"], uhd: ["<code>configs/profiles/ota_2p45ghz.yaml</code>"], pluto: ["<code>configs/profiles/ota_2p45ghz.yaml</code>"] },
-        opts: { sim: ["<code>--snr-db</code>（只在 RX 設定）"], uhd: ["<code>--overlay</code>：選擇 center frequency 與 sample rate"], pluto: ["<code>--overlay</code>：選擇 center frequency"] },
+        opts: { sim: ["<code>--snr-db</code>（只在 RX 設定）"], uhd: ["<code>--overlay</code>：選擇 center frequency 與 sample rate", "<code>configs/profiles/b210_2p45ghz_15p36msps.yaml</code>：B210 的 15.36 MS/s"], pluto: ["<code>--overlay</code>：選擇 center frequency"] },
         gui: "RX 的 spectrum 與 <code>SNR (2 s)</code> card。"
       }]
     },
@@ -210,18 +210,18 @@ window.GUIDE_CONTENT = (function () {
     {
       id: "rx-phy", cls: "rx", area: "rx-phy", arrow: "left", row: "RX",
       name: "PHY", line: "Samples 變回 PSDU",
-      sum: "PHY 在 stream 裡找到每個 burst，然後 decode。SIG 告訴 RX 要用哪一種 MCS。RX 也 decode 舊格式（v1–v4）的 burst。",
+      sum: "PHY 在 stream 裡找到每個 burst，然後 decode。SIG 告訴 RX 要用哪一種 MCS。RX 預設只找 v5 的 burst。<code>phy.rx.legacy_acquisition: true</code> 時，RX 也 decode 舊格式（v1–v4）的 burst。",
       blocks: [
         {
           name: "Acquisition",
           does: ["這個 block 計算 samples 與 32 個 samples 之前的 samples 的 correlation。Preamble 重複時，這個 correlation 變大。",
-            "一次計算找兩種 burst：v5 與舊格式（v1–v4）。兩種 preamble 都相隔 32 個 samples 重複。v5 的 window 有 128 個 products，舊格式有 32 個。",
+            "預設只找 v5。<code>legacy_acquisition</code> 開啟時，同一次計算也找舊格式（v1–v4）。兩種 preamble 都相隔 32 個 samples 重複。v5 的 window 有 128 個 products，舊格式有 32 個。",
             "DC offset 或 CW tone 在每個 product 加上一個穩定的成分。這個 block 先減去這個成分，然後比較門檻。",
             "這個 block 用 STF 估計 coarse CFO，並用 STF 的 coherent correlation 擋掉 tone 與 spur。",
             "然後它用 LTF 的兩個 symbols 找準確的起點與 fine CFO。舊格式的 training symbol 只像第一個 LTF symbol。所以這一步擋掉舊格式的 burst。"],
           input: "Sample stream", output: "Burst 起點、CFO",
-          code: ["<code>ofdm_link.phy.sync</code>：<code>acquire_all</code>", "<code>ofdm_link.phy.sync_v5</code>", "<code>ofdm_link.phy.streaming</code>：<code>StreamingBurstDecoder</code>"],
-          opts: ["<code>phy.rx.v5_stf_threshold</code>（0.20）、<code>v5_correlation_threshold</code>（0.25）", "舊格式：<code>sync.detection_threshold</code>、<code>correlation_threshold</code>"],
+          code: ["<code>ofdm_link.phy.sync</code>：<code>acquire_all</code>", "<code>ofdm_link.phy.sync_v5</code>", "<code>ofdm_link.phy.streaming</code>：<code>StreamingBurstDecoder</code>", "<code>ofdm_link/phy/acq_native.cpp</code>（C++ 版，<code>--native-backend</code>）"],
+          opts: ["<code>phy.rx.v5_stf_threshold</code>（0.20）、<code>v5_correlation_threshold</code>（0.25）", "舊格式：<code>phy.rx.legacy_acquisition</code>（預設 <code>false</code>；<code>configs/profiles/legacy_rx.yaml</code> 設成 <code>true</code>）、<code>sync.detection_threshold</code>、<code>correlation_threshold</code>"],
           gui: "RX 的 <code>Decode</code> tab：decode funnel；<code>SNR (2 s)</code> card。"
         },
         {
@@ -234,7 +234,7 @@ window.GUIDE_CONTENT = (function () {
             "SIG 提供 MCS、length 與 scrambler seed。所以你不需要在 RX 設定 MCS。",
             "舊格式的 burst 使用舊的 header decoder。它有 majority vote、soft combining 與 maximum likelihood。"],
           input: "LTF 與 SIG symbols", output: "Channel estimate、noise variance、MCS、length",
-          code: ["<code>ofdm_link.phy.sync_v5</code>：<code>measure_ltf_pair</code>", "<code>ofdm_link.phy.channel</code>：<code>refine_channel_estimate</code>", "<code>ofdm_link.phy.header_v5</code>：<code>decode_v5_header</code>", "舊格式：<code>ofdm_link.phy.burst_header</code>"],
+          code: ["<code>ofdm_link.phy.sync_v5</code>：<code>measure_ltf_pair</code>", "<code>ofdm_link.phy.channel</code>：<code>refine_channel_estimate</code>", "<code>ofdm_link.phy.header_v5</code>：<code>decode_v5_header</code>", "<code>ofdm_link/phy/header_native.cpp</code>（header probe 的 C++ 版）", "舊格式：<code>ofdm_link.phy.burst_header</code>"],
           opts: ["—"],
           gui: "RX message list 的每一行顯示 MCS。"
         },
@@ -340,7 +340,7 @@ window.GUIDE_CONTENT = (function () {
         name: "MCS selector",
         does: ["你在 TX window 選擇一種 v5 格式：QPSK、16QAM 或 64QAM，code rate 1/3 到 3/4。", "新的 MCS 從下一則 message 開始生效。你不需要停止 radio。",
           "同一則 message 的全部 fragments 使用同一種 MCS。", "TX 把 MCS 寫進 SIG。RX 從 SIG 讀出 MCS。",
-          "MCS 0 到 7 是舊格式。TX 不送舊格式。RX 仍然 decode 舊格式。"],
+          "MCS 0 到 7 是舊格式。TX 不送舊格式。RX 預設不收舊格式。<code>phy.rx.legacy_acquisition: true</code> 時，RX 也 decode 舊格式。"],
         input: "你的選擇", output: "TX chain 的 FEC 與 modulation",
         code: ["<code>tx_app.py</code>：<code>MCS for next message</code> 選單", "<code>ofdm_link.phy.mcs_table</code>：<code>v5_entries</code>"],
         opts: ["<code>--mcs-index N</code>（8 到 17，預設 8）"],
@@ -434,7 +434,11 @@ window.GUIDE_CONTENT = (function () {
         { text: "Terminal 1：先啟動 RX。RX 不發射。", cmd: "python -m ofdm_message_link.rx_app --transport uhd" },
         { text: "Terminal 2：啟動 TX，並帶上 RF acknowledgement。", cmd: "python -m ofdm_message_link.tx_app --transport uhd \\\n    " + ACK },
         { text: "在兩個 window 開啟 Hardware tab。選擇 device、antenna 與 gain。然後按 Start radio。" },
-        { text: "TX gain 預設是 0 dB，也就是最小值。請調高 Gain (dB)，直到 RX light 顯示 GOOD。" }
+        { text: "TX gain 預設是 0 dB，也就是最小值。請調高 Gain (dB)，直到 RX light 顯示 GOOD。" },
+        { text: "選用：雙向 FDD link。每台 USRP B210 執行一個 <code>node_app</code>。TX 用 RF A，RX 用 RF B。Node 1 在 2420 MHz 發送，在 2460 MHz 接收。Node 2 相反。",
+          cmd: "python -m ofdm_message_link.node_app --node-id 1 \\\n    --transport uhd --serial NODE1_B210_SERIAL --auto-start \\\n    " + ACK +
+            "\npython -m ofdm_message_link.node_app --node-id 2 \\\n    --transport uhd --serial NODE2_B210_SERIAL --auto-start \\\n    " + ACK },
+        { text: "B210 的 <code>--tx-gain</code> 是 amplifier gain：0 到 89.75 dB，預設 0 dB（最小輸出）。<code>--rx-gain</code> 預設 30 dB。" }
       ]
     },
     pluto: {
@@ -461,7 +465,7 @@ window.GUIDE_CONTENT = (function () {
     { q: "Overflow 次數一直增加", cause: "USB bandwidth 或 CPU 不夠。", fix: "把兩台 radio 接到不同的 USB 3 controller。保持 <code>--engine process</code>。" },
     { q: "Probe 失敗：device 被佔用", cause: "另一個 process 已經開啟這台 radio。", fix: "確認 TX 與 RX 的 <code>--serial</code> 不同。停止舊的 process。" },
     { q: "Pluto：device 清單是空的", cause: "電腦沒有在 USB 上找到 Pluto。", fix: "重新插拔 Pluto。Pluto 開機大約需要 20 秒。" },
-    { q: "node_app：TX duty 高時，overflow 次數增加", cause: "USB 2.0 同時傳送 5 MS/s 的 RX stream 與 TX bursts。TX duty 超過大約 0.7 時，bandwidth 不夠。",
+    { q: "node_app（Pluto）：TX duty 高時，overflow 次數增加", cause: "USB 2.0 同時傳送 5 MS/s 的 RX stream 與 TX bursts。TX duty 超過大約 0.7 時，bandwidth 不夠。",
       fix: "保持 <code>--tx-duty-cap 0.7</code>（預設值）。" },
     { q: "node_app：Feedback age 是紅色", cause: "另一個方向的 SNR 太低。Peer 收不到這個 node 的 feedback。",
       fix: "調高 peer 的 <code>--tx-gain</code>。兩個方向的 path loss 可以不同。" },
@@ -485,7 +489,8 @@ window.GUIDE_CONTENT = (function () {
     ["qt_runtime.py、window_layout.py", "（window）", "Qt 啟動、Ctrl-C、<code>--geometry</code>"],
     ["log_limits.py", "（長時間執行）", "Log 大小上限與 rotation"],
     ["node_app.py、node_options.py", "（雙向 node）", "雙向 node 的 CLI、headless loop、control socket、stats line"],
-    ["node_engine.py", "（雙向 node）", "一個 child process 同時執行 TX 與 RX，兩個方向共用一台 Pluto"],
+    ["node_engine.py", "（雙向 node）", "一個 child process 同時執行 TX 與 RX，兩個方向共用一台 Pluto 或一台 USRP B210"],
+    ["burst_events.py", "（雙向 node）", "<code>--events</code>：逐 burst 的接收事件（只有 headless）"],
     ["node_window.py", "（雙向 node）", "TX、RX 與 link adaptation 的 cards，以及 MCS trend"],
     ["control.py", "（雙向 node）", "LCP：CONTROL frame 的 header 與 FEEDBACK body"],
     ["la/", "（雙向 node）", "LinkController、可以替換的 LinkAdaptation（預設 olla）與 FeedbackReporter、threshold 表"],
@@ -496,9 +501,10 @@ window.GUIDE_CONTENT = (function () {
   ];
 
   /* ---- 5. duplex node_app: the blocks of the second diagram ---- */
-  // A value that differs between the UDP simulation and a Pluto.  node_app
-  // refuses --transport uhd, so the USRP choice shows the Pluto text.
-  function ota(sim, hw) { return { sim: sim, uhd: hw, pluto: hw }; }
+  // A value that differs between the UDP simulation and the radios.  With two
+  // arguments the USRP choice shows the Pluto text; a third is the USRP B210's
+  // own text (node_app --transport uhd).
+  function ota(sim, hw, uhd) { return { sim: sim, uhd: uhd === undefined ? hw : uhd, pluto: hw }; }
 
   var NODE_MODULES = [
     {
@@ -508,12 +514,12 @@ window.GUIDE_CONTENT = (function () {
         {
           name: "Window 或 headless",
           does: ["沒有 <code>--headless</code> 時，main process 開一個 Qt window。Window 有 TX、RX、LA 三排 cards 與 60 秒的 MCS trend。",
-            "<code>--headless</code> 不開 window。它隱含 <code>--auto-start</code>。Pluto 也需要 <code>--serial</code>。",
+            "<code>--headless</code> 不開 window。它隱含 <code>--auto-start</code>。Pluto 與 USRP 也需要 <code>--serial</code>。",
             "Main process 每 0.5 s 寫一行 stats：<code>tx</code>、<code>rx</code>、<code>la</code>、<code>feedback</code>、<code>cpu</code>。",
             "Radio 沒有啟動時，headless 程式的 exit code 是 2。Engine child process 中途結束時，exit code 是 3。"],
           input: "Engine child process 的 events", output: "Cards、trend、stats line",
           code: ["<code>node_app.py</code>：<code>main</code>、<code>HeadlessNode</code>、<code>NodeMonitor</code>", "<code>node_window.py</code>：<code>NodeWindow</code>"],
-          opts: ["<code>--headless</code>、<code>--duration S</code>、<code>--stats-log PATH</code>、<code>--ready-file PATH</code>"],
+          opts: ["<code>--headless</code>、<code>--duration S</code>、<code>--stats-log PATH</code>、<code>--ready-file PATH</code>", "<code>--events PATH</code>（只有 headless）：逐 burst 的接收事件"],
           gui: "Window 的標題是 <code>OFDM node 1</code>（或 2）。"
         },
         {
@@ -533,7 +539,7 @@ window.GUIDE_CONTENT = (function () {
             "Window 模式與 headless 都執行 gain profile。", "Main process 把每一步寫進 stats log。"],
           input: "時間與 gain 的清單", output: "TX gain 的改變",
           code: ["<code>node_options.py</code>：<code>parse_gain_profile</code>、<code>GainSchedule</code>"],
-          opts: ["<code>--gain-profile T:DB,...</code>、<code>--tx-gain</code>（預設 −89.75 dB）、<code>--rx-gain</code>（預設 15 dB）"],
+          opts: ["<code>--gain-profile T:DB,...</code>、<code>--tx-gain</code>（預設 −89.75 dB；B210 0 dB）、<code>--rx-gain</code>（預設 15 dB；B210 30 dB）"],
           gui: "<code>Hardware</code> tab：TX gain。"
         }
       ]
@@ -585,7 +591,7 @@ window.GUIDE_CONTENT = (function () {
     },
     {
       id: "n-tx-sink", cls: "tx", row: "TX",
-      name: "TX sink", sum: ota("UDP sink 把 burst 送到 peer。", "Pluto sink 推送 burst。Duty cap 保護 RX stream。"),
+      name: "TX sink", sum: ota("UDP sink 把 burst 送到 peer。", "Pluto sink 推送 burst。Duty cap 保護 RX stream。", "UHD sink 在一個 front end 發射 timed burst。"),
       blocks: [{
         name: "TX sink",
         does: ota(["這個 block 縮放每個 burst，讓 peak 是 0.7。", "UDP sink 把 samples 送到 peer 的 sample port。Node 1 送到 52224，node 2 送到 52214。",
@@ -593,35 +599,49 @@ window.GUIDE_CONTENT = (function () {
           ["這個 block 縮放每個 burst，讓 peak 是 0.7。然後它把 samples 推到 Pluto。",
             "<code>DutyCappedSink</code> 讓 TX duty 不超過 0.7。一個 burst 最早在前一個 burst 開始之後 airtime ÷ 0.7 開始。",
             "原因：Pluto 的 USB 2.0 同時帶 5 MS/s 的 RX stream。TX duty 超過大約 0.7 時，RX overflow（M0 量測）。",
-            "閒置的時間最多存 50 ms 的 credit。所以閒置之後的幾個 burst 不必等。"]),
-        input: "Burst samples", output: ota("UDP sample datagrams", "Pluto 的 TX buffer"),
+            "閒置的時間最多存 50 ms 的 credit。所以閒置之後的幾個 burst 不必等。"],
+          ["這個 block 縮放每個 burst，讓 peak 是 0.7。然後 <code>UhdSampleSink</code> 在 RX 沒有使用的 front end（預設 RF A）的 TX/RX port 發射。",
+            "TX LO 偏離 carrier 8 MHz。所以 LO leakage 不落在 peer 的 RX 頻帶。",
+            "它在每個 burst 前面加 250 µs 的 zero samples，讓 front end 穩定。",
+            "USRP 沒有 duty cap。"]),
+        input: "Burst samples", output: ota("UDP sample datagrams", "Pluto 的 TX buffer", "RF signal"),
         code: ota(["<code>node_engine.py</code>：<code>UdpDuplexFactory</code>", "<code>transport.py</code>：<code>UdpSampleSink</code>"],
-          ["<code>node_engine.py</code>：<code>DutyCappedSink</code>、<code>PlutoDuplexFactory</code>", "<code>pluto.py</code>：<code>PlutoSampleSink</code>"]),
+          ["<code>node_engine.py</code>：<code>DutyCappedSink</code>、<code>PlutoDuplexFactory</code>", "<code>pluto.py</code>：<code>PlutoSampleSink</code>"],
+          ["<code>node_engine.py</code>：<code>UhdDuplexFactory</code>", "<code>transport.py</code>：<code>UhdSampleSink</code>"]),
         opts: ota(["<code>--udp-peer-port</code>、<code>--peak-amplitude</code>（預設 0.7）"],
-          ["<code>--tx-duty-cap D</code>（預設 0.7；1 = 沒有上限）", "<code>--peak-amplitude</code>（預設 0.7）、<code>--tx-gain</code>（預設 −89.75 dB）"]),
+          ["<code>--tx-duty-cap D</code>（預設 0.7；1 = 沒有上限）", "<code>--peak-amplitude</code>（預設 0.7）、<code>--tx-gain</code>（預設 −89.75 dB）"],
+          ["<code>--tx-lo-offset HZ</code>（預設 8e6）、<code>--tx-analog-bw HZ</code>、<code>--tx-guard-us US</code>（預設 250）", "<code>--peak-amplitude</code>（預設 0.7）、<code>--tx-gain</code>（0 到 89.75 dB，預設 0 dB）"]),
         gui: "<code>Hardware</code> tab：TX gain 與原始統計。"
       }]
     },
     {
       id: "n-radio", cls: "sh", row: "Radio",
-      name: "Shared radio", sum: ota("兩個 UDP sample sockets 取代 radio。", "一個 Pluto context 同時帶 TX 與 RX。"),
+      name: "Shared radio", sum: ota("兩個 UDP sample sockets 取代 radio。", "一個 Pluto context 同時帶 TX 與 RX。", "一台 USRP B210 的兩個 front ends：一個 TX，一個 RX。"),
       blocks: [{
         name: "Shared radio",
         does: ota(["<code>--transport udp</code> 不需要 radio。這是預設的 transport。",
           "每個 node 開兩個 UDP sample sockets：一個送到 peer 的 sample port，一個收自己的 sample port。",
           "Node 1 收在 52214，node 2 收在 52224。所以兩個 node 在同一台 PC 上組成一條雙向 link。",
           "<code>--snr-db</code> 在 RX 加 AWGN。"],
-          ["<code>node_app</code> 只驅動 Pluto。<code>--transport uhd</code> 會被拒絕。",
+          ["<code>--transport pluto</code>：一個 node 驅動一台 Pluto。",
             "一個 Pluto 只能開一個 libiio context。第二個 context 失敗（EBUSY）。所以一個 engine child process 同時執行 TX 與 RX。",
             "<code>SharedPlutoContext</code> 把一個 context 借給 sink 與 source。Attribute 與 register 的呼叫經過一把 lock。Buffer 的 refill 與 push 不經過 lock。",
             "Sample rate 只設一次。TX 與 RX 共用它。",
             "Node 先啟動 TX，再啟動 RX。停止時也先停 TX。所以 context 關閉前，TX attenuator 已經回到最小輸出。",
-            "Node 1 的 TX LO 是 2.420 GHz，RX LO 是 2.460 GHz。Node 2 相反。"]),
+            "Node 1 的 TX LO 是 2.420 GHz，RX LO 是 2.460 GHz。Node 2 相反。"],
+          ["<code>--transport uhd</code>：一個 node 驅動一台 USRP B210。",
+            "RX 使用一個 front end（預設 RF B，<code>--channel 1</code>）。TX 使用另一個 front end 的 TX/RX port。",
+            "TX 與 RX 各開一個 UHD block。兩個都用 <code>--serial</code> 選同一台 B210。",
+            "Node 先啟動 TX，再啟動 RX。停止時也先停 TX。",
+            "Node 1 在 2.420 GHz 發送，在 2.460 GHz 接收。Node 2 相反。",
+            "B210 也可以用 15.36 MS/s：<code>configs/profiles/duplex_fdd_2420_2460_15p36.yaml</code>。"]),
         input: "TX bursts", output: "RX sample stream",
         code: ota(["<code>node_engine.py</code>：<code>UdpDuplexFactory</code>、<code>DuplexEndpoint</code>"],
-          ["<code>pluto.py</code>：<code>SharedPlutoContext</code>", "<code>node_engine.py</code>：<code>PlutoDuplexFactory</code>、<code>NodeWorker</code>"]),
+          ["<code>pluto.py</code>：<code>SharedPlutoContext</code>", "<code>node_engine.py</code>：<code>PlutoDuplexFactory</code>、<code>NodeWorker</code>"],
+          ["<code>node_engine.py</code>：<code>UhdDuplexFactory</code>、<code>NodeWorker</code>"]),
         opts: ota(["<code>--udp-listen-port</code>、<code>--udp-peer-port</code>、<code>--snr-db</code>"],
-          ["<code>--serial</code>、<code>--rx-kernel-buffers N</code>（預設 4）、<code>--rx-analog-bw HZ</code>", "<code>--enable-rf</code> 與 <code>--acknowledgement</code>（必要）"]),
+          ["<code>--serial</code>、<code>--rx-kernel-buffers N</code>（預設 4）、<code>--rx-analog-bw HZ</code>", "<code>--enable-rf</code> 與 <code>--acknowledgement</code>（必要）"],
+          ["<code>--serial</code>、<code>--channel</code>（RX front end，預設 1）、<code>--antenna</code>（RX port，預設 TX/RX）、<code>--rx-analog-bw HZ</code>", "<code>--enable-rf</code> 與 <code>--acknowledgement</code>（必要）"]),
         gui: "<code>Hardware</code> tab：RX 的 Radio panel、TX gain 與 TX 頻率。"
       }]
     },
@@ -698,10 +718,11 @@ window.GUIDE_CONTENT = (function () {
       blocks: [{
         name: "RX source",
         does: ota(["UDP source 在自己的 sample port 收 samples：node 1 用 52214，node 2 用 52224。", "沒有 samples 時，它提供 zeros 或 AWGN。"],
-          ["Pluto source 經過 shared context 提供連續的 sample stream。", "RX gain 預設是 15 dB。"]),
+          ["Pluto source 經過 shared context 提供連續的 sample stream。", "RX gain 預設是 15 dB。"],
+          ["UHD source 在 RX 的 front end 提供連續的 sample stream。", "RX gain 預設是 30 dB（0 到 76 dB）。"]),
         input: "Samples", output: "連續的 sample stream",
-        code: ota(["<code>transport.py</code>：<code>UdpSampleSource</code>"], ["<code>pluto.py</code>：<code>PlutoSampleSource</code>"]),
-        opts: ota(["<code>--udp-listen-port</code>、<code>--snr-db</code>"], ["<code>--rx-gain</code>（預設 15 dB）、<code>--rx-kernel-buffers</code>"]),
+        code: ota(["<code>transport.py</code>：<code>UdpSampleSource</code>"], ["<code>pluto.py</code>：<code>PlutoSampleSource</code>"], ["<code>transport.py</code>：<code>UhdSampleSource</code>"]),
+        opts: ota(["<code>--udp-listen-port</code>、<code>--snr-db</code>"], ["<code>--rx-gain</code>（預設 15 dB）、<code>--rx-kernel-buffers</code>"], ["<code>--rx-gain</code>（預設 30 dB）、<code>--channel</code>、<code>--antenna</code>"]),
         gui: "<code>Live</code> tab：spectrum。"
       }]
     },

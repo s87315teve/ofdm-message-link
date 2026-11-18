@@ -21,7 +21,7 @@ python -m guide.build_data
 
 `index.html#lab`、`#code`、`#run`、`#node` 可以直接開啟對應的分頁。
 
-前四個分頁說明單向的 `tx_app` 與 `rx_app`。`雙向 node` 分頁說明 `node_app`：兩個 node、共用的 Pluto、
+前四個分頁說明單向的 `tx_app` 與 `rx_app`。`雙向 node` 分頁說明 `node_app`：兩個 node、共用的 Pluto（或一台 USRP B210）、
 `LinkController` 的三個 hooks、link adaptation 與 feedback。`app.js` 的 `NODE_BLOCKS` 把這張圖的 blocks
 對應到 `NODE_MODULES`。完整說明在 `docs/07-reference.md` 的 7.8 與 7.9 節。
 

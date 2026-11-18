@@ -9,7 +9,7 @@ UDP egress 出的 **UDP payload throughput**。兩個 app 都用預設參數原�
 
 > **MCS 編號說明**：本報告的數據用的是舊版（legacy）MCS 0–7，是在 TX 只送 wire v5 之前量的。
 > 現在的 `tx_app` 只接受 wire-v5 的 `--mcs-index 8–17`（0–7 會被拒絕，預設 8），所以下方「重現」一節的指令
-> 已改用 v5 編號（`airtime.py` 與 `sweep.py` 預設只列 `v5_entries()` 看得到的 8、9、10、12、13、14）。
+> 已改用 v5 編號（`airtime.py` 列出 `v5_entries()` 看得到的 8、9、10、12–17；`sweep.py` 預設掃 8、9、10、12、13、14）。
 > v5 編號的數據與本報告表格**不能直接對照**；舊版編號的結果要重跑才有新數據。
 
 這份報告同時是一個範例：實驗怎麼設計、指標怎麼定義、哪些結論有數據支持、哪些沒有。
@@ -309,5 +309,7 @@ python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/size-m12-1472 --mcs 12
 ```
 
 `--tx-serial` 與 `--rx-serial` 必填；gain 預設是 `--tx-gain 5 --rx-gain 15`，RX egress 用 UDP 52022。
+`sweep.py` 用 app 的預設值啟動 `tx_app`，現在包括 aggregation（最多 32 個 datagram 一個 burst、burst 間隔至少
+4 ms），所以第 4 節「一個 datagram 一個 burst」的服務速率模型不再是現在 `tx_app` 的上限。
 每個 `--out` 目錄會產生 `results.jsonl`（一個量測點一行）、`rx_stats.jsonl`、`rx.log`、`tx-mcsN.log`
 與每個點的 JSON。原始量測資料不放進 repository。

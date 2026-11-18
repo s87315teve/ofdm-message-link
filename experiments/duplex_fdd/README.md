@@ -1,7 +1,7 @@
 # 雙向 FDD：`node_app`、link adaptation 與實機量測
 
 [Wire v5](../tx_v5/README.md)（`tx-v5`）之前，這個專案只有單向的 link：`tx_app` 發、`rx_app` 收。
-這個資料夾記錄 `duplex-fdd` 分支怎麼把它變成**雙向**：一台 Pluto 一個 `node_app` process，同時在
+這個資料夾記錄 `duplex-fdd` 分支怎麼把它變成**雙向**：一台 Pluto（後來也可以是一台 USRP B210，見 4.6）一個 `node_app` process，同時在
 一個頻率發、在另一個頻率收（FDD），每個 burst 帶回 feedback，讓對方的 link adaptation（LA）
 為每個 burst 選 MCS。也記錄量測用的腳本與數據。
 
@@ -190,6 +190,8 @@ node_app parent（視窗 或 headless）       node engine 子 process（_node_m
   看 M2 的完整結果。
 - **`--transport udp`**：兩個 node 在同一台 PC 上把 samples 送到對方的 UDP sample port，不需要 radio
   就是一條完整的雙向 link。
+- **`--transport uhd`**（後來加的，4.6）：一台 USRP B210 取代 Pluto（`node_engine.UhdDuplexFactory`）：TX 是一個前端的
+  `UhdSampleSink`（TX LO 偏 8 MHz），RX 是另一個前端的 `UhdSampleSource`；沒有 shared context，也沒有 `DutyCappedSink`。
 - **CPU 預算。** 兩個 node 在同一台 PC，所以 `node_app` 的 decode workers 預設 3（`rx_app` 仍是 4）。
 - **Headless**：每 0.5 s 寫一行 stats（`tx`、`rx`、`la`、`feedback`、`cpu`），依 `--gain-profile`
   準時改 TX gain，提供 localhost 的 JSON control socket（`set_gain` 回 readback、`set_mcs`、`set_la`、
@@ -861,7 +863,7 @@ GIL（acquisition、header probe、GNU Radio 的 Python block，duplex 時再加
 
 | 項目 | 改了什麼 | 開關 |
 |---|---|---|
-| B210 量測關 legacy acquisition | `configs/profiles/b210_measurement.yaml`（附加 overlay）；`run_duplex.sh --transport uhd` 自動加，`--legacy-acquisition` 不加 | overlay |
+| B210 量測關 legacy acquisition | `configs/profiles/b210_measurement.yaml`（附加 overlay）；`run_duplex.sh --transport uhd` 自動加，`--legacy-acquisition` 不加（v2.0 起 `default.yaml` 本身就關，不加這個 overlay 也不會打開 legacy 偵測） | overlay |
 | CPU affinity | `--cpu-affinity CPUS\|p-cores`，不寫死核心 | 預設不綁 |
 | Chunk 合併 | `ReceiveWorker` 把短 chunk 併到 ≥ 8192 samples，最多等 2 ms | 無（samples 不變） |
 | Worker 的 NumPy 快速路徑 | `measure_quality` 每軸找最近點（平手照 argmin 的規則），16QAM soft demap 每軸分開 | 無（輸出相同） |

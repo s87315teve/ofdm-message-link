@@ -138,7 +138,7 @@
       <g class="blk tx" data-id="tx-ampdu" tabindex="0" role="button">
         <rect x="426" y="196" width="114" height="88" rx="10"/>
         <text class="t-title" x="483" y="218" text-anchor="middle">A-MPDU</text>
-        <text class="t-sub" x="483" y="237" text-anchor="middle">≤ 16 frames, 8 ms</text>
+        <text class="t-sub" x="483" y="237" text-anchor="middle">≤ 32 frames, 8 ms</text>
         <text class="t-sub" x="483" y="251" text-anchor="middle">PSDU + FCS</text>
         <text class="t-sub" x="483" y="265" text-anchor="middle">min interval 4 ms</text>
       </g>
@@ -241,7 +241,7 @@
       <g class="blk rx" data-id="rx-acq" tabindex="0" role="button">
         <rect x="1194" y="416" width="114" height="88" rx="10"/>
         <text class="t-title" x="1251" y="438" text-anchor="middle">Acquisition</text>
-        <text class="t-sub" x="1251" y="457" text-anchor="middle">lag-32: v5 + v1–v4</text>
+        <text class="t-sub" x="1251" y="457" text-anchor="middle">lag-32: v5（預設）</text>
         <text class="t-sub" x="1251" y="471" text-anchor="middle">DC / CW removed</text>
         <text class="t-sub" x="1251" y="485" text-anchor="middle">LTF timing, CFO</text>
       </g>
@@ -313,8 +313,8 @@
       <text class="t-ctl" x="867" y="392" text-anchor="middle">SIG → MCS、length、scrambler seed；SIG + LTF → noise</text>
 
       <!-- legacy path -->
-      <text class="t-sub" x="1195" y="536" text-anchor="middle">Legacy v1–v4 burst（只有 RX）：</text>
-      <text class="t-sub" x="1195" y="552" text-anchor="middle">同一個 scan，舊的 header 與 payload decoder</text>
+      <text class="t-sub" x="1195" y="536" text-anchor="middle">Legacy v1–v4 burst（只有 RX，預設關閉）：</text>
+      <text class="t-sub" x="1195" y="552" text-anchor="middle">legacy_acquisition: true 時，同一個 scan 與舊的 decoder</text>
 
       <!-- GUI instruments -->
       <g class="blk ins" data-id="gui-spectrum" tabindex="0" role="button">
@@ -363,6 +363,7 @@
       <select id="rate">
         <option value="5000000">5 MS/s（預設）</option>
         <option value="10000000">10 MS/s</option>
+        <option value="15360000">15.36 MS/s（只有 USRP B210）</option>
         <option value="20000000">20 MS/s</option>
       </select>
     </label>
@@ -506,7 +507,7 @@
     <!-- duplex:start -->
     <svg id="node-svg" viewBox="0 0 1640 680" role="img" aria-labelledby="node-title node-desc">
       <title id="node-title">雙向 node_app 的 block diagram</title>
-      <desc id="node-desc">Two node_app processes. Node 1 transmits A to B on 2.420 GHz and receives B to A on 2.460 GHz; node 2 the reverse. In each node one shared Pluto context carries TX and RX. The TX chain is ingress, link TX, PHY TX and TX sink; the RX chain is RX source, PHY RX, link RX and egress. A LinkController holds the link adaptation, the feedback reporter and three hooks: BurstPolicy on the TX worker, ControlHandler for received CONTROL frames, ReceiveObserver on the RX worker. Feedback travels as the first CONTROL frame of each burst.</desc>
+      <desc id="node-desc">Two node_app processes. Node 1 transmits A to B on 2.420 GHz and receives B to A on 2.460 GHz; node 2 the reverse. In each node one shared Pluto context, or the two front ends of one USRP B210, carries TX and RX. The TX chain is ingress, link TX, PHY TX and TX sink; the RX chain is RX source, PHY RX, link RX and egress. A LinkController holds the link adaptation, the feedback reporter and three hooks: BurstPolicy on the TX worker, ControlHandler for received CONTROL frames, ReceiveObserver on the RX worker. Feedback travels as the first CONTROL frame of each burst.</desc>
       <defs>
         <marker id="nah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
         <marker id="nah-ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-ch"/></marker>
@@ -547,8 +548,10 @@
         <text class="t-title" x="464" y="186" text-anchor="middle">TX sink</text>
         <text class="t-sub only-sim" x="464" y="201" text-anchor="middle">UDP sink</text>
         <text class="t-sub only-sim" x="464" y="215" text-anchor="middle">peak 0.7</text>
-        <text class="t-sub only-ota" x="464" y="201" text-anchor="middle">Pluto sink</text>
-        <text class="t-sub only-ota" x="464" y="215" text-anchor="middle">duty cap 0.7</text>
+        <text class="t-sub only-pluto" x="464" y="201" text-anchor="middle">Pluto sink</text>
+        <text class="t-sub only-uhd" x="464" y="201" text-anchor="middle">UHD sink</text>
+        <text class="t-sub only-pluto" x="464" y="215" text-anchor="middle">duty cap 0.7</text>
+        <text class="t-sub only-uhd" x="464" y="215" text-anchor="middle">LO offset 8 MHz</text>
       </g>
       <path class="flow" d="M144,196 L152,196" marker-end="url(#nah)"/>
       <path class="flow" d="M270,196 L278,196" marker-end="url(#nah)"/>
@@ -578,7 +581,8 @@
         <text class="t-title" x="464" y="474" text-anchor="middle">RX source</text>
         <text class="t-sub only-sim" x="464" y="489" text-anchor="middle">UDP source</text>
         <text class="t-sub only-sim" x="464" y="503" text-anchor="middle">:52214</text>
-        <text class="t-sub only-ota" x="464" y="489" text-anchor="middle">Pluto source</text>
+        <text class="t-sub only-pluto" x="464" y="489" text-anchor="middle">Pluto source</text>
+        <text class="t-sub only-uhd" x="464" y="489" text-anchor="middle">UHD source</text>
         <text class="t-sub only-ota" x="464" y="503" text-anchor="middle">free-running</text>
       </g>
       <path class="flow" d="M406,484 L398,484" marker-end="url(#nah)"/>
@@ -592,12 +596,18 @@
         <text class="t-sub only-sim" x="619" y="345" text-anchor="middle">收在 :52214</text>
         <text class="t-sub only-sim" x="619" y="359" text-anchor="middle">沒有 duty cap</text>
         <text class="t-sub only-sim" x="619" y="373" text-anchor="middle">--snr-db：AWGN</text>
-        <text class="t-title only-ota" x="619" y="302" text-anchor="middle">SharedPlutoContext</text>
-        <text class="t-sub only-ota" x="619" y="317" text-anchor="middle">一個 libiio context</text>
-        <text class="t-sub only-ota" x="619" y="331" text-anchor="middle">TX 與 RX 共用</text>
-        <text class="t-sub only-ota" x="619" y="345" text-anchor="middle">TX LO 2.420 GHz</text>
-        <text class="t-sub only-ota" x="619" y="359" text-anchor="middle">RX LO 2.460 GHz</text>
-        <text class="t-sub only-ota" x="619" y="373" text-anchor="middle">TX duty ≤ 0.7（USB 2.0）</text>
+        <text class="t-title only-pluto" x="619" y="302" text-anchor="middle">SharedPlutoContext</text>
+        <text class="t-title only-uhd" x="619" y="302" text-anchor="middle">一台 USRP B210</text>
+        <text class="t-sub only-pluto" x="619" y="317" text-anchor="middle">一個 libiio context</text>
+        <text class="t-sub only-uhd" x="619" y="317" text-anchor="middle">TX：RF A（TX/RX）</text>
+        <text class="t-sub only-pluto" x="619" y="331" text-anchor="middle">TX 與 RX 共用</text>
+        <text class="t-sub only-uhd" x="619" y="331" text-anchor="middle">RX：RF B</text>
+        <text class="t-sub only-pluto" x="619" y="345" text-anchor="middle">TX LO 2.420 GHz</text>
+        <text class="t-sub only-uhd" x="619" y="345" text-anchor="middle">TX 2.420 GHz（LO +8 MHz）</text>
+        <text class="t-sub only-pluto" x="619" y="359" text-anchor="middle">RX LO 2.460 GHz</text>
+        <text class="t-sub only-uhd" x="619" y="359" text-anchor="middle">RX 2.460 GHz</text>
+        <text class="t-sub only-pluto" x="619" y="373" text-anchor="middle">TX duty ≤ 0.7（USB 2.0）</text>
+        <text class="t-sub only-uhd" x="619" y="373" text-anchor="middle">沒有 duty cap</text>
         <text class="t-sub only-ota" x="619" y="387" text-anchor="middle">TX 先開、先停</text>
       </g>
       <g class="blk ctl" data-id="n-ctrl" tabindex="0" role="button">
@@ -683,8 +693,10 @@
         <text class="t-title" x="1176" y="474" text-anchor="middle">TX sink</text>
         <text class="t-sub only-sim" x="1176" y="489" text-anchor="middle">UDP sink</text>
         <text class="t-sub only-sim" x="1176" y="503" text-anchor="middle">peak 0.7</text>
-        <text class="t-sub only-ota" x="1176" y="489" text-anchor="middle">Pluto sink</text>
-        <text class="t-sub only-ota" x="1176" y="503" text-anchor="middle">duty cap 0.7</text>
+        <text class="t-sub only-pluto" x="1176" y="489" text-anchor="middle">Pluto sink</text>
+        <text class="t-sub only-uhd" x="1176" y="489" text-anchor="middle">UHD sink</text>
+        <text class="t-sub only-pluto" x="1176" y="503" text-anchor="middle">duty cap 0.7</text>
+        <text class="t-sub only-uhd" x="1176" y="503" text-anchor="middle">LO offset 8 MHz</text>
       </g>
       <path class="flow" d="M1496,484 L1488,484" marker-end="url(#nah)"/>
       <path class="flow" d="M1370,484 L1362,484" marker-end="url(#nah)"/>
@@ -714,7 +726,8 @@
         <text class="t-title" x="1176" y="186" text-anchor="middle">RX source</text>
         <text class="t-sub only-sim" x="1176" y="201" text-anchor="middle">UDP source</text>
         <text class="t-sub only-sim" x="1176" y="215" text-anchor="middle">:52224</text>
-        <text class="t-sub only-ota" x="1176" y="201" text-anchor="middle">Pluto source</text>
+        <text class="t-sub only-pluto" x="1176" y="201" text-anchor="middle">Pluto source</text>
+        <text class="t-sub only-uhd" x="1176" y="201" text-anchor="middle">UHD source</text>
         <text class="t-sub only-ota" x="1176" y="215" text-anchor="middle">free-running</text>
       </g>
       <path class="flow" d="M1234,196 L1242,196" marker-end="url(#nah)"/>
@@ -728,12 +741,18 @@
         <text class="t-sub only-sim" x="1021" y="345" text-anchor="middle">收在 :52224</text>
         <text class="t-sub only-sim" x="1021" y="359" text-anchor="middle">沒有 duty cap</text>
         <text class="t-sub only-sim" x="1021" y="373" text-anchor="middle">--snr-db：AWGN</text>
-        <text class="t-title only-ota" x="1021" y="302" text-anchor="middle">SharedPlutoContext</text>
-        <text class="t-sub only-ota" x="1021" y="317" text-anchor="middle">一個 libiio context</text>
-        <text class="t-sub only-ota" x="1021" y="331" text-anchor="middle">TX 與 RX 共用</text>
-        <text class="t-sub only-ota" x="1021" y="345" text-anchor="middle">TX LO 2.460 GHz</text>
-        <text class="t-sub only-ota" x="1021" y="359" text-anchor="middle">RX LO 2.420 GHz</text>
-        <text class="t-sub only-ota" x="1021" y="373" text-anchor="middle">TX duty ≤ 0.7（USB 2.0）</text>
+        <text class="t-title only-pluto" x="1021" y="302" text-anchor="middle">SharedPlutoContext</text>
+        <text class="t-title only-uhd" x="1021" y="302" text-anchor="middle">一台 USRP B210</text>
+        <text class="t-sub only-pluto" x="1021" y="317" text-anchor="middle">一個 libiio context</text>
+        <text class="t-sub only-uhd" x="1021" y="317" text-anchor="middle">TX：RF A（TX/RX）</text>
+        <text class="t-sub only-pluto" x="1021" y="331" text-anchor="middle">TX 與 RX 共用</text>
+        <text class="t-sub only-uhd" x="1021" y="331" text-anchor="middle">RX：RF B</text>
+        <text class="t-sub only-pluto" x="1021" y="345" text-anchor="middle">TX LO 2.460 GHz</text>
+        <text class="t-sub only-uhd" x="1021" y="345" text-anchor="middle">TX 2.460 GHz（LO +8 MHz）</text>
+        <text class="t-sub only-pluto" x="1021" y="359" text-anchor="middle">RX LO 2.420 GHz</text>
+        <text class="t-sub only-uhd" x="1021" y="359" text-anchor="middle">RX 2.420 GHz</text>
+        <text class="t-sub only-pluto" x="1021" y="373" text-anchor="middle">TX duty ≤ 0.7（USB 2.0）</text>
+        <text class="t-sub only-uhd" x="1021" y="373" text-anchor="middle">沒有 duty cap</text>
         <text class="t-sub only-ota" x="1021" y="387" text-anchor="middle">TX 先開、先停</text>
       </g>
       <g class="blk ctl" data-id="n-ctrl" tabindex="0" role="button">
@@ -816,7 +835,7 @@
     </svg>
     <!-- duplex:end -->
     </div>
-    <p class="hint">Simulation 時，兩個 node 經過 UDP 交換 samples。USRP 不能執行 <code>node_app</code>，所以 USRP 與 Pluto 顯示相同的圖。</p>
+    <p class="hint">Simulation 時，兩個 node 經過 UDP 交換 samples。USRP 是一台 B210 一個 node（<code>--transport uhd</code>）：TX 與 RX 各用一個 front end。</p>
   </div>
 
   <div class="card detail" id="node-detail" aria-live="polite"></div>

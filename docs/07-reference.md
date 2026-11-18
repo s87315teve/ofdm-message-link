@@ -37,7 +37,7 @@
 | `--ingress-port` | 接受 application bytes 的 UDP port，預設 52001 |
 | `--peak-amplitude` | 每個 burst 發射前正規化到的 peak，預設 0.7 |
 | `--aggregation {on,off}` | `on`：radio 可以接下一個 burst 時，把 queue 裡的 datagram 放進同一個 burst（在下面的上限內）。`off`：一個 burst 一個 datagram，供 A/B 量測。預設取 `mac.aggregation.enabled`（`on`） |
-| `--aggregation-max-subframes N` | 一個 burst 最多幾個 datagram，1–64，預設取設定檔（16） |
+| `--aggregation-max-subframes N` | 一個 burst 最多幾個 datagram，1–64，預設取設定檔（32） |
 | `--aggregation-max-wait-ms MS` | 還有空間的 burst 最多等 MS 毫秒（從最早的 message 到達算起），讓更多 datagram 一起走。0–1000，預設 0：不等，負載低時不增加延遲 |
 | `--min-burst-interval-ms MS` | 兩個 burst 開始交給 radio 的時間至少隔多久（start 到 start：比間隔長的 burst 後面不會多等），0–50，預設取設定檔（4 ms，最多每秒 250 個 burst）；等的時候繼續收 datagram，讓下一個 burst 帶比較多。閒置之後的第一個 burst 不多等，滿的 burst 不會被留。0 關閉。實際等待是它與 `--aggregation-max-wait-ms` 較大的那個 |
 | `--max-burst-airtime-ms MS` | 聚合後的 burst 最長多久（含 guard），大於 0、最大 100，預設取設定檔（8 ms）。不論設多少，聚合也會在 80 000 samples 停止；超過上限的單一 datagram 仍然單獨送出 |
@@ -485,9 +485,9 @@ process 默默分流。
 | `--ready-file PATH` | 兩個方向都在跑時建立，停止時刪除 |
 | `--ingress-port` / `--egress-host` / `--egress-port` | 覆寫依 node 的預設 |
 | `--udp-listen-port` / `--udp-peer-port` | `--transport udp` 的 sample ports，預設自己與 peer 的 base+4 |
-| `--enable-rf` / `--acknowledgement` | `--transport pluto` 必要，和 `tx_app` 相同 |
+| `--enable-rf` / `--acknowledgement` | `--transport pluto` 與 `uhd` 必要，和 `tx_app` 相同 |
 | Aggregation | `--aggregation`、`--aggregation-max-subframes`、`--aggregation-max-wait-ms`、`--min-burst-interval-ms`、`--max-burst-airtime-ms`，與 `tx_app` 相同（7.1 節） |
-| 其他共用的選項 | `--config`、`--mcs`、`--frame-payload-bytes`、`--ui-fps`、`--log-lines`、`--geometry`、`--channel`、`--antenna`，與 7.1 節相同 |
+| 其他共用的選項 | `--config`、`--mcs`、`--frame-payload-bytes`、`--ui-fps`、`--log-lines`、`--geometry`，與 7.1 節相同 |
 | 效能開關 | `--cpu-affinity`、`--realtime[=PRIO]`、`--force`、`--native-backend`、`--overload-protection`，與 7.1 節相同（7.10 節）；全部預設關閉 |
 
 **TX analog filter 的預設值（`node_engine.default_uhd_tx_bandwidth`）。** LO 偏離載波 `lo` 時，取樣的頻帶離 LO 最遠是

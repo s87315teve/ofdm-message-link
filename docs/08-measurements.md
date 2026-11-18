@@ -355,7 +355,8 @@ coherent 檢查。在邊緣的錄音上，0.25／0.30 讓 MCS 0 在 −20 dB 的
 
 ## 8.8 Wire v5：Pluto → Pluto，2.45 GHz
 
-`tx-v5` 分支**改了 wire format**：TX 只送 wire v5，RX 同時收 v5 與 v1–v4。改了六件事：
+`tx-v5` 分支**改了 wire format**：TX 只送 wire v5，RX 同時收 v5 與 v1–v4（v2.0 起 RX 預設只收 v5，見
+[7.2 節](07-reference.md#72-設定檔)的 `legacy_rx.yaml`）。改了六件事：
 
 1. Preamble 改成 802.11a 的 L-STF + L-LTF。兩種 preamble 共用一次 acquisition 掃描。
 2. Header 改成 SIG：802.11a SIGNAL 的作法（K=7 convolutional code、BPSK、CRC-16），不再用 ML list。
@@ -733,7 +734,8 @@ step 之後 1.06% → 1.11%（沒變）。剩下的約 77 個是 feedback 來回
 
 ### 這次沒有量到的
 
-- B210、N210、USRP-2901 跑 `node_app`（共用 context 只有 Pluto 有）。
+- B210、N210、USRP-2901 跑 `node_app`（共用 context 只有 Pluto 有）。之後 v2.0 加了 `--transport uhd`，兩台 B210 的
+  `node_app` 量測見 [`experiments/duplex_fdd/README.md`](../experiments/duplex_fdd/README.md) 4.6、4.7。
 - LBT（單頻）與把 RX、TX 分成兩個子 process 的 layout：只有設計。ARQ 只有提案。
 - 自干擾每個 phase 只有 200 個 burst，只能說小於約 0.5 dB 的影響量不出來；自己的 duty 只到 0.7。
 - `…1e6e77` 在 duty 0.78 overflow 而 `…1ef9c6` 不會，原因沒有分開查。

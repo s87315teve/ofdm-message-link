@@ -6,6 +6,10 @@ RTL-SDR）時，**PHY 與 GUI 都不用動**，只要補一個 sample transport�
 ADALM-Pluto 就是這樣加進來的：一個新檔案 [`pluto.py`](../src/ofdm_message_link/pluto.py)，加上
 `devices.py` 與 `options.py` 裡的幾行。這篇用它當範例。
 
+這篇講的是單向的 `tx_app`／`rx_app`。雙向的 `node_app` 一個 process 同時開 TX 與 RX，另外要在
+`node_engine.py` 照 `PlutoDuplexFactory`／`UhdDuplexFactory` 加一個 factory，並在 `node_app.py` 依
+`--transport` 建立它。
+
 ## 5.1 介面在哪裡
 
 PHY 產生的是一段 `complex64` 的 NumPy array（一個 burst），需要的也只是一串 `complex64` 的 samples。
