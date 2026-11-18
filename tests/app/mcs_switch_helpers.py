@@ -5,6 +5,8 @@ ordered pair of distinct indices exactly once, so one pass covers every
 adjacent switch (n -> n+-1) and every cross-level jump (8 <-> 17, 9 <-> 15,
 ...).  ``free_udp_ports`` hands out ephemeral loopback ports outside the
 52000-52999 range the B210 measurement scripts use.
+``assert_sent_joins_received`` checks a node's ``--events`` ``sent`` lines
+against its peer's ``burst`` lines.
 """
 
 from __future__ import annotations
@@ -70,3 +72,47 @@ def free_udp_ports(count: int) -> list[int]:
         for probe in held:
             probe.close()
     return ports
+
+
+def assert_sent_joins_received(sent_rows, rx_rows, datagrams, *, waits: bool):
+    """Node 1's ``sent`` lines against node 2's ``burst`` lines of the same run.
+
+    One ``sent`` line per accepted burst (``n`` = 1, 2, ...), each accepted at
+    the first attempt; the data bursts' ``first_sequence`` / ``subframes``
+    tile 0 .. ``datagrams`` - 1 in order; node 2 decoded every one of them
+    exactly once, whole, at the MCS the ``sent`` line names.  ``waits``: the
+    aggregation limits make the fill step wait (node_app's 4 ms minimum burst
+    interval), so ``planned_mcs`` is set; else it is None.  Returns the data
+    lines.
+    """
+
+    assert [row["n"] for row in sent_rows] == list(range(1, len(sent_rows) + 1))
+    assert all(row["attempt"] == 1 for row in sent_rows)
+    monos = [row["mono"] for row in sent_rows]
+    assert monos == sorted(monos)
+    data = [row for row in sent_rows if not row["control_only"]]
+    assert all(row["first_sequence"] is None and row["subframes"] == 0
+               for row in sent_rows if row["control_only"])
+    expected = 0
+    for row in data:
+        assert row["first_sequence"] == expected % 65536 and row["subframes"] >= 1
+        expected += row["subframes"]
+    assert expected == datagrams
+    received = [row for row in rx_rows if row["kind"] == "data"]
+    by_seq = {row["seq"]: row for row in received}
+    assert len(by_seq) == len(received) == len(data)  # each burst decoded once
+    for row in data:
+        rx = by_seq[row["first_sequence"]]
+        # sf_ok counts the CONTROL subframes in front of the data too.
+        whole = row["subframes"] + row["control_subframes"]
+        assert (rx["mcs"], rx["sf_ok"], rx["sf_bad"]) == (row["mcs"], whole, 0)
+        assert rx["pl"] == "ok" and rx["fcs"] is True
+    # planned_mcs: the MCS the aggregation wait sized the burst with; with a
+    # minimum burst interval every data burst after the first accepted one
+    # waited (the first had no previous burst to wait after).
+    assert all("planned_mcs" in row for row in sent_rows)
+    if waits:
+        assert all(isinstance(row["planned_mcs"], int) for row in data if row["n"] > 1)
+    else:
+        assert all(row["planned_mcs"] is None for row in sent_rows)
+    return data

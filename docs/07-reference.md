@@ -325,6 +325,9 @@ burst 在有 noise、multipath、CFO、DC、sample clock offset 的模擬 channe
 - Link light 的每一條規則與邊界值。
 - 多 worker 的 payload decode 與單 worker 的結果逐 byte 相同。
 - 兩個視窗的建構，以及**用 README 的指令實際啟動 app 的 subprocess 測試**。
+- 執行中換 MCS 不遺失、不亂序、不用錯 MCS（`test_mcs_switch_guard.py`、`test_mcs_switch_node_udp.py`）；兩個
+  `node_app --events` 經 udp 交換時，發送端每個 burst 一行 `sent`，sequence 連續，和 peer 解出的 `burst` 一個對一個、
+  MCS 相同（`test_sent_events.py`）。
 
 修改 PHY 之後，除了跑測試，也請重新產生互動導覽的資料：`python -m guide.build_data`。
 
@@ -521,8 +524,8 @@ process 默默分流。
 | `--control-mcs-index N` | Control-only burst 的 MCS，預設 profile 的值（8） |
 | `--decode-workers N` | 1–64；沒給時取 `acceleration.decode_workers`，`null`（預設）時是 3（兩個 node 在同一台 PC 時的 CPU 預算） |
 | `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`tx.health` 是 TX health（見 7.1 節的 `tx_health`）。`wall_time` 是 Unix 時間（秒），`monotonic_s` 是 monotonic 時間。`tx.goodput_bps`、`tx.airtime_frac` 是 2 秒視窗，`tx.goodput_avg_bps`、`tx.airtime_avg_frac` 是第一行以來的平均。`tx.bandwidth_hz`、`rx.bandwidth_hz` 是 UHD 讀回的類比濾波器頻寬（沒有讀回值時是 `null`）。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
-| `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON |
-| `--events PATH` | 只有 `--headless`：逐 burst 的接收事件，一行一個 JSON（preamble SNR、雜訊變異數、clipping、header／payload／FCS 結果、裝置時間與主機時間），加上 gain、頻率、失鎖、overflow 與每 0.5 s 的計數器。**預設關閉**，關閉時接收端的程式路徑不變。格式見 [7.11 節](#711-逐-burst-的接收事件--events) |
+| `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON。v2.1.2 之後，MCS 改變的 `la` 行多一個 `first_sequence`：決定當下下一個要編碼的 DATA sequence，也就是新 MCS 的第一個 DATA subframe（決定的那個 burst 是 control-only 時，是下一個 data burst 的第一個） |
+| `--events PATH` | 只有 `--headless`：逐 burst 的接收事件，一行一個 JSON（preamble SNR、雜訊變異數、clipping、header／payload／FCS 結果、裝置時間與主機時間），加上 gain、頻率、失鎖、overflow 與每 0.5 s 的計數器；v2.1.2 之後也寫發送端每個送出的 burst（`sent`）與丟掉的 burst（`tx_dropped`）。**預設關閉**，關閉時接收端與發送端的程式路徑不變。格式見 [7.11 節](#711-逐-burst-的接收事件--events) |
 | `--events-lock-timeout S` | 配合 `--events`：串流時間連續 S 秒沒有收到 peer 的 header 就算失鎖，預設 1.0 |
 | `--ready-file PATH` | 兩個方向都在跑時建立，停止時刪除 |
 | `--ingress-port` / `--egress-host` / `--egress-port` | 覆寫依 node 的預設 |
@@ -715,8 +718,8 @@ pump 拆開每一批，照原來的順序一個一個交出去，所以跨 threa
 剩下的處理時間）；發送 thread 的晚到這個 burst 送出；沒有自己 flush 的 thread（從其他 thread 呼叫的 controller 等）最多晚約
 50 ms 加一次 stats tick；主 thread 被一個很久的 attach 卡住時，其他 thread 的事件仍各自送出。母 process 用「收到的時間」記錄的
 值會跟著晚這麼多：`node_app` 的 RX SNR 曲線（`link_snr`）、LA 歷史（`stats` 收到的時間），以及 `--events` 檔裡由母 process
-記時間的列（`failed`、`gap`、`lock`、`rx_time`、`overflow` 的 `mono`／`wall`）。`burst` 列的 `mono`／`wall`、`gain` 與 `mark`
-的 `mono` 是子 process 記的，不受影響。
+記時間的列（`failed`、`gap`、`lock`、`rx_time`、`overflow` 的 `mono`／`wall`）。`burst`、`sent`、`tx_dropped` 列的
+`mono`／`wall`、`gain` 與 `mark` 的 `mono` 是子 process 記的，不受影響。
 
 PC 上的 micro-benchmark（`experiments/engine_events/bench_event_batching.py`，子 process 每次 iteration 送幾個接收端的事件，量子 process 的 CPU
 時間，含 feeder thread，減去只建事件不送的 baseline；每秒 280 個事件、10 s、各 3 次的中位數，2026-11-19）：
@@ -758,9 +761,12 @@ pump 跟不上，3 次裡有 2 次 queue 滿而丟掉 397 與 1742／8004 個事
 
 給量測用的正式輸出（v2.1.0 起）。`node_app --headless --events node2_events.jsonl` 把接收端看到的每一個
 preamble 寫成一行 `burst`，同時配上這個 burst 的解碼結果，另外寫 gain、頻率、失鎖、overflow 與計數器。
-**預設關閉**；關閉時 decoder 與 receiver 每個 burst 只多一次屬性檢查（`burst_observer is None`），沒有其他程式
-路徑改變。程式在 `src/ofdm_message_link/burst_events.py`：子 process 的 `BurstEventRecorder`（接在 decoder 與
-`MessageReceiver` 上）與 `BurstEventTap`（接收 observer），母 process 的 `EventLogWriter`（寫檔）。
+發送端（v2.1.2 之後）每個被 transport 接受的 burst 寫一行 `sent`，每個 encode 或 send 失敗而丟掉的 burst 寫一行
+`tx_dropped`，所以 TX 與 RX 兩個檔可以一個 burst 對一個 burst 接起來（見下面〈發送端〉）。
+**預設關閉**；關閉時 decoder 與 receiver 每個 burst 只多一次屬性檢查（`burst_observer is None`），transmit worker
+每個 burst 只多幾次 `events is None` 檢查與整數計數，沒有其他程式路徑改變。程式在 `src/ofdm_message_link/burst_events.py`：子
+process 的 `BurstEventRecorder`（接在 decoder 與 `MessageReceiver` 上）與 `BurstEventTap`（接收 observer），母 process
+的 `EventLogWriter`（寫檔）；發送端的紀錄在 `tx_app.TransmitWorker`（`events=`）與它送出的 `SentRecord`。
 同一份資料也可以不寫檔、直接拿：`NodeSpec(burst_events=True)` 的 `ProcessNodeWorker` 會把 `bursts` 事件交給
 listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程式裡呼叫
 `MessageReceiver.enable_burst_events(recorder)`。讀檔用 `burst_events.read_events(path)`（最後一行寫到一半時跳過）。
@@ -778,6 +784,8 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 | `gain` | 每次 gain 變更（control socket、`--gain-profile`） | `dir`、`db`（要求值）、`readback`（裝置讀回）；`mono` 是子 process 套用的時間 |
 | `radio` / `readback` / `freq` | 第一行 stats 時記下 TX／RX 頻率、gain、類比濾波器；`readback` 是 UHD 讀回的設定；之後頻率改變時寫 `freq` | |
 | `status` | 每 0.5 s（跟 stats log 同一行的時間） | `tx`（`bursts`、`control_bursts`、`subframes`、`payload_bytes`、`active_mcs`）、`rx.decoder`、`rx.receiver`、`rx_samples_lost`、`rx_time_discontinuities`、`uhd_faults`、`dropped_events`、`lost_batches` |
+| `sent` | 發送端每個被 transport 接受的 burst（data 與 control-only 都寫；v2.1.2 之後） | 見下面〈發送端〉 |
+| `tx_dropped` | 發送端丟掉的 burst：encode 失敗，或 send 失敗而不再重送（v2.1.2 之後） | 見下面〈發送端〉 |
 | `mark` / `failed` | control socket 的 `mark`、引擎回報的錯誤 | `text` |
 | `gap` | 子 process 到母 process 的事件 queue 滿了，掉了幾批 burst | `lost_batches`、`next_seq` |
 | `stop` | 關檔時 | 各種行的數量、`lost_batches`、`write_errors` |
@@ -813,6 +821,33 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
   `acquired` 只取 `off` 在缺口之後的那個。
 - v2.1.0 只用 `off` 計時：overflow 遺失的 samples 不算進 `off`，所以接收端自己停住超過 timeout 也不會寫 `lock lost`
   （桌上量測 `v210_stalltree_r2` 發現）。分析 v2.1.0 的檔案時，要用 `overflow` 行的 `lost` 自己補判。
+
+**發送端（v2.1.2 之後）。** `sent` 的 `mono`／`wall` 是 transmit worker（子 process 的發送 thread）在 transport 的
+`send` 傳回「接受」之後立刻記的時間，不是母 process 收到的時間。接受的意思依 transport 不同：udp 是 burst 的所有 UDP
+datagram 都交給了 socket；UHD 是 burst 連同它的裝置開始時間排進 sink 的 queue（真正上空中還要再等 queue 前面的
+burst 與 lead time）；Pluto 是 push 傳回（大約一個 burst 的 airtime）。
+
+| 欄位 | 意思 |
+|---|---|
+| `n` | 這個 node 第幾個被接受的 burst（從 1 起算，data 與 control-only 一起數）。跳號表示中間的 `sent` 行在事件 queue 滿時被丟掉了 |
+| `first_sequence` | 第一個 DATA subframe 的 16-bit sequence；control-only burst 是 `null` |
+| `subframes` | DATA subframe 數。下一個 data burst 的 `first_sequence` 是 `first_sequence + subframes`（mod 65536），除非中間有 `tx_dropped` |
+| `control_subframes`、`control_sequence` | 放在 data 前面的 CONTROL subframe 數與第一個的 sequence（CONTROL 有自己的計數器；沒有 CONTROL 時 `control_sequence` 是 `null`） |
+| `mcs` | 編碼用的 MCS index |
+| `planned_mcs` | aggregation 等待（`max_wait_ms` 或 `min_burst_interval_ms`）估算這個 burst 能裝多少時用的 MCS：policy 的 `peek_next_entry`，沒有 policy 或它還沒有答案時是 TX 目前的 MCS。真正裝幾個仍由 encode 用的 `mcs` 決定；兩者不同只表示 MCS 在等待與 encode 之間換了（等待可能多等或少等），burst 不會因此超過上限，也不會掉 datagram。沒有等待可估時是 `null`：control-only burst、aggregation 關閉、兩個等待都是 0，以及啟動後的第一個 burst（還沒有上一個 burst 可以算間隔） |
+| `sample_count` | burst 的 samples，含前後 guard |
+| `control_only`、`standalone` | 只有 CONTROL frame；`standalone` 是 policy 為了 feedback 在排隊的 data 之前先送的 control-only burst（閒置時的 control burst 是 `false`） |
+| `attempt` | 第幾次交給 transport 時被接受：1 是第一次；大於 1 表示前面的 send 失敗而保留重送（`retry_failed_send` 的 transport），或 radio 在接受它之前被 detach，換了 radio 後再送。重送的是同一份 samples、同樣的 sequence 與 MCS，所以一個 burst 仍只有一行 `sent` |
+
+`tx_dropped` 的欄位：`reason`（`encode_failed` 或 `send_failed`）、`first_sequence`、`subframes`、`control_subframes`、
+`control_sequence`、`mcs`、`attempt`（`send_failed` 是最後一次失敗的 attempt；`encode_failed` 是 0）。`mono`／`wall` 是丟掉
+的時間。`send_failed` 時這些 sequence 已經用掉，接收端會看到這段缺口；`encode_failed` 時 encode 已經分配 sequence 才失敗的話
+`first_sequence` 是用掉的第一個，在分配之前就失敗時是 `null`（沒有用掉 sequence，接收端看不到缺口），`subframes` 都是丟掉的
+datagram 數。
+
+**TX 與 RX 對起來**：peer 檔裡 `kind = "data"` 的 `burst` 行，`seq` 等於這邊 `sent` 的 `first_sequence`，`mcs` 等於 `mcs`，
+沒有損壞時 `sf_ok` 等於 `subframes + control_subframes`（`sf_ok`、`sf_bad` 也算 CONTROL subframe）。兩邊的 `mono` 是不同主機的
+時鐘，不能直接相減；同一台主機時（udp）`burst` 的 `mono` 也可能比 `sent` 早一點，因為 send 傳回之前接收端就可能已經收到。
 
 **順序與完整性**：同一批（一次 receive feed）裡的 `burst` 依 `off` 排序；decode pool 的 payload 比較晚回來，所以
 跨批次時要再依 `off` 排一次。每批有編號，queue 滿而掉的批次寫成 `gap`，不會默默消失。停止時（detach）會把還沒有

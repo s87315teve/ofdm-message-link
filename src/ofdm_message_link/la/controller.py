@@ -187,6 +187,7 @@ class LinkController:
         codec: ControlCodec | None = None,
         on_event: Callable[[str, Mapping[str, Any]], None] | None = None,
         own_seed_range: tuple[int, int] | None = None,
+        next_sequence: Callable[[], int] | None = None,
     ) -> None:
         if mode not in {"auto", "fixed"}:
             raise ValueError("mode must be 'auto' or 'fixed'")
@@ -208,6 +209,8 @@ class LinkController:
         self._sample_rate = sample_rate
         self._codec = codec if codec is not None else _ControlModuleCodec()
         self._on_event = on_event
+        # Logging only: the transmitter's next DATA sequence for "la" records.
+        self._next_sequence = next_sequence
         self._lock = threading.RLock()
         self._log_lock = threading.Lock()
 
@@ -313,13 +316,21 @@ class LinkController:
         previous = None if self._entry is None else self._entry.index
         self._entry = entry
         self._counts["decisions"] += 1
-        events.append(
-            ("la", {
-                "t": now, "mode": self._mode, "mcs_index": entry.index, "previous": previous,
-                "reason": decision.reason, "snr_eff_db": decision.snr_eff_db,
-                "offset_db": decision.offset_db,
-            })
-        )
+        record = {
+            "t": now, "mode": self._mode, "mcs_index": entry.index, "previous": previous,
+            "reason": decision.reason, "snr_eff_db": decision.snr_eff_db,
+            "offset_db": decision.offset_db,
+        }
+        if self._next_sequence is not None:
+            # The next DATA sequence to be encoded.  Decided on the transmit
+            # thread just before the burst is encoded, so it is the first
+            # DATA sequence of the new MCS (the next data burst's, if this
+            # one goes out control-only).
+            try:
+                record["first_sequence"] = int(self._next_sequence())
+            except Exception:
+                record["first_sequence"] = None
+        events.append(("la", record))
 
     # -- BurstPolicy ----------------------------------------------------------
 

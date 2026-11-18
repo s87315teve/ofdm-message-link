@@ -19,6 +19,12 @@ of the burst:
   decoded payload, what it carried (``kind``, ``mcs``, ``seq``, ``sf_ok``,
   ``sf_bad``, ``lost``, ``fcs``).
 
+The transmit side adds one ``sent`` line per burst the transport accepted
+(sequence range, MCS, the MCS the aggregation wait sized it with, attempt),
+stamped by the transmit worker in the child when the send returned, and one
+``tx_dropped`` line per burst whose encode or send failed, so a measurement
+can join each transmitted burst to the receiver's ``burst`` line exactly.
+
 The field order of a record is :data:`BURST_FIELDS`; the JSON lines written by
 :class:`EventLogWriter` are documented in ``docs/07-reference.md`` section 7.11
 and versioned by :data:`EVENTS_SCHEMA_VERSION`.
@@ -420,7 +426,10 @@ class EventLogWriter:
     """Parent-side JSON-lines writer for ``node_app --events``.
 
     Chain :meth:`on_event` behind the node's event listener and call
-    :meth:`status` with each stats line.  Thread-safe; every write is flushed.
+    :meth:`status` with each stats line.  Besides the receive events it writes
+    one ``sent`` line per burst the node's transmitter had accepted and one
+    ``tx_dropped`` line per burst it dropped; both carry the child's clocks.
+    Thread-safe; every write is flushed.
     A failing write is counted (``write_errors``) and never raised into the
     caller, so a full disk cannot stop the radio.
     """
@@ -483,6 +492,12 @@ class EventLogWriter:
         try:
             if kind == "bursts":
                 self._bursts(value)
+            elif kind == "sent":
+                self._sent(value)
+            elif kind == "tx_dropped":
+                fields = dict(value)
+                mono, wall = fields.pop("mono", None), fields.pop("wall", None)
+                self._write("tx_dropped", fields, mono=mono, wall=wall)
             elif kind == "gain":
                 self._write("gain", {"dir": value.get("dir"), "db": value.get("db"),
                                      "readback": value.get("readback")},
@@ -495,6 +510,32 @@ class EventLogWriter:
                 self._readback(value)
         except Exception:
             self.write_errors += 1
+
+    def _sent(self, record: Any) -> None:
+        """One burst the transport accepted (a :class:`~.tx_app.SentRecord`).
+
+        Written only when the child stamped it (``mono`` is set: the
+        transmit worker runs with ``events``), with that time: the moment the
+        transport accepted the burst, not when the record reached here.
+        """
+
+        mono = getattr(record, "mono", None)
+        if mono is None:
+            return
+        control_only = bool(record.control_only)
+        self._write("sent", {
+            "n": record.n,
+            "first_sequence": None if control_only else record.first_sequence,
+            "subframes": record.subframe_count,
+            "control_subframes": record.control_subframes,
+            "control_sequence": record.control_sequence,
+            "mcs": record.mcs_index,
+            "planned_mcs": record.planned_mcs,
+            "sample_count": record.sample_count,
+            "control_only": control_only,
+            "standalone": bool(record.standalone),
+            "attempt": record.attempt,
+        }, mono=mono, wall=record.wall)
 
     def _readback(self, stats: dict[str, Any]) -> None:
         """The device's own report of its settings (UHD readback), once, when it first appears."""

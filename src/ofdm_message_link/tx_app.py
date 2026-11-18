@@ -132,6 +132,22 @@ class SentRecord:
     # carried nothing else (then source is "control" and the counts are 0).
     control_subframes: int = 0
     control_only: bool = False
+    # For the ``node_app --events`` "sent" line (burst_events.EventLogWriter).
+    # The first CONTROL sequence (None without CONTROL frames); a control-only
+    # burst the policy put ahead of queued data (not an idle one); the MCS
+    # the aggregation wait sized the burst with (None: there was no wait to
+    # size, or --events is off); the send attempt that was accepted (> 1 after a
+    # raising send or a detach); bursts accepted by this worker so far,
+    # this one included.
+    control_sequence: int | None = None
+    standalone: bool = False
+    planned_mcs: int | None = None
+    attempt: int = 1
+    n: int = 0
+    # Host clocks right after the transport accepted the burst, stamped on
+    # the transmit thread; None unless the worker has ``events``.
+    mono: float | None = None
+    wall: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +223,8 @@ class _Encoded:
 
     burst: OutgoingBurst
     pieces: tuple[_Pending, ...]
+    planned_mcs: int | None = None  # SentRecord.planned_mcs
+    standalone: bool = False  # SentRecord.standalone
 
 
 @dataclass(slots=True)
@@ -276,6 +294,14 @@ class TransmitWorker:
     raises cannot be retried (the same input fails again), so its datagrams
     are dropped, reported and counted in ``encode_failures`` and
     ``dropped_encode_datagrams``.
+
+    ``events(kind, value)`` (``node_app --events``; None, the default, turns
+    all of this off) only adds logging: each :class:`SentRecord` then carries
+    the host clocks of the moment the transport accepted the burst and the
+    MCS the aggregation wait sized it with, and every dropped burst is
+    reported as a ``tx_dropped`` dict (``reason`` ``encode_failed`` or
+    ``send_failed``, ``first_sequence`` and ``subframes`` of its datagrams).
+    No decision of the worker reads any of it.
     """
 
     def __init__(
@@ -287,9 +313,16 @@ class TransmitWorker:
         aggregation: AggregationLimits | None = None,
         clock: Callable[[], float] = time.monotonic,
         policy: BurstPolicy | None = None,
+        events: Callable[[str, dict], None] | None = None,
     ) -> None:
         self._transmitter = transmitter
         self._policy = policy
+        self._events = events
+        # Logging only (SentRecord): the MCS the latest _fill sized with,
+        # the send attempt of the burst in hand, bursts accepted so far.
+        self._planned_mcs: int | None = None
+        self._attempt = 0
+        self._accepted_bursts = 0
         self._bridge = bridge
         self._plot_buffers = plot_buffers if plot_buffers is not None else PlotBuffers()
         self._limits = AggregationLimits() if aggregation is None else aggregation
@@ -379,6 +412,7 @@ class TransmitWorker:
     def _run(self) -> None:
         pending: deque[_Pending] = deque()
         unsent: _Encoded | None = None
+        tried: _Encoded | None = None  # the burst self._attempt counts for
         # An engine child's bridge batches its events (engine._EventSink):
         # send them once per iteration (one burst, or one idle wait).  The
         # flush at the top ends the previous iteration, whichever
@@ -407,6 +441,10 @@ class TransmitWorker:
                     if unsent is None:
                         self._fill(pending)
                         unsent = self._encode_next(pending)
+                # Logging only: which hand-over of this burst this is.
+                if unsent is not tried:
+                    tried, self._attempt = unsent, 0
+                self._attempt += 1
                 # The minimum burst interval runs from start to start: a
                 # Pluto push of a long burst blocks for about its airtime, so
                 # stamping after the push returned would add the whole
@@ -427,10 +465,15 @@ class TransmitWorker:
                     # The radio was stopped underneath us.  The burst keeps
                     # its sequence numbers and goes out first on the next one.
                     continue
+                # --events: stamped here, the moment the transport took it.
+                accepted_at = (
+                    None if self._events is None else (time.monotonic(), time.time())
+                )
+                self._accepted_bursts += 1
                 self._streak = None
                 self._last_burst_at = handed_at
                 self._plot_buffers.set_samples(unsent.burst.samples)
-                self._report(unsent)
+                self._report(unsent, accepted_at)
                 if self._policy is not None:
                     self._policy_call("on_sent", None, self._policy.on_sent,
                                       unsent.burst, self._clock())
@@ -510,6 +553,31 @@ class TransmitWorker:
     def _count_send_drop(self, unsent: _Encoded) -> None:
         self.dropped_send_failed_bursts += 1
         self.dropped_send_failed += len(unsent.burst.datagrams)
+        if self._events is not None:
+            burst = unsent.burst
+            self._log_drop(
+                "send_failed",
+                burst.sequences[0] if burst.sequences else None,
+                len(burst.sequences),
+                burst.mcs_index,
+                len(burst.control_sequences),
+                burst.control_sequences[0] if burst.control_sequences else None,
+            )
+
+    def _log_drop(self, reason: str, first_sequence: int | None, subframes: int,
+                  mcs: int | None, control_subframes: int,
+                  control_sequence: int | None) -> None:
+        """A ``tx_dropped`` event (``events`` only); never raises into the worker."""
+
+        try:
+            self._events("tx_dropped", {
+                "mono": time.monotonic(), "wall": time.time(), "reason": reason,
+                "first_sequence": first_sequence, "subframes": subframes,
+                "control_subframes": control_subframes, "control_sequence": control_sequence,
+                "mcs": mcs, "attempt": self._attempt if reason == "send_failed" else 0,
+            })
+        except Exception:
+            pass
 
     def _report_streak(self, streak: _SendStreak, now: float, error: Exception) -> None:
         """Report a failure streak; it counts as reported only once a report went out."""
@@ -581,6 +649,7 @@ class TransmitWorker:
         """
 
         cap = self._subframe_cap()
+        self._planned_mcs = None
         while len(pending) < cap:
             try:
                 item = self._queue.get_nowait()
@@ -603,6 +672,10 @@ class TransmitWorker:
         # Sized at the entry the burst will get: a policy's, not the
         # transmitter's active one (node_app never changes that one).
         entry = self._fill_entry()
+        if self._events is not None:
+            # plan_burst below sizes at the active entry when entry is None.
+            planned = self._transmitter.active_mcs_entry if entry is None else entry
+            self._planned_mcs = planned.index
         while len(pending) < cap and not self._stop.is_set():
             datagrams = [piece.datagram for piece in pending]
             if self._transmitter.plan_burst(datagrams, self._limits, entry) < len(datagrams):
@@ -665,7 +738,7 @@ class TransmitWorker:
                     "control_entry", None, self._encode_control, plan.payloads
                 )
                 if encoded is not None:
-                    return encoded
+                    return replace(encoded, standalone=True)
             else:
                 payloads = tuple(plan.payloads)
         datagrams = [piece.datagram for piece in pending]
@@ -676,6 +749,7 @@ class TransmitWorker:
             extra_mpdu_lengths=[control_mpdu_length(payload) for payload in payloads],
         )
         pieces = tuple(pending.popleft() for _ in range(take))
+        before = None if self._events is None else self._next_sequence()
         try:
             burst = self._transmitter.encode_datagrams(
                 [piece.datagram for piece in pieces], entry=entry, control_payloads=payloads
@@ -687,8 +761,32 @@ class TransmitWorker:
             self.encode_failures += 1
             self.dropped_encode_datagrams += len(pieces)
             self._encode_dropped_now = len(pieces)
+            if self._events is not None:
+                self._log_encode_drop(before, len(pieces), entry, len(payloads))
             raise
-        return _Encoded(burst, pieces)
+        return _Encoded(burst, pieces, self._planned_mcs)
+
+    def _next_sequence(self) -> int | None:
+        return getattr(self._transmitter, "next_sequence", None)
+
+    def _log_encode_drop(self, before: int | None, count: int, entry, controls: int) -> None:
+        """Log datagrams an encode dropped; their sequences only if it had assigned them.
+
+        An encode that raised after numbering the datagrams used up
+        ``count`` sequences (the receiver will see that gap); one that raised
+        before did not, and ``first_sequence`` is None.
+        """
+
+        try:
+            after = self._next_sequence()
+            numbered = (
+                before is not None and after is not None
+                and (after - before) % 65536 == count and count > 0
+            )
+            self._log_drop("encode_failed", before if numbered else None, count,
+                           getattr(entry, "index", None), controls, None)
+        except Exception:
+            pass
 
     def _idle_timeout(self) -> float:
         """How long the idle worker may wait for a message (0.1 s without a policy)."""
@@ -725,8 +823,10 @@ class TransmitWorker:
         )
         return _Encoded(burst, ())
 
-    def _report(self, sent: _Encoded) -> None:
+    def _report(self, sent: _Encoded, accepted_at: tuple[float, float] | None = None) -> None:
         burst = sent.burst
+        mono, wall = (None, None) if accepted_at is None else accepted_at
+        control_sequence = burst.control_sequences[0] if burst.control_sequences else None
         if not sent.pieces:
             self._bridge.sent.emit(
                 SentRecord(
@@ -741,6 +841,12 @@ class TransmitWorker:
                     mcs_label=describe_mcs_entry(mcs_entry(burst.mcs_index)),
                     control_subframes=len(burst.control_sequences),
                     control_only=True,
+                    control_sequence=control_sequence,
+                    standalone=sent.standalone,
+                    attempt=self._attempt,
+                    n=self._accepted_bursts,
+                    mono=mono,
+                    wall=wall,
                 )
             )
             return
@@ -757,6 +863,12 @@ class TransmitWorker:
                 mcs_index=burst.mcs_index,
                 mcs_label=describe_mcs_entry(mcs_entry(burst.mcs_index)),
                 control_subframes=len(burst.control_sequences),
+                control_sequence=control_sequence,
+                planned_mcs=sent.planned_mcs,
+                attempt=self._attempt,
+                n=self._accepted_bursts,
+                mono=mono,
+                wall=wall,
             )
         )
 

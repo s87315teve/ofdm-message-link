@@ -20,6 +20,10 @@ encoded with the MCS it was planned with, that MCS is the one selected when
 its planning began, it stays within the aggregation caps of that MCS, and the
 receiver decodes it with that MCS (from its own SIG header).
 
+With ``events`` (``node_app --events``) the worker's ``sent`` records must
+also name every burst on the air exactly once, in order, with its sequences
+and MCS, and change none of the above.
+
 ``OFDM_MCS_SOAK=1`` enables a longer soak variant.
 """
 
@@ -200,6 +204,7 @@ class _Run:
     limits: AggregationLimits
     sent: list[bytes] = field(default_factory=list)
     current: list[int] = field(default_factory=list)  # the MCS the test selected last
+    tx_events: list | None = None  # the worker's events (tx_dropped), with events on
 
     def messages_on_air(self) -> int:
         return sum(record.message_count for record in list(self.bridge.sent.values))
@@ -247,13 +252,14 @@ class _CyclingLa:
         return getattr(self._inner, name)
 
 
-def _node_run(profile, limits, first_mcs, *, la_schedule=None):
+def _node_run(profile, limits, first_mcs, *, la_schedule=None, events=False):
     """node_app: the worker runs with the node's LinkController as its policy.
 
     Built like ``node_engine._node_main`` with ``--la fixed``.  Without
     ``la_schedule`` the controller is put in fixed mode at ``first_mcs`` and
     the test changes it with ``set_fixed`` (node_app's ``set_mcs``); with one,
     the controller stays in auto mode and the LA moves every burst.
+    ``events`` runs the worker as ``--events`` does (``node_engine``).
     """
 
     spec = NodeSpec(
@@ -284,8 +290,13 @@ def _node_run(profile, limits, first_mcs, *, la_schedule=None):
         profile, entry=mcs_entry(spec.mcs_index), seed_range=tuple(spec.seed_range)
     )
     bridge = _Bridge()
-    worker = TransmitWorker(transmitter, bridge, aggregation=limits, policy=controller)
-    run = _Run(transmitter, worker, bridge, _Sink(), limits, current=[first_mcs])
+    tx_events = [] if events else None
+    worker = TransmitWorker(
+        transmitter, bridge, aggregation=limits, policy=controller,
+        events=None if tx_events is None else lambda kind, value: tx_events.append((kind, value)),
+    )
+    run = _Run(transmitter, worker, bridge, _Sink(), limits, current=[first_mcs],
+               tx_events=tx_events)
     run.controller = controller
     run.la = la
     if la_schedule is None:
@@ -409,6 +420,28 @@ def _check_transmit_side(run: _Run, profile, *, check_expected: bool = True) -> 
     data_sequences = [sequence for burst in on_air for sequence in burst.sequences]
     assert data_sequences == list(range(len(data_sequences)))
     return on_air
+
+
+def _check_sent_records(run: _Run, on_air: list) -> None:
+    """With events: one stamped SentRecord per burst on the air, in order, naming it."""
+
+    records = list(run.bridge.sent.values)
+    assert run.tx_events == []  # nothing dropped
+    assert len(records) == len(on_air)
+    for number, (record, burst) in enumerate(zip(records, on_air, strict=True), start=1):
+        assert (record.n, record.attempt) == (number, 1)
+        assert record.control_only == (not burst.datagrams)
+        assert (record.first_sequence, record.subframe_count, record.mcs_index) == (
+            burst.sequence, burst.subframe_count, burst.mcs_index)
+        assert record.control_sequence == (
+            burst.control_sequences[0] if burst.control_sequences else None)
+        assert record.mono is not None and record.wall is not None
+        if burst.datagrams and number > 1 and run.limits.min_burst_interval_s > 0:
+            assert record.planned_mcs in NODE_MCS
+        if not burst.datagrams:
+            assert record.planned_mcs is None
+    monos = [record.mono for record in records]
+    assert monos == sorted(monos)
 
 
 @dataclass
@@ -598,13 +631,18 @@ def test_node_app_full_queue_switching_every_burst_with_set_mcs(switch_at, node_
     _check_delivery(run, node_profile, bursts)
 
 
-def test_node_app_full_queue_with_the_la_changing_every_burst(node_profile, configured_limits):
+@pytest.mark.parametrize("events", [False, True])
+def test_node_app_full_queue_with_the_la_changing_every_burst(node_profile, configured_limits,
+                                                              events):
     """Auto mode: the link adaptation itself picks a new MCS for every burst."""
 
     schedule = every_transition(NODE_MCS)
-    run = _node_run(node_profile, configured_limits, schedule[0], la_schedule=schedule[:-1])
+    run = _node_run(node_profile, configured_limits, schedule[0], la_schedule=schedule[:-1],
+                    events=events)
     _full_queue(run, schedule, lambda run, index: None, switch_at="plan", seed=4)
     bursts = _check_transmit_side(run, node_profile)
+    if events:
+        _check_sent_records(run, bursts)
     assert run.controller.mode == "auto"
     # A standalone robust-feedback burst takes a decision without data, so the
     # data bursts follow the schedule with gaps; each still went out at the
@@ -711,7 +749,7 @@ def test_the_decode_pool_decodes_each_burst_at_its_own_mcs_in_order(tx_profile):
 
 
 @pytest.mark.skipif(not SOAK, reason="set OFDM_MCS_SOAK=1 for the soak variant")
-@pytest.mark.parametrize("path", ["tx_app", "node_app"])
+@pytest.mark.parametrize("path", ["tx_app", "node_app", "node_app_events"])
 @pytest.mark.parametrize("limits_name", ["tight", "configured"])
 def test_soak_switching_every_burst_and_from_a_thread(path, limits_name, tx_profile,
                                                        node_profile, configured_limits):
@@ -723,7 +761,8 @@ def test_soak_switching_every_burst_and_from_a_thread(path, limits_name, tx_prof
     else:
         profile, indices = node_profile, NODE_MCS
         schedule = every_transition(indices)
-        run, switch = _node_run(profile, limits, schedule[0]), _node_switch
+        run = _node_run(profile, limits, schedule[0], events=path == "node_app_events")
+        switch = _node_switch
     stop = threading.Event()
     thread = _hammer(run, switch, indices, stop, seed=9)
     try:
@@ -732,4 +771,6 @@ def test_soak_switching_every_burst_and_from_a_thread(path, limits_name, tx_prof
         stop.set()
         thread.join(2.0)
     bursts = _check_transmit_side(run, profile, check_expected=False)
+    if run.tx_events is not None:
+        _check_sent_records(run, bursts)
     _check_delivery(run, profile, bursts, workers=2)

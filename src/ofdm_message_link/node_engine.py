@@ -555,6 +555,9 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
     sink = _EventSink(events, samples_per_second=ui_fps)
     la_log = open(spec.la_log_path, "a", encoding="utf-8") if spec.la_log_path else None  # noqa: SIM115
     la, reporter, ladder = build_algorithms(spec, profile.sample_rate)
+    transmitter = MessageTransmitter(
+        profile, mcs_entry=mcs_entry(spec.mcs_index), seed_range=tuple(spec.seed_range)
+    )
     controller = LinkController(
         node_id=spec.node_id,
         peer_id=spec.peer_id,
@@ -569,19 +572,21 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
         # The node's own leakage is recognised by its scrambler seeds (node_app only:
         # rx_app's peer is a tx_app that uses every seed).
         own_seed_range=tuple(spec.seed_range),
+        # The LA log's "la" lines name the DATA sequence the new MCS starts at.
+        next_sequence=lambda: transmitter.next_sequence,
     )
     controller.set_tx_gain(spec.tx_gain_db)
     counters = TxCounters()
     counters_lock = threading.Lock()
-    transmitter = MessageTransmitter(
-        profile, mcs_entry=mcs_entry(spec.mcs_index), seed_range=tuple(spec.seed_range)
-    )
     tx_worker = TransmitWorker(
         transmitter,
         _TxBridge(sink, counters, counters_lock),
         _NullPlots(),
         aggregation=aggregation,
         policy=controller,
+        # --events: "sent" records stamped where the transport accepted the
+        # burst (here, in the child), and "tx_dropped" for lost datagrams.
+        events=sink.put if spec.burst_events else None,
     )
     receiver = MessageReceiver(
         profile,

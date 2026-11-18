@@ -15,6 +15,10 @@ node 1 is changed with ``ProcessNodeWorker.select_mcs_entry`` (node_app's
 Node 2 must deliver every datagram byte-exact and in order, with no FCS
 failure and no sequence gap, and node 1's LA log must show every switch
 applied to a data burst.
+
+With ``--events`` on (``NodeSpec.burst_events``), node 1's ``sent`` lines and
+node 2's ``burst`` lines must also join one to one: every data burst once,
+its sequences contiguous with the previous burst's, at the MCS node 2 decoded.
 """
 
 from __future__ import annotations
@@ -25,10 +29,17 @@ import threading
 import time
 
 import pytest
-from mcs_switch_helpers import every_transition, free_udp_ports, required_transitions, transitions
+from mcs_switch_helpers import (
+    assert_sent_joins_received,
+    every_transition,
+    free_udp_ports,
+    required_transitions,
+    transitions,
+)
 
 from ofdm_link.phy.mcs_table import mcs_entry, v5_entries
 from ofdm_message_link import node_options
+from ofdm_message_link.burst_events import EventLogWriter, read_events
 from ofdm_message_link.link import build_phy_profile
 from ofdm_message_link.node_engine import NodeSpec, ProcessNodeWorker, UdpDuplexFactory
 from ofdm_message_link.options import load_link_config
@@ -112,14 +123,18 @@ def _payload(number: int, size: int) -> bytes:
 
 
 # Node 2 decodes inline (1) or on a decode pool (2), whose results come back
-# out of step with the feeds that carried them.
-@pytest.mark.parametrize("decode_workers", [1, 2])
-def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path, decode_workers):
+# out of step with the feeds that carried them.  ``events``: both nodes run
+# with --events (NodeSpec.burst_events) and their lines must join exactly.
+@pytest.mark.parametrize(("decode_workers", "events"), [(1, False), (2, False), (2, True)])
+def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path, decode_workers,
+                                                                   events):
     config = load_link_config("configs/default.yaml", [node_options.DEFAULT_NODE_OVERLAY])
     profile = build_phy_profile(config)
     ingress1, egress1, samples1, ingress2, egress2, samples2 = free_udp_ports(6)
     egress = {1: _Egress(egress1), 2: _Egress(egress2)}
     listeners = {1: _Listener(), 2: _Listener()}
+    writers = {}
+    events_path = {node_id: tmp_path / f"node{node_id}_events.jsonl" for node_id in (1, 2)}
     la_log = tmp_path / "la_1.jsonl"
     plan = {
         1: (ingress1, egress1, samples1, samples2),
@@ -152,9 +167,20 @@ def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path, deco
                 egress=("127.0.0.1", out),
                 la_spec="fixed",
                 la_log_path=str(la_log) if node_id == 1 else None,
+                burst_events=events,
             )
+            listener = listeners[node_id]
+            if events:
+                writers[node_id] = EventLogWriter(
+                    str(events_path[node_id]), node_id=node_id, sample_rate=profile.sample_rate
+                )
+
+                def listener(kind, value, _l=listeners[node_id], _w=writers[node_id]):
+                    _l(kind, value)
+                    _w.on_event(kind, value)
+
             workers[node_id] = ProcessNodeWorker(
-                profile, spec, listeners[node_id], decode_workers=decode_workers
+                profile, spec, listener, decode_workers=decode_workers
             )
             workers[node_id].start()
         for node_id, (_, _, listen, peer) in plan.items():
@@ -195,6 +221,8 @@ def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path, deco
                 worker.detach()
             finally:
                 worker.stop()
+        for writer in writers.values():
+            writer.stop()
         for receiver in egress.values():
             receiver.close()
 
@@ -226,3 +254,26 @@ def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path, deco
     burst_phase = burst_changes[len(sparse_changes):]
     assert burst_phase
     assert set(burst_phase) <= {index for pair in BURST_ROUNDS for index in pair}
+    if not events:
+        return
+    rows = {node_id: read_events(str(events_path[node_id])) for node_id in plan}
+    assert not any(row["k"] in ("gap", "tx_dropped") for node_id in plan for row in rows[node_id])
+    sent_rows = [row for row in rows[1] if row["k"] == "sent"]
+    data = assert_sent_joins_received(
+        sent_rows, [row for row in rows[2] if row["k"] == "burst"], len(sent), waits=False
+    )
+    # The sparse phase: one datagram per burst, at the scheduled MCS.
+    sparse = data[: len(schedule)]
+    assert [row["mcs"] for row in sparse] == schedule
+    assert all(row["subframes"] == 1 for row in sparse)
+    # The LA log names the first DATA sequence of every switch.
+    by_first = {row["first_sequence"]: row for row in data}
+    la_events = _log_events(la_log, "la")
+    assert la_events and all(
+        by_first[event["first_sequence"]]["mcs"] == event["mcs_index"] for event in la_events
+    )
+    # Node 2 sent control bursts only.
+    node2_sent = [row for row in rows[2] if row["k"] == "sent"]
+    assert node2_sent and all(row["control_only"] and row["first_sequence"] is None
+                              and isinstance(row["control_sequence"], int)
+                              for row in node2_sent)

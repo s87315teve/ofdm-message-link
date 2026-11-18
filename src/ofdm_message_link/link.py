@@ -363,6 +363,9 @@ class MessageTransmitter:
         self._scrambler = profile.scrambler if scrambler is None else bool(scrambler)
         self._codec_lock = threading.Lock()
         self._sequence = itertools.count()
+        # The DATA sequence the next datagram gets (``next_sequence``); set
+        # from the numbers each encode assigns, so it never steers them.
+        self._next_sequence = 0
         self._control_sequence = itertools.count()
         self._seed_counter = itertools.count()
         self._message_ids = itertools.count(1)
@@ -386,6 +389,17 @@ class MessageTransmitter:
     def active_mcs_entry(self) -> McsTableEntry:
         with self._codec_lock:
             return self._mcs_entry
+
+    @property
+    def next_sequence(self) -> int:
+        """The 16-bit DATA sequence the next encoded datagram will get.
+
+        For logs (``node_app --events``, the LA log): one attribute read, no
+        lock, so it may be one encode stale on another thread.  The numbers
+        themselves are assigned by :meth:`encode_datagrams` alone.
+        """
+
+        return self._next_sequence
 
     def select_mcs_entry(self, entry: McsTableEntry) -> None:
         """Apply one complete v5 format atomically to the next encoded burst."""
@@ -478,6 +492,8 @@ class MessageTransmitter:
                 next(self._control_sequence) % _SEQUENCE_MODULUS for _ in controls
             )
             sequences = tuple(next(self._sequence) % _SEQUENCE_MODULUS for _ in pieces)
+            if sequences:
+                self._next_sequence = (sequences[-1] + 1) % _SEQUENCE_MODULUS
             seed = (
                 next(self._seed_counter) % self._seed_count + self._seed_low
                 if self._scrambler
