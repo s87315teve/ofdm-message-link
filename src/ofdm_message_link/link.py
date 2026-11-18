@@ -830,6 +830,8 @@ class MessageReceiver:
         self._clock = clock
         self._burst_reports: deque[BurstReport] = deque(maxlen=BURST_REPORT_HISTORY)
         self._peer_snrs: deque[float] = deque(maxlen=BURST_REPORT_HISTORY)
+        # Why a decode worker raised, per segment (decode workers only).
+        self._decode_errors: deque[str] = deque(maxlen=BURST_REPORT_HISTORY)
         # Per-burst events (node_app --events): None unless enable_burst_events.
         self._burst_recorder = None
         # One worker keeps the original inline decoder untouched.  More move
@@ -927,6 +929,19 @@ class MessageReceiver:
         self._peer_snrs.clear()
         return drained
 
+    def drain_decode_errors(self) -> tuple[str, ...]:
+        """Take the error of every burst a decode worker raised on since the last call.
+
+        Each such burst is already counted as an undiagnosed payload failure
+        and its later bursts are still delivered; this is so the error is
+        surfaced, as an exception from an inline decode is.  Bounded like
+        :meth:`drain_burst_reports`; always empty without decode workers.
+        """
+
+        drained = tuple(self._decode_errors)
+        self._decode_errors.clear()
+        return drained
+
     def decoder_snapshot(self):
         """Return bounded acquisition/header/payload counters for observers."""
 
@@ -1019,6 +1034,8 @@ class MessageReceiver:
             # A v5 PSDU whose FCS failed has both a burst, for its CRC-valid
             # subframes, and a failure for the counters.
             self._decoder.record_payload_outcome(result.failure, burst)
+            if result.error is not None:
+                self._decode_errors.append(result.error)
             if burst is not None:
                 delivered.extend(self._accept(burst, result.annotation))
         return tuple(delivered)

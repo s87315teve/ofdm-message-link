@@ -219,6 +219,14 @@ class ReceiveWorker:
                 if self._egress is not None:
                     self._egress.forward(message.message.payload)
                 self._bridge.message.emit(message)
+            drain_errors = getattr(self._receiver, "drain_decode_errors", None)
+            errors = () if drain_errors is None else drain_errors()
+            if errors:
+                # The bursts are already counted as payload failures and the
+                # stream goes on; say why, once per feed, as for an inline error.
+                self._bridge.failed.emit(
+                    f"decode worker raised on {len(errors)} burst(s): {errors[-1]}"
+                )
             if self._observer is not None:
                 try:
                     self._notify_observer(source, chunk, snrs)

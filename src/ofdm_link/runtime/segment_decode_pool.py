@@ -22,6 +22,14 @@ its management thread, the call-queue feeder, the wake-up pipe -- and each
 one takes the GIL from the receive owner, whose acquisition is the
 bottleneck; at 500 bursts/s those handoffs cost the owner about a quarter of
 its time.  A batch pays them once.
+
+A worker that raises fails only what it was decoding.  A segment whose decode
+or annotation raises anything but :class:`BurstDecodeError` comes back as an
+undiagnosed :class:`PayloadFailure` carrying the error text, as does every
+segment of a task whose result cannot come back at all (for example one that
+cannot be pickled), so each segment still gets exactly one result, in order,
+and later segments keep flowing.  Only a dead worker (``BrokenExecutor``) or
+an executor that refuses new work closes the pool with :class:`DecodePoolError`.
 """
 
 from __future__ import annotations
@@ -88,6 +96,20 @@ class SegmentDecodeResult:
     burst: AnyDecodedBurst | None
     failure: PayloadFailure | None
     annotation: Any = None
+    # Set when the worker raised instead of decoding: "Type: message".  The
+    # failure is then an undiagnosed one, as for a payload the inline decoder
+    # could not classify.
+    error: str | None = None
+
+
+def failed_result(error: BaseException) -> SegmentDecodeResult:
+    """The result of a segment whose decode raised something unexpected."""
+
+    return SegmentDecodeResult(
+        burst=None,
+        failure=PayloadFailure(diagnosed=False, crc_failed=False),
+        error=f"{type(error).__name__}: {error}",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +123,9 @@ class SegmentDecodePoolSnapshot:
     # Segments dropped because the pool was full (opt-in overload
     # protection); never decoded and never counted as payload attempts.
     dropped_full: int = 0
+    # Segments whose worker raised (SegmentDecodeResult.error); each is
+    # also an undiagnosed payload failure.
+    worker_errors: int = 0
 
 
 _WORKER: dict[str, Any] = {}
@@ -159,16 +184,22 @@ def decode_segment(
 def _run_in_worker(segments: tuple[BurstSegment, ...]) -> tuple[SegmentDecodeResult, ...]:
     if not _worker_is_ready():
         raise DecodePoolError("segment decode worker was not initialized")
-    return tuple(
-        decode_segment(
-            segment,
-            _WORKER["burst_config"],
-            frame_decoder=_WORKER["frame_decoder"],
-            symbol_demapper=_WORKER["symbol_demapper"],
-            annotate=_WORKER["annotate"],
-        )
-        for segment in segments
-    )
+    results: list[SegmentDecodeResult] = []
+    for segment in segments:
+        # One segment that raises must not take the rest of its task along.
+        try:
+            results.append(
+                decode_segment(
+                    segment,
+                    _WORKER["burst_config"],
+                    frame_decoder=_WORKER["frame_decoder"],
+                    symbol_demapper=_WORKER["symbol_demapper"],
+                    annotate=_WORKER["annotate"],
+                )
+            )
+        except Exception as error:
+            results.append(failed_result(error))
+    return tuple(results)
 
 
 class SegmentDecodePool:
@@ -208,6 +239,7 @@ class SegmentDecodePool:
         self._submitted = 0
         self._completed = 0
         self._backpressure_waits = 0
+        self._worker_errors = 0
         self._closed = False
         self._executor = ProcessPoolExecutor(
             max_workers=workers,
@@ -280,6 +312,11 @@ class SegmentDecodePool:
             except BrokenExecutor as error:
                 self.close()
                 raise DecodePoolError("a segment decode worker died") from error
+            except Exception as error:
+                # The executor refuses work (it is shutting down): these
+                # segments would silently get no result, so stop here.
+                self.close()
+                raise DecodePoolError("the segment decode pool refused work") from error
             self._pending.append((future, take))
             self._in_flight += take
             self._submitted += take
@@ -310,9 +347,19 @@ class SegmentDecodePool:
         except BrokenExecutor as error:
             self.close()
             raise DecodePoolError("a segment decode worker died") from error
+        except Exception as error:
+            if not future.done():
+                # Timed out waiting: still decoding, so it stays at the head.
+                raise
+            # The worker returned, but the task's result did not come back
+            # (it could not be pickled, say).  Each of its segments fails
+            # alone, so the ones behind it, and the results already taken in
+            # this call, still reach the caller in order.
+            results = (failed_result(error),) * count
         self._pending.popleft()
         self._in_flight -= count
         self._completed += count
+        self._worker_errors += sum(1 for result in results if result.error is not None)
         return results
 
     def worker_cpu_seconds(self) -> float | None:
@@ -343,6 +390,7 @@ class SegmentDecodePool:
             completed=self._completed,
             backpressure_waits=self._backpressure_waits,
             dropped_full=self._dropped_full,
+            worker_errors=self._worker_errors,
         )
 
     def close(self) -> None:

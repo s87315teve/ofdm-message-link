@@ -683,6 +683,12 @@ engine 子 process 都會把已載入的 BLAS／OpenMP 函式庫限制在 `cpu_c
 `--decode-workers` > `acceleration.decode_workers` > app 預設（`rx_app` 4、`node_app` 3）。兩個 key 的範圍見 7.2 節。
 Receive path 沒有大到能從多個 BLAS thread 得到好處的線性代數，所以 `cpu_cores` 調大通常不會更快；它是限制浪費的上限。
 
+Decode worker 在一個 burst 上丟出 `BurstDecodeError` 以外的例外（程式錯誤）時，只有那個 burst 算失敗：記成無法分類的
+payload 失敗（`unclassified_decode_failures`，和 inline decoder 解不出又分不出原因的 payload 一樣），後面的 burst 照順序繼續交付，
+錯誤訊息每次 feed 合成一行 `failed`（`decode worker raised on N burst(s): ...`），pool 快照的 `worker_errors` 計數。整個 task 的結果
+送不回來（例如不能 pickle）時，那個 task 的每個 segment 都這樣算。worker 死掉（`BrokenExecutor`）或 pool 不再接受工作時，pool 關閉並丟出
+`DecodePoolError`。以前一個這樣的例外會一直卡在 pool 的最前面，之後每次 feed 都重丟一次，後面的 burst 全部遺失。
+
 **CPU 放置與排程（全部預設關閉）。**
 
 - `--cpu-affinity CPUS` 在 `main` 一開始就套用，engine、forkserver、decode workers 都繼承。不寫死任何核心編號。
