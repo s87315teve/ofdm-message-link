@@ -1,11 +1,12 @@
 # Bidirectional FDD link for node_app on two USRPs at 15.36 MS/s.
 #   node_app --transport uhd --overlay configs/profiles/duplex_fdd_2420_2460_15p36.yaml ...
 #
-# 15.36 MS/s is the LTE rate a B210 reaches from a 30.72 MHz master clock with a
+# 15.36 MS/s is the LTE rate a B2xx reaches from a 30.72 MHz master clock with a
 # clean decimation by 2 (ofdm_link.radio.uhd.MASTER_CLOCK_RATES sets that clock;
 # it is also the highest a B210 allows with both channels in use).  Tested on
-# a B210 and an NI USRP-2901 only; the code does not restrict it by device.  A
-# Pluto stays at 5 MS/s (USB 2.0).  The node's TX analog filter defaults to 35 MHz at
+# a B210 and an NI USRP-2901; a device with a fixed clock (an N210's 100 MHz)
+# cannot make it exactly, and the radio code warns when the read-back rate
+# differs.  A Pluto stays at 5 MS/s (USB 2.0).  The node's TX analog filter defaults to 35 MHz at
 # this rate, so the signal shifted 8 MHz by the LO offset stays inside it.
 #
 # Same frequencies as duplex_fdd_2420_2460.yaml: node 1 TX 2420 / RX 2460 MHz,
@@ -14,10 +15,13 @@
 #
 # The aggregate airtime cap is 5 ms: the receiver's timing correction covers
 # 80 000 samples at 50 ppm, 5.21 ms at 15.36 MS/s (configuration validation
-# refuses the 8 ms default here).  On hardware, 15.36 MS/s has been measured
-# only one-way (tx_app -> rx_app, 2026-11-11, a B210 and an NI USRP-2901: MCS 17
-# about 35.5 Mb/s, docs/07-reference.md 7.4); no node_app duplex run at this
-# rate is on record yet.
+# refuses the 8 ms default here).
+#
+# NOT measured with node_app: 15.36 MS/s has only been run one-way (tx_app ->
+# rx_app, 2026-11-11, NI USRP-2901 <-> B210, docs/08-measurements.md 8.10).
+# There MCS 17 carried about 35.5 Mb/s, TX-airtime bound, but both 300 s
+# confirmations FAILED the stability rule (TX time_error / underflow still
+# rising) and 2901 -> B210 starts were sometimes bad (13-31 % lost).
 #
 # Like every profile, this does not arm a transmitter: each RF run still
 # needs --enable-rf and its explicit acknowledgement.

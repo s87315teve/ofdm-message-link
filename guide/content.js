@@ -645,7 +645,7 @@ window.GUIDE_CONTENT = (function () {
             "TX 與 RX 各開一個 UHD block。兩個都用 <code>--serial</code> 選同一台 B210。",
             "Node 先啟動 TX，再啟動 RX。停止時也先停 TX。",
             "Node 1 在 2.420 GHz 發送，在 2.460 GHz 接收。Node 2 相反。",
-            "USRP 也可以用 15.36 MS/s：<code>configs/profiles/duplex_fdd_2420_2460_15p36.yaml</code>。這個速率只在 B210 與 NI USRP-2901 上測過，而且只量過單向。"]),
+            "USRP 也可以用 15.36 MS/s：<code>configs/profiles/duplex_fdd_2420_2460_15p36.yaml</code>。這個速率測過 B210 與 NI USRP-2901（需要 30.72 MHz master clock），而且只量過單向，雙向的 <code>node_app</code> 沒有量過。"]),
         input: "TX bursts", output: "RX sample stream",
         code: ota(["<code>node_engine.py</code>：<code>UdpDuplexFactory</code>、<code>DuplexEndpoint</code>"],
           ["<code>pluto.py</code>：<code>SharedPlutoContext</code>", "<code>node_engine.py</code>：<code>PlutoDuplexFactory</code>、<code>NodeWorker</code>"],

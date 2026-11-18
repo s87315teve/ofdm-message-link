@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -468,6 +469,7 @@ def _configure_block(
 ) -> None:
     block.set_clock_source(settings.clock_source, 0)
     block.set_samp_rate(settings.sample_rate)
+    warn_on_sample_rate_mismatch(settings.sample_rate, block)
     if settings.lo_offset:
         uhd = uhd_api if uhd_api is not None else _load_uhd()
         target = uhd.tune_request(settings.center_frequency, settings.lo_offset)
@@ -477,6 +479,35 @@ def _configure_block(
     block.set_gain(gain, _BLOCK_CHANNEL)
     block.set_bandwidth(settings.bandwidth, _BLOCK_CHANNEL)
     block.set_antenna(antenna, _BLOCK_CHANNEL)
+
+
+def warn_on_sample_rate_mismatch(requested: float, block: Any) -> float | None:
+    """Warn, without raising, when the device did not take the sample rate exactly.
+
+    Nothing here restricts a rate by device; but a device whose master clock
+    cannot divide down to the rate (15.36 MS/s needs 30.72 MHz, which an
+    N210's fixed 100 MHz clock cannot give) runs at a nearby rate, and the
+    other end, at the exact rate, then cannot decode it.  Returns the
+    read-back rate, or None when the block does not report one.
+    """
+
+    getter = getattr(block, "get_samp_rate", None)
+    try:
+        actual = float(getter()) if callable(getter) else None
+    except (TypeError, ValueError):
+        actual = None
+    if actual is None or not math.isfinite(actual):
+        return None
+    if abs(actual - float(requested)) > 1e-6 * float(requested):
+        print(
+            f"[uhd] WARNING: asked for {float(requested) / 1e6:g} MS/s, the device runs at "
+            f"{actual / 1e6:.6g} MS/s. The other end will not decode this link; this "
+            f"device's master clock probably cannot make the rate (15.36 MS/s needs "
+            f"30.72 MHz, B2xx family).",
+            file=sys.stderr,
+            flush=True,
+        )
+    return actual
 
 
 def _make_stream_args(uhd_api: Any, channel: int) -> Any:

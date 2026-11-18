@@ -132,3 +132,33 @@ def test_the_node_tx_filter_covers_the_lo_shifted_signal_at_15_36():
     # The LO-offset signal reaches 8 + 7.68 MHz from the LO: inside a 35 MHz filter.
     assert tx.lo_offset + RATE / 2 < tx.bandwidth / 2
     assert rx.bandwidth == RATE
+
+
+class _RateBlock:
+    def __init__(self, actual):
+        self.actual = actual
+
+    def get_samp_rate(self):
+        return self.actual
+
+
+def test_a_rate_the_device_cannot_make_is_warned_about_not_refused(capsys):
+    from ofdm_link.radio.uhd import warn_on_sample_rate_mismatch
+
+    # An N210's fixed 100 MHz clock gives 100e6 / 7 instead of 15.36 MS/s.
+    assert warn_on_sample_rate_mismatch(RATE, _RateBlock(100e6 / 7)) == 100e6 / 7
+    err = capsys.readouterr().err
+    assert "WARNING" in err and "15.36 MS/s" in err and "30.72 MHz" in err
+    assert warn_on_sample_rate_mismatch(RATE, _RateBlock(float(RATE))) == RATE
+    assert warn_on_sample_rate_mismatch(RATE, _Block()) is None  # no read-back
+    assert capsys.readouterr().err == ""
+
+
+def test_the_sample_rate_error_names_the_uhd_adapter(tmp_path):
+    import yaml
+
+    overlay = tmp_path / "rate.yaml"
+    overlay.write_text(yaml.safe_dump({"phy": {"sample_rate": 12_500_000}}), encoding="utf-8")
+    with pytest.raises(ConfigError, match="uhd adapter") as error:
+        load_config(ROOT / "configs/default.yaml", [ROOT / ONE_WAY, overlay])
+    assert "B210 adapter" not in str(error.value)

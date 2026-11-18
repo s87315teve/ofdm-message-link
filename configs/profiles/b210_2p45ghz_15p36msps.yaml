@@ -2,14 +2,22 @@
 #   rx_app --transport uhd --overlay configs/profiles/b210_2p45ghz_15p36msps.yaml
 #   tx_app --transport uhd --overlay configs/profiles/b210_2p45ghz_15p36msps.yaml --enable-rf ...
 #
-# 15.36 MS/s comes from a 30.72 MHz master clock, decimation 2
-# (ofdm_link.radio.uhd.MASTER_CLOCK_RATES).  Tested on a B210 and an NI
-# USRP-2901 only; the code does not restrict it by device.  Signal
-# 2442.32-2457.68 MHz.  The aggregate airtime cap is 5 ms (80 000 samples at
-# 50 ppm is 5.21 ms at this rate).  Measured one-way on 2026-11-11 between a
-# B210 and an NI USRP-2901 on one bench: MCS 17 carried about 35.5 Mb/s,
-# limited by TX airtime (docs/07-reference.md 7.4).  It does not arm the
-# transmitter: every RF run still requires --enable-rf and its acknowledgement.
+# 15.36 MS/s needs a 30.72 MHz master clock, decimation 2
+# (ofdm_link.radio.uhd.MASTER_CLOCK_RATES): the B2xx family.  Tested on a B210
+# and an NI USRP-2901; a device with a fixed clock (an N210's 100 MHz) cannot
+# make it exactly, and the radio code warns when the read-back rate differs.
+# Signal 2442.32-2457.68 MHz.  The aggregate airtime cap is 5 ms (80 000
+# samples at 50 ppm is 5.21 ms at this rate).
+#
+# Measured one-way only, 2026-11-11, NI USRP-2901 <-> B210 on one bench, at
+# 2440/2460 MHz with a 5.21 ms cap (docs/08-measurements.md 8.10): MCS 17
+# carried about 35.5 Mb/s, bound by TX airtime (duty ~97.5 %).  Both 300 s
+# confirmations lost 0.19 % / 0.40 % but FAILED the stability rule (TX
+# time_error and underflow or rejected bursts still rising), and 2901 -> B210
+# starts were sometimes bad (13-31 % lost, up to 99 % in 15 s points).
+#
+# It does not arm the transmitter: every RF run still requires --enable-rf and
+# its acknowledgement.
 phy:
   sample_rate: 15360000
   center_frequency: 2450000000

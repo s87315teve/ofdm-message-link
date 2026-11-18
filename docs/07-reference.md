@@ -248,18 +248,24 @@ Radio 的 analog filter bandwidth 設成等於 sample rate。這和 OFDM signal 
 | 15.36 MS/s（`uhd`；測過 B210 與 NI USRP-2901） | 12.48 MHz | 15.36 MHz |
 | 20 MS/s | 16.25 MHz | 20 MHz |
 
-**15.36 MS/s（`--transport uhd`；只在 B210 與 NI USRP-2901 上測過）。** LTE 的 sample rate：程式要求 UHD 把 master clock 設成
-30.72 MHz，B210／2901 的 FPGA 剛好 2 倍 decimation（`ofdm_link.radio.uhd.MASTER_CLOCK_RATES`；30.72 MHz 也是 B210 兩個 channel
-同時用時允許的最高值，`node_app` 一台裝置 TX 與 RX 各用一個前端）。其他速率仍由 UHD 自己選 master clock。程式不依裝置型號
-限制這個速率，其他 USRP 只是還沒有測過。用 profile
+**15.36 MS/s（`--transport uhd`；測過 B210 與 NI USRP-2901）。** LTE 的 sample rate。它需要 30.72 MHz 的 master clock：程式要求
+UHD 把 master clock 設成 30.72 MHz（`ofdm_link.radio.uhd.MASTER_CLOCK_RATES`），B2xx 家族（B210、NI USRP-2901）的 FPGA 剛好
+2 倍 decimation；30.72 MHz 也是 B210 兩個 channel 同時用時允許的最高值（`node_app` 一台裝置 TX 與 RX 各用一個前端）。其他速率
+仍由 UHD 自己選 master clock。Master clock 固定的裝置（例如 N210 的 100 MHz）做不出剛好 15.36 MS/s。程式不依裝置型號限制，
+但會比對 UHD 讀回的 sample rate：和要求的不同時記一行警告（不會停下來），這時兩端對不上，收不到東西。Pluto 經 USB 2.0
+只能跑 5 MS/s。用 profile
 [`duplex_fdd_2420_2460_15p36.yaml`](../configs/profiles/duplex_fdd_2420_2460_15p36.yaml)（`node_app`）或
 [`b210_2p45ghz_15p36msps.yaml`](../configs/profiles/b210_2p45ghz_15p36msps.yaml)（`tx_app`／`rx_app`）。這個速率下：
 aggregate 的 airtime 上限要 ≤ 5.21 ms（80 000 samples），profile 設 5 ms，沿用 8 ms 預設值的設定檔會被拒絕；RX 的 UHD
 receive frames 與 chunk 依 sample rate 放大到 1024 個 frame 與 4 × 65536 samples；`node_app` 的 TX analog filter 預設是
-35 MHz（見 7.9 節的 `--tx-analog-bw`）。Pluto 經 USB 2.0 只能跑 5 MS/s，用不到這個速率。2026-11-11 在同一張桌上的一台 B210 與一台
-NI USRP-2901 之間量過單向（`tx_app` → `rx_app`）MCS 17：約 35.5 Mb/s，上限是 TX airtime。雙向的 `node_app` 在 15.36 MS/s
-還沒有量測紀錄（兩台裝置 2x2 串流 15.36 MS/s 沒有 overflow，見 [`experiments/duplex_fdd/`](../experiments/duplex_fdd/README.md)
-4.7 節，那只是 USB 的測試）。12.5 MS/s 沒有開放。
+35 MHz（見 7.9 節的 `--tx-analog-bw`）。
+
+實測（[8.10](08-measurements.md#810-1536-mss-單向ni-usrp-2901--b21024402460-mhz)）：2026-11-11 在同一張桌上的 NI USRP-2901 與
+B210 之間只量過單向（`tx_app` → `rx_app`）。MCS 17 約 35.5 Mb/s，上限是 TX airtime（duty 約 97.5 %）。兩個方向的 300 秒確認遺失
+0.19 %／0.40 %，但**都判 FAIL**：TX 的 time_error 與 underflow（或被拒絕的 burst）在最後三分之一仍在增加。2901 → B210 方向有時
+一啟動就壞：60 秒的 4 次啟動掉 13–28 %，15 秒的點有 31 % 到 99 %。雙向的 `node_app` 在 15.36 MS/s 沒有量過（兩台裝置 2x2 串流
+15.36 MS/s 沒有 overflow，見 [`experiments/duplex_fdd/`](../experiments/duplex_fdd/README.md) 4.7 節，那只是 USB 的測試）。
+12.5 MS/s 沒有開放。
 
 把 analog bandwidth 設成 Fs 會在 signal 兩側留下合理的 transition margin。設得太窄會先衰減外緣的
 subcarrier、提高 EVM；設得太寬則會收進更多帶外 noise 與鄰近 channel 的干擾。

@@ -601,10 +601,13 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         5_000_000, 10_000_000, 15_360_000, 20_000_000
     }:
         raise ConfigError(
-            "phy.sample_rate must be 5, 10, 15.36, or 20 MS/s for the B210 adapter"
+            "phy.sample_rate must be 5, 10, 15.36, or 20 MS/s for the uhd adapter "
+            "(15.36 MS/s needs a 30.72 MHz master clock: tested on B210 and NI USRP-2901)"
         )
     if radio.adapter == "uhd" and not 70_000_000 <= phy.center_frequency <= 6_000_000_000:
-        raise ConfigError("phy.center_frequency must be within 70 MHz to 6 GHz for B210")
+        raise ConfigError(
+            "phy.center_frequency must be within 70 MHz to 6 GHz for the uhd adapter"
+        )
     _check_v5_link_limits(phy, mac.aggregation)
     duplex = _duplex_section(root, phy) if "duplex" in root else None
 
