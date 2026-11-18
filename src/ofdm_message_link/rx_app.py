@@ -33,6 +33,7 @@ import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ofdm_link.phy.mcs_table import McsTableEntry, McsTableError, describe_mcs_entry, mcs_entry
+from ofdm_link.phy.streaming import peak_amplitude
 
 from . import dashboard_widgets as widgets
 from . import log_limits, options, qt_runtime
@@ -41,7 +42,7 @@ from .la.api import BurstReport, RxHealth
 from .link import MessageReceiver, RateMeter, ReceivedMessage
 from .plots import ConstellationPlot, PlotBuffers, SpectrumPlot, TrendPlot
 from .radio_panel import RadioPanel
-from .transport import DEFAULT_RX_RECV_FRAMES, set_transport_gain
+from .transport import DEFAULT_RX_RECV_FRAMES, ReceiveFeed, set_transport_gain
 
 _LATENCY_HISTORY = 64
 # |I| or |Q| at or above this fraction of full scale counts as clipping: 1900
@@ -82,9 +83,11 @@ class _Bridge(QtCore.QObject):
 
 
 # A receive feed is at least this many samples when the transport has them
-# queued; a short chunk waits at most MAX_MERGE_WAIT_S for the rest.
-MIN_FEED_SAMPLES = 8192
-MAX_MERGE_WAIT_S = 0.002
+# queued; a short chunk waits at most MAX_MERGE_WAIT_S for the rest.  The
+# defaults of ReceiveFeed; --rx-min-feed-samples / --rx-max-merge-wait-ms and
+# acceleration.rx_min_feed_samples / rx_max_merge_wait_ms change them.
+MIN_FEED_SAMPLES = ReceiveFeed().min_samples
+MAX_MERGE_WAIT_S = ReceiveFeed().max_wait_s
 
 
 class ReceiveWorker:
@@ -187,7 +190,12 @@ class ReceiveWorker:
                     10.0 * np.log10(power) if power > 0.0 else -200.0
                 )
             try:
-                delivered = self._receiver.feed(chunk)
+                # A source that guarantees finite samples (finite_samples)
+                # spares the decoder its finite check of every chunk.
+                if getattr(source, "finite_samples", False) is True:
+                    delivered = self._receiver.feed(chunk, assume_finite=True)
+                else:
+                    delivered = self._receiver.feed(chunk)
             except Exception as error:  # surfaced in the window, never silent
                 self._bridge.failed.emit(f"{type(error).__name__}: {error}")
                 continue
@@ -243,14 +251,11 @@ class ReceiveWorker:
         drain_peer = getattr(self._receiver, "drain_peer_snr_db", None)
         if drain_peer is not None:
             snrs = drain_peer()
-        values = np.asarray(chunk)
         # Per feed, like decode_backlog: a feed is one transport chunk or several
         # merged (_next_chunk), and a sample that clips in any of them is in it.
         # The only consumer, the feedback reporter, ORs it over its window.
-        self._clipping_seen = bool(values.size) and (
-            max(float(np.max(np.abs(values.real))), float(np.max(np.abs(values.imag))))
-            >= CLIPPING_LEVEL
-        )
+        peak = peak_amplitude(np.asarray(chunk))
+        self._clipping_seen = peak is not None and peak >= CLIPPING_LEVEL
         self._observer.on_receive(
             time.monotonic(),
             snrs=tuple(snrs),
@@ -365,6 +370,7 @@ class ReceiveWindow(QtWidgets.QWidget):
                 ui_fps=ui_fps,
                 decode_workers=decode_workers,
                 cpu_cores=resolved.cpu_cores,
+                receive_feed=resolved.receive_feed,
             )
         else:
             self._worker = ReceiveWorker(
@@ -372,6 +378,8 @@ class ReceiveWindow(QtWidgets.QWidget):
                 self._bridge,
                 self._plot_buffers,
                 egress=EgressForwarder(*egress_address),
+                min_feed_samples=resolved.receive_feed.min_samples,
+                max_merge_wait_s=resolved.receive_feed.max_wait_s,
             )
         self._sample_rate = float(resolved.profile.sample_rate)
         self._started = time.monotonic()
@@ -1009,6 +1017,7 @@ def build_parser() -> argparse.ArgumentParser:
             "headers stay on one owner. 1 keeps the original inline decoder"
         ),
     )
+    options.add_receive_feed_arguments(app)
     app.add_argument(
         "--stats-log",
         default=None,

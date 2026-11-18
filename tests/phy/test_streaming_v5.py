@@ -308,9 +308,9 @@ def test_each_chunk_is_scanned_once_when_it_holds_no_preamble(
     scans: list[int] = []
     real = streaming_module.acquire_all
 
-    def counted(samples, legacy, v5):
+    def counted(samples, legacy, v5, **kwargs):
         scans.append(np.asarray(samples).size)
-        return real(samples, legacy, v5)
+        return real(samples, legacy, v5, **kwargs)
 
     monkeypatch.setattr(streaming_module, "acquire_all", counted)
     rng = np.random.default_rng(3)

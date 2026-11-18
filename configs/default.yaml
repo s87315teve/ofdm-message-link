@@ -162,3 +162,16 @@ acceleration:
   # the link is large enough linear algebra to gain from more than one.  The
   # output never depends on this value.
   cpu_cores: 1
+  # Receive feed batching for rx_app and node_app: a transport chunk shorter
+  # than rx_min_feed_samples (0-131072) is merged with the chunks queued
+  # behind it, waiting at most rx_max_merge_wait_ms (0-20) for them; 0 samples
+  # feeds every chunk as it comes.  null (or the key left out) keeps the PC
+  # setting, 8192 samples and 2 ms.  On a Jetson use 65536 and 15: each feed
+  # has a fixed cost, and fewer, larger feeds save receive-owner CPU.  Only
+  # the feed boundaries move: the samples, the payloads delivered and their
+  # order do not change, but a burst's SNR and noise estimates can differ in
+  # the last digits (each feed is cut into 8192-sample pieces from its own
+  # start).  --events host times (mono) can come up to the wait later.
+  # --rx-min-feed-samples / --rx-max-merge-wait-ms override them.
+  rx_min_feed_samples: null
+  rx_max_merge_wait_ms: null

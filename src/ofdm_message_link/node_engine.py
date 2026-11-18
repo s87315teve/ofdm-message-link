@@ -43,7 +43,7 @@ from .engine import (
     _serve,
     _Signal,
 )
-from .transport import TransportError
+from .transport import ReceiveFeed, TransportError
 from .tx_health import tx_health
 
 SWITCH_INTERVAL_S = 0.002
@@ -388,6 +388,8 @@ class NodeSpec:
     # Per-burst receive events (node_app --events); off by default.
     burst_events: bool = False
     lock_timeout_s: float = 1.0
+    # Receive feed batching (--rx-min-feed-samples, --rx-max-merge-wait-ms).
+    receive_feed: ReceiveFeed = ReceiveFeed()
 
 
 def la_context(spec: NodeSpec, sample_rate: float):
@@ -595,7 +597,15 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
         tap = BurstEventTap(controller, recorder, sink.put,
                             lambda: getattr(workers.get("rx"), "source", None))
         observer = tap
-    rx_worker = ReceiveWorker(receiver, sink, sink, egress=egress, observer=observer)
+    rx_worker = ReceiveWorker(
+        receiver,
+        sink,
+        sink,
+        egress=egress,
+        observer=observer,
+        min_feed_samples=spec.receive_feed.min_samples,
+        max_merge_wait_s=spec.receive_feed.max_wait_s,
+    )
     if tap is not None:
         workers["rx"] = rx_worker
     submit_failures = {"count": 0, "last_report": 0.0}

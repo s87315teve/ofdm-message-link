@@ -932,12 +932,16 @@ class MessageReceiver:
 
         return self._decoder.snapshot()
 
-    def feed(self, samples: NDArray[np.complex64]) -> tuple[ReceivedMessage, ...]:
+    def feed(
+        self, samples: NDArray[np.complex64], *, assume_finite: bool = False
+    ) -> tuple[ReceivedMessage, ...]:
         """Consume one sample chunk and return every message it completed.
 
         With decode workers, a message is returned once its burst's payload
         has been decoded, which can be a later call than the one that carried
-        its samples; the order is still the stream's.
+        its samples; the order is still the stream's.  ``assume_finite`` is
+        for a source that guarantees finite samples (``finite_samples``):
+        a complex64 chunk then skips the decoder's finite check.
         """
 
         recorder = self._burst_recorder
@@ -955,7 +959,7 @@ class MessageReceiver:
         if self._pool is None:
             delivered: list[ReceivedMessage] = []
             for piece in pieces:
-                for burst in self._decoder.feed(piece):
+                for burst in self._decoder.feed(piece, assume_finite=assume_finite):
                     delivered.extend(self._accept(burst, None))
             return tuple(delivered)
         # Segments go out in full batches as soon as there are enough, so the
@@ -964,7 +968,7 @@ class MessageReceiver:
         results: list = []
         waiting: list = []
         for piece in pieces:
-            waiting.extend(self._decoder.feed_segments(piece))
+            waiting.extend(self._decoder.feed_segments(piece, assume_finite=assume_finite))
             if len(waiting) >= self._pool.max_batch:
                 results.extend(self._submit(waiting))
                 waiting.clear()

@@ -313,6 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
                       help=("payload decode worker processes, 1-64 (default: "
                             "acceleration.decode_workers in the configuration, else "
                             f"{DEFAULT_DECODE_WORKERS})"))
+    options.add_receive_feed_arguments(node)
     node.add_argument("--snr-db", type=float, default=None,
                       help="udp transport only: add AWGN at this SNR")
     node.add_argument("--snr-fft-advance", type=_snr_fft_advance, default=None, metavar="N",

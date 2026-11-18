@@ -34,7 +34,7 @@ import numpy as np
 from ofdm_link.runtime import realtime
 from ofdm_link.runtime.segment_decode_pool import _safe_context
 
-from .transport import TransportError
+from .transport import ReceiveFeed, TransportError
 
 _EVENT_DEPTH = 4096
 _CONTROL_DEPTH = 1024
@@ -336,7 +336,8 @@ def _serve(
 
 
 def _rx_main(
-    profile, egress_address, ui_fps, decode_workers, cpu_cores, events, control, replies
+    profile, egress_address, ui_fps, decode_workers, receive_feed, cpu_cores,
+    events, control, replies,
 ) -> None:
     _bound_numeric_threads(cpu_cores)
     from .link import MessageReceiver
@@ -345,7 +346,14 @@ def _rx_main(
     sink = _EventSink(events, samples_per_second=ui_fps)
     receiver = MessageReceiver(profile, decode_workers=decode_workers)
     egress = EgressForwarder(*egress_address)
-    worker = ReceiveWorker(receiver, sink, sink, egress=egress)
+    worker = ReceiveWorker(
+        receiver,
+        sink,
+        sink,
+        egress=egress,
+        min_feed_samples=receive_feed.min_samples,
+        max_merge_wait_s=receive_feed.max_wait_s,
+    )
     worker.start()
 
     def tick() -> None:
@@ -391,6 +399,7 @@ class ProcessReceiveWorker:
         ui_fps: int = 15,
         decode_workers: int = 1,
         cpu_cores: int = 1,
+        receive_feed: ReceiveFeed | None = None,
     ) -> None:
         from .link import ReceiveStats
 
@@ -403,7 +412,14 @@ class ProcessReceiveWorker:
         self._source: _TransportView | None = None
         self._engine = _EngineProcess(
             _rx_main,
-            (profile, egress_address, ui_fps, decode_workers, cpu_cores),
+            (
+                profile,
+                egress_address,
+                ui_fps,
+                decode_workers,
+                ReceiveFeed() if receive_feed is None else receive_feed,
+                cpu_cores,
+            ),
             self._dispatch,
         )
 

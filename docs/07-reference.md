@@ -52,6 +52,7 @@
 | `--snr-db` | 只適用 `udp`，加上 AWGN。對真實 channel 無效，帶了會被拒絕 |
 | `--decode-workers N` | Payload decode 的 process 數，1–64；1 = 單 thread inline decoder。沒給時取 `acceleration.decode_workers`，設定檔是 `null`（預設）時是 4 |
 | `--rx-recv-frames` | UHD `num_recv_frames`，預設每 5 MS/s 256 個（約 0.1 s）；0 = UHD 預設 |
+| `--rx-min-feed-samples N` / `--rx-max-merge-wait-ms MS` | 把 transport 的短 chunk 併成至少 N samples（0–131072）再交給 decoder，最多為此等 MS 毫秒（0–20）。沒給時取 `acceleration.rx_min_feed_samples`／`rx_max_merge_wait_ms`，設定檔是 `null`（預設）時是 8192 與 2 ms。Jetson 用 65536 與 15。見 [7.10 節](#710-效能開關與-native-模組) |
 | `--stats-log PATH` | 每次統計刷新附加一行 JSON，見 [2.7 節](02-gui.md#27---stats-log把統計存成檔案) |
 | `--stats-log-max-mb MB` | `--stats-log` 的大小上限，預設 16 MiB，超過就輪替成 `PATH.1`；0 = 不設限 |
 | `--stats-log-backups N` | 保留幾份輪替後的舊檔，預設 1 |
@@ -94,7 +95,7 @@
 | `phy` | Sample rate、center frequency、預設 MCS 與 FEC、synchronization 的門檻；`phy.v5`、`phy.rx` 見下 |
 | `mac.aggregation` | v5 TX 的 aggregation 上限，見下 |
 | `radio` | `adapter`（`uhd` 才能用 `--transport uhd`）、預設 gain 與 antenna、clock source |
-| `acceleration` | `decode_workers`、`cpu_cores`：decode worker 數與 NumPy 的 thread 數，見下 |
+| `acceleration` | `decode_workers`、`cpu_cores`、`rx_min_feed_samples`、`rx_max_merge_wait_ms`：decode worker 數、NumPy 的 thread 數與接收端 feed 的大小，見下 |
 | `duplex` | 只有 `node_app` 讀（選用）：`mode`、`control_mcs_index`、`nodes`，見下 |
 
 `simulation` 區段是 PHY 測試用的 channel 模型參數。`node`、`network` 與 `mac` 的其他欄位是設定 schema
@@ -144,11 +145,15 @@
 |---|---|---|---|
 | `decode_workers` | `null` | `null`、0 或 1–64 | `rx_app` 與 `node_app` 的 payload decode process 數。`null`（或不寫）與 0 = 各 app 自己的預設（v2.0.0–v2.1.2 的 `default.yaml` 把 0 寫成「auto」）：`rx_app` 4、`node_app` 3（兩個 node 常在同一台 PC）。1 = 不開 worker，inline decode。`--decode-workers` 優先。`tx_app` 不 decode，不讀它 |
 | `cpu_cores` | 1 | 0–256 | 每個 app 的主 process 與 engine 子 process 各自的 NumPy／BLAS（與 OpenMP）thread 上限；0 = 這個 process 可以跑的 CPU 數（看 affinity／cgroup）。`--cpu-cores` 優先。Decode workers 固定各 1 個 thread，平行度由 `decode_workers` 決定 |
+| `rx_min_feed_samples` | `null` | `null` 或 0–131072（整數） | `rx_app` 與 `node_app`：比這個短的 transport chunk 會和 queue 裡後面的 chunk 併成一次 feed。`null` = 8192；0 = 每個 chunk 直接 feed。Jetson 用 65536。`--rx-min-feed-samples` 優先 |
+| `rx_max_merge_wait_ms` | `null` | `null` 或 0–20（可以有小數） | 為了湊滿上面的大小最多等幾毫秒。`null` = 2；Jetson 用 15。`--rx-max-merge-wait-ms` 優先 |
 
-優先順序都是：命令列 > 設定檔（`default.yaml` 加上各個 overlay，後面的蓋過前面的）> app 內建預設。內建預設就是這兩個 key
-生效之前的行為（thread 1、`rx_app` 4 個 worker、`node_app` 3 個），所以沒設的人執行結果不變。輸出不會因這兩個值而改變，
-只影響 CPU 用量。超出範圍、不是整數（包含 `true`、`"4"`、2.5）會在啟動時被拒絕。每個 app 啟動時印一行，寫出實際用的值與
-來源，例如 `[acceleration] cpu_cores 1 from app default; decode_workers 4 from app default`。
+優先順序都是：命令列 > 設定檔（`default.yaml` 加上各個 overlay，後面的蓋過前面的）> app 內建預設。內建預設就是這些 key
+生效之前的行為（thread 1、`rx_app` 4 個 worker、`node_app` 3 個、feed 8192 samples／2 ms），所以沒設的人執行結果不變。
+輸出不會因這些值而改變，只影響 CPU 用量（feed 的兩個值另外會讓 `--events` 的主機時間晚一點，見 7.11 節）。超出範圍、
+型別不對（包含 `true`、`"4"`；整數的 key 給 2.5）會在啟動時被拒絕。每個 app 啟動時印一行，寫出實際用的值與
+來源，例如 `[acceleration] cpu_cores 1 from app default; decode_workers 4 from app default`；`rx_app` 與 `node_app`
+後面再接 `; rx_min_feed_samples 8192 from app default; rx_max_merge_wait_ms 2 from app default`。
 
 **從 v2.0–v2.1.2 複製來的設定檔要注意（v2.1.2 之後）：** 那幾版的 `default.yaml` 寫 `decode_workers: 1`、`cpu_cores: 4`，
 但程式從來不讀。現在這兩個 key 會生效，所以這樣的設定檔會真的用 1 個 decode worker（inline decode）與 4 個 NumPy thread。
@@ -521,7 +526,7 @@ process 默默分流。
 | `--enable-rf` / `--acknowledgement` | `--transport pluto` 與 `uhd` 必要，和 `tx_app` 相同 |
 | Aggregation | `--aggregation`、`--aggregation-max-subframes`、`--aggregation-max-wait-ms`、`--min-burst-interval-ms`、`--max-burst-airtime-ms`，與 `tx_app` 相同（7.1 節） |
 | 其他共用的選項 | `--config`、`--mcs`、`--frame-payload-bytes`、`--ui-fps`、`--log-lines`、`--geometry`，與 7.1 節相同 |
-| 效能開關 | `--cpu-cores`、`--cpu-affinity`、`--realtime[=PRIO]`、`--force`、`--native-backend`、`--overload-protection`，與 7.1 節相同（7.10 節）；除了 `--cpu-cores`（預設取設定檔，再來是 1）全部預設關閉 |
+| 效能開關 | `--cpu-cores`、`--cpu-affinity`、`--realtime[=PRIO]`、`--force`、`--native-backend`、`--overload-protection`，與 7.1 節相同（7.10 節）；除了 `--cpu-cores`（預設取設定檔，再來是 1）全部預設關閉。`--rx-min-feed-samples`／`--rx-max-merge-wait-ms` 與 `rx_app` 相同 |
 
 **TX analog filter 的預設值（`node_engine.default_uhd_tx_bandwidth`）。** LO 偏離載波 `lo` 時，取樣的頻帶離 LO 最遠是
 `|lo| + fs/2`，濾波器的半寬要蓋住它：頻寬 ≥ `2|lo| + fs`，再乘 1.1 的餘量（AD9361 濾波器的 roll-off），進位到整數 MHz，
@@ -585,8 +590,23 @@ aarch64（Jetson）也能編。
 `tests/app/test_native_end_to_end.py` 檢查（容差：起點相同、|ΔCFO| ≤ 1e-6、confidence 相對誤差 ≤ 1e-5、header 欄位相同、
 Turbo BLER 差 ≤ 0.1 dB 且 iteration ±1、固定 seed 的端到端 delivered 相同）。
 
-**接收端的其他改變（不需要開關）。** `ReceiveWorker` 會把 queue 裡已經在等的短 chunk 併成至少 8192 samples 再 feed，
-最多為此等 2 ms；`measure_quality` 改成每軸各自找最近點，16QAM soft demap 改成每軸分開算，輸出與原本相同。
+**接收端的其他改變（不需要開關）。** `measure_quality` 改成每軸各自找最近點，16QAM soft demap 改成每軸分開算，輸出與
+原本相同。Decoder 的 sample buffer 改成一塊重複使用的記憶體加上起點：feed 進來的 samples 接在後面，丟掉的只移動起點，
+不再每次把留下的 samples 整段複製；buffer 只在新 samples 放不下時才搬一次：不夠大時加倍（從 131072 samples 起，最多
+`max_input_samples`），長過 4 倍初始大小（524288 samples 以上）之後，留下的 samples 又只剩初始大小的一半以內時才縮回 131072。
+每個 sample 進 buffer 時檢查一次是否有限（NaN／Inf 照舊拒絕），之後 acquisition、SNR 量測與 header probe 不再重複檢查；
+UHD 與 udp transport 的 samples 一定是有限值（`finite_samples`），連進 buffer 的那次也省掉（udp 在收到 burst 時就丟掉
+含 NaN／Inf 的 burst，計數在 transport 的 `bursts_non_finite`，不再像以前那樣讓 feed 報錯；`--snr-db` 小到加上的雜訊
+會溢位時，transport 啟動時就拒絕）。解出來的 burst、位置與 SNR 和原本逐位元相同。
+
+**接收端 feed 的大小（`--rx-min-feed-samples`、`--rx-max-merge-wait-ms`，預設不變）。** `ReceiveWorker` 會把 queue 裡已經
+在等的短 chunk 併成至少 `rx_min_feed_samples` 個 samples 再 feed，最多為此等 `rx_max_merge_wait_ms`：
+命令列 > `acceleration.rx_min_feed_samples`／`rx_max_merge_wait_ms` > 8192 samples、2 ms（PC 的設定，所有版本都是這個）。
+每次 feed 有固定成本，在慢的機器上大一點的 feed 省 receive owner 的 CPU；**Jetson 用 65536 與 15 ms**。`MessageReceiver`
+仍然把每次 feed 切成 8192 samples 的小塊交給 decoder，所以省下的只是每次 feed 的固定成本。samples、交付的 payload
+與順序都不變；但小塊是從每次 feed 的開頭切的，feed 的邊界一變，decoder 看到的 buffer 就不同，所以一個 burst 的 SNR 與
+雜訊估計可能在最後幾位數不同。啟動時的 `[acceleration]` 那行會印出實際用的兩個值與來源。代價是延遲：一個 burst 最多晚等待的那段時間才交給 decoder，`--events` 的 `mono`
+也會跟著晚（7.11 節）。範圍：0–131072 samples（0 = 不併）、0–20 ms。
 
 **NumPy thread 數與 decode workers（`acceleration`，預設不變）。** NumPy 內建的 BLAS 會依機器的核心數開 thread pool，
 而且在呼叫之間空轉；在 20 核心的機器上它吃掉 15.6 個核心、少了三分之一的 throughput。所以每個 app 的主 process 與
@@ -651,7 +671,7 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 |---|---|
 | `off` | preamble 第一個 sample 在接收串流中的位置（從 RX 開始算的 sample 數） |
 | `dev_t` | 那個 sample 的裝置時間（秒）：最近一個不晚於它的 `rx_time` anchor 加上 `(off − anchor) / sample_rate`。只有 UHD 有；B210 的裝置時鐘從開機起算，沒有對主機或 GNSS 對時 |
-| `mono`、`wall` | 接收 thread 把含有這個 preamble 的 chunk 交給 decoder 時的主機時間。比 burst 在空中的時間晚一段 queue 與 USB 的延遲（沒有量） |
+| `mono`、`wall` | 接收 thread 把含有這個 preamble 的 chunk 交給 decoder 時的主機時間。比 burst 在空中的時間晚一段 queue 與 USB 的延遲（沒有量），再加上併 chunk 的等待：最多 `rx_max_merge_wait_ms`（預設 2 ms，Jetson 設定 15 ms，見 7.10 節） |
 | `snr_db` | preamble（v5 是 LTF pair）量到的 SNR，換算到 payload samples，和 `link_snr` 事件同一個值。兩個 FFT window 提早 `start` 行的 `snr_fft_advance_samples` 個 sample；不同值的檔案不能直接合併比較 |
 | `noise_var`、`signal_power` | 同一個量測的複數雜訊變異數（每個 sample）與 active carriers 上的平均 `|H|²`；都是線性值，接收的 full scale 是 1.0 |
 | `peak`、`clip` | burst 的 samples 裡最大的 `|I|` 或 `|Q|`（header 失敗時只看 fixed header 那一段）；`clip = peak ≥ 1900/2048`（與 `rx_app` 相同） |

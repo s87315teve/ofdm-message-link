@@ -32,6 +32,8 @@ from typing import Any, Protocol
 import numpy as np
 from numpy.typing import NDArray
 
+from ofdm_link.phy._arrays import all_finite
+
 from .devices import uhd_access_lock
 
 _UDP_HEADER = struct.Struct(">IHH")
@@ -58,6 +60,21 @@ _MAX_RX_RECV_FRAMES = 1024
 _RX_QUEUE_WAIT_S = 0.005
 # rx_time tags kept for device time: one at start and one per overflow or retune.
 ANCHOR_HISTORY = 64
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiveFeed:
+    """How the receive worker batches transport chunks into decoder feeds.
+
+    A chunk shorter than ``min_samples`` is merged with the chunks queued
+    behind it, waiting at most ``max_wait_s`` for them (rx_app.ReceiveWorker).
+    Each feed has a fixed cost, so larger feeds save CPU on a slow host
+    (Jetson: 65536 samples, 15 ms); the samples and their order never change.
+    The defaults are the PC setting every release has used.
+    """
+
+    min_samples: int = 8192
+    max_wait_s: float = 0.002
 
 
 def _rx_rate_scale(sample_rate: float) -> int:
@@ -189,7 +206,14 @@ class UdpSampleSource:
     burst; the idle chunks carry the same noise.  This is a development aid,
     not a channel model: there is no fading, no frequency offset and no
     sample-clock error beyond what the samples already carry.
+
+    Every chunk it returns is finite (``finite_samples``): a reassembled
+    burst with a NaN or infinite sample is dropped, and counted in
+    ``bursts_non_finite``, before it reaches the queue.
     """
+
+    # The receive worker may skip the decoder's finite check for this source.
+    finite_samples = True
 
     def __init__(
         self,
@@ -203,6 +227,18 @@ class UdpSampleSource:
     ) -> None:
         if type(idle_chunk_samples) is not int or idle_chunk_samples < 256:
             raise TransportError("idle_chunk_samples must be an integer at least 256")
+        if snr_db is not None:
+            # The added noise must stay finite: see finite_samples.  Checked
+            # as _with_noise computes it, for a full-scale reference power,
+            # with ten standard deviations of room in complex64.
+            snr_db = float(snr_db)
+            try:
+                factor = 10.0 ** (snr_db / 10.0) if math.isfinite(snr_db) else math.nan
+            except OverflowError:
+                factor = math.inf
+            scale = math.sqrt(1.0 / factor / 2.0) if factor > 0.0 else math.inf
+            if not math.isfinite(factor) or not 10.0 * scale < float(np.finfo(np.float32).max):
+                raise ValueError(f"snr_db {snr_db:g} gives noise that is not finite")
         self._address = (bind_host, int(port))
         self._snr_db = None if snr_db is None else float(snr_db)
         self._idle_chunk_samples = idle_chunk_samples
@@ -215,6 +251,7 @@ class UdpSampleSource:
         self._pending: dict[int, dict[int, bytes]] = {}
         self._bursts_received = 0
         self._bursts_incomplete = 0
+        self._bursts_non_finite = 0
         self._datagrams_received = 0
         self._dropped_overflow = 0
         self._reference_power = 1.0
@@ -264,6 +301,10 @@ class UdpSampleSource:
             raw = b"".join(fragments[position] for position in range(count))
             samples = np.frombuffer(raw, dtype=np.complex64)
             self._bursts_received += 1
+            if not all_finite(samples):
+                # Checked once here so the decoder need not check every chunk.
+                self._bursts_non_finite += 1
+                continue
             with self._lock:
                 power = float(np.mean(np.abs(samples) ** 2))
                 if np.isfinite(power) and power > 0.0:
@@ -318,6 +359,7 @@ class UdpSampleSource:
             "snr_db": self._snr_db,
             "bursts_received": self._bursts_received,
             "bursts_incomplete": self._bursts_incomplete,
+            "bursts_non_finite": self._bursts_non_finite,
             "datagrams_received": self._datagrams_received,
             "chunks_dropped_overflow": self._dropped_overflow,
         }
@@ -518,8 +560,13 @@ class UhdSampleSink:
 class UhdSampleSource:
     """Receive a continuous sample stream from a GNU Radio UHD flowgraph.
 
-    Receiving transmits nothing, so this needs no RF authorisation.
+    Receiving transmits nothing, so this needs no RF authorisation.  UHD
+    converts the radio's 16-bit integer samples to complex64, so every
+    sample is finite (``finite_samples``).
     """
+
+    # The receive worker may skip the decoder's finite check for this source.
+    finite_samples = True
 
     def __init__(
         self,

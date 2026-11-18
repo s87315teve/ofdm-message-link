@@ -167,6 +167,8 @@ def measure_preamble(
     acquisition: AcquisitionResult,
     active_carriers: tuple[int, ...],
     config: SyncConfig | None = None,
+    *,
+    assume_finite: bool = False,
 ) -> PreambleMeasurement | None:
     """Split one acquired preamble's in-band power into signal and noise.
 
@@ -180,10 +182,12 @@ def measure_preamble(
     of the quadratic-phase preamble has unit power in every bin, so the signal
     power is ``|H|^2`` on the carriers the data uses.  ``None`` when the
     samples do not hold the whole useful preamble or no bin is in band.
+    ``assume_finite`` skips the finite check for samples the caller has
+    already checked.
     """
 
     settings = _require_config(config)
-    values = _as_complex_samples(samples, "samples")
+    values = _as_complex_samples(samples, "samples", assume_finite=assume_finite)
     half = settings.half_length
     start = acquisition.useful_start
     if start < 0 or start + settings.fft_size > values.size:
@@ -490,6 +494,7 @@ def _acquisition_candidates(
     config: SyncConfig | None = None,
     *,
     shared: SharedCorrelation | None = None,
+    assume_finite: bool = False,
 ) -> tuple[AcquisitionResult, ...]:
     """Return every threshold-qualified preamble candidate.
 
@@ -502,7 +507,7 @@ def _acquisition_candidates(
     """
 
     settings = _require_config(config)
-    values = _as_complex_samples(samples, "samples")
+    values = _as_complex_samples(samples, "samples", assume_finite=assume_finite)
     if values.size < settings.preamble_length:
         return ()
     # Exact-channel idle is observed zero energy, never a preamble. Preserve
@@ -677,6 +682,8 @@ def acquire_all(
     samples: ArrayLike,
     legacy: SyncConfig | None,
     v5: V5SyncConfig | None,
+    *,
+    assume_finite: bool = False,
 ) -> tuple[AnyAcquisition, ...]:
     """Every separated preamble of either family in one buffer, by start.
 
@@ -695,6 +702,8 @@ def acquire_all(
 
     ``v5.prefilter`` (experiment only) low-pass filters the acquisition copy
     of the buffer for both families; the decoder still reads the raw samples.
+    ``assume_finite`` skips the finite check: the continuous decoder checks
+    every sample once, when it enters its buffer.
     """
 
     from .sync_v5 import (
@@ -706,9 +715,9 @@ def acquire_all(
 
     if legacy is None and v5 is None:
         return ()
-    values = _as_complex_samples(samples, "samples")
+    values = _as_complex_samples(samples, "samples", assume_finite=assume_finite)
     if v5 is not None and v5.prefilter:
-        values = prefilter_for_acquisition(values)
+        values = prefilter_for_acquisition(values, assume_finite=True)
     native = native_backend.module("acq")
     if native is not None and (legacy is None or _native_legacy_supported(legacy)):
         legacy_found, v5_found = _native_family_candidates(native, values, legacy, v5)
@@ -761,7 +770,7 @@ def _family_candidates(
     legacy_found: tuple[AcquisitionResult, ...] = ()
     if legacy is not None:
         legacy_found = separated_candidates(
-            _acquisition_candidates(values, legacy, shared=shared),
+            _acquisition_candidates(values, legacy, shared=shared, assume_finite=True),
             legacy.preamble_length,
         )
     if v5 is None:
@@ -869,14 +878,22 @@ def _coherent_reference(
     return reference, float(np.vdot(preamble, preamble).real), positions
 
 
-def _as_complex_samples(values: ArrayLike, name: str) -> NDArray[np.complex64]:
+def _as_complex_samples(
+    values: ArrayLike, name: str, *, assume_finite: bool = False
+) -> NDArray[np.complex64]:
+    """``values`` as a one-dimensional complex64 array, checked finite.
+
+    ``assume_finite`` skips only the finite check, for samples the caller
+    already checked (shape and type are still checked: they cost nothing).
+    """
+
     array = np.asarray(values)
     if array.ndim != 1:
         raise SyncError(f"{name} must be a one-dimensional array")
     if not np.issubdtype(array.dtype, np.number):
         raise SyncError(f"{name} must be numeric")
     converted = array.astype(np.complex64, copy=False)
-    if not all_finite(converted):
+    if not assume_finite and not all_finite(converted):
         raise SyncError(f"{name} must contain only finite values")
     return converted
 

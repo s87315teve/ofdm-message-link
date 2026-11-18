@@ -315,8 +315,15 @@ def _decode_v5_acquired(
     backoff = rx.fft_backoff_samples
 
     try:
+        # ``values`` were checked by the caller (_input_samples, or the
+        # stream's buffer, which is checked on the way in).
         ltf = measure_ltf_pair(
-            values, acquisition, numerology, average=rx.ltf_average, backoff=backoff
+            values,
+            acquisition,
+            numerology,
+            average=rx.ltf_average,
+            backoff=backoff,
+            assume_finite=True,
         )
         if ltf is None:
             raise BurstDecodeError(

@@ -483,6 +483,7 @@ def build_spec(args, setup: node_options.NodeSetup) -> NodeSpec:
         mode=setup.mode,
         burst_events=getattr(args, "events", None) is not None,
         lock_timeout_s=float(getattr(args, "events_lock_timeout", 1.0)),
+        receive_feed=setup.resolved.receive_feed,
     )
 
 

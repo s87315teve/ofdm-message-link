@@ -36,7 +36,7 @@ from .link import (
     default_v5_entry,
     load_link_config,
 )
-from .transport import DEFAULT_PEAK_AMPLITUDE, DEFAULT_TX_PORT, TransportError
+from .transport import DEFAULT_PEAK_AMPLITUDE, DEFAULT_TX_PORT, ReceiveFeed, TransportError
 from .window_layout import parse_geometry
 
 _MIN_BANDWIDTH_HZ = 200_000.0
@@ -277,6 +277,54 @@ def _cpu_cores(value: str) -> int:
             f"must be between 0 (the CPUs this process may run on) and {MAX_CPU_CORES}"
         )
     return parsed
+
+
+def rx_min_feed_samples_argument(value: str) -> int:
+    """``--rx-min-feed-samples``: the bound ``acceleration.rx_min_feed_samples`` has."""
+
+    from ofdm_link.config import MAX_RX_MIN_FEED_SAMPLES
+
+    parsed = int(value)
+    if not 0 <= parsed <= MAX_RX_MIN_FEED_SAMPLES:
+        raise argparse.ArgumentTypeError(f"must be between 0 and {MAX_RX_MIN_FEED_SAMPLES}")
+    return parsed
+
+
+def rx_max_merge_wait_ms_argument(value: str) -> float:
+    """``--rx-max-merge-wait-ms``: the bound ``acceleration.rx_max_merge_wait_ms`` has."""
+
+    from ofdm_link.config import MAX_RX_MERGE_WAIT_MS
+
+    return _milliseconds(0.0, MAX_RX_MERGE_WAIT_MS)(value)
+
+
+def add_receive_feed_arguments(group) -> None:
+    """``--rx-min-feed-samples`` and ``--rx-max-merge-wait-ms`` (rx_app, node_app)."""
+
+    default = ReceiveFeed()
+    group.add_argument(
+        "--rx-min-feed-samples",
+        type=rx_min_feed_samples_argument,
+        default=None,
+        metavar="N",
+        help=(
+            "merge short transport chunks into decoder feeds of at least N samples, 0-131072; "
+            "0 feeds every chunk as it comes (default: acceleration.rx_min_feed_samples in "
+            f"the configuration, else {default.min_samples}; 65536 on a Jetson)"
+        ),
+    )
+    group.add_argument(
+        "--rx-max-merge-wait-ms",
+        type=rx_max_merge_wait_ms_argument,
+        default=None,
+        metavar="MS",
+        help=(
+            "wait at most MS for the chunks that complete a feed, 0-20 (default: "
+            "acceleration.rx_max_merge_wait_ms in the configuration, else "
+            f"{default.max_wait_s * 1e3:g}; 15 on a Jetson); --events host times can "
+            "come up to this much later"
+        ),
+    )
 
 
 def decode_workers_argument(value: str) -> int:
@@ -528,6 +576,10 @@ class ResolvedOptions:
     # 0 = the CPUs each process may run on.  The source is logged at startup.
     cpu_cores: int = 1
     cpu_cores_source: str = "app default"
+    # Receive feed batching: the --rx-* flags, else acceleration.rx_*, else the
+    # defaults; the source names where each value came from, for the log line.
+    receive_feed: ReceiveFeed = ReceiveFeed()
+    receive_feed_source: str = "app default"
 
     @property
     def uses_radio(self) -> bool:
@@ -574,6 +626,7 @@ def resolve(args: argparse.Namespace) -> ResolvedOptions:
     if selected_entry is None:
         selected_entry = default_v5_entry(profile.mcs)
     cpu_cores, cpu_cores_source = _resolve_cpu_cores(args, config)
+    receive_feed, receive_feed_source = _resolve_receive_feed(args, config)
     return ResolvedOptions(
         config=config,
         profile=profile,
@@ -582,7 +635,39 @@ def resolve(args: argparse.Namespace) -> ResolvedOptions:
         aggregation=aggregation_limits(args, config),
         cpu_cores=cpu_cores,
         cpu_cores_source=cpu_cores_source,
+        receive_feed=receive_feed,
+        receive_feed_source=receive_feed_source,
     )
+
+
+def _resolve_receive_feed(
+    args: argparse.Namespace, config: LinkConfig
+) -> tuple[ReceiveFeed, str]:
+    """Each value from its flag, else ``acceleration``, else :class:`ReceiveFeed`'s default.
+
+    Returns the feed and one log phrase naming each value's source.
+    """
+
+    default = ReceiveFeed()
+    sources = []
+    values = []
+    for name, flag, configured, built_in in (
+        ("rx_min_feed_samples", "--rx-min-feed-samples",
+         config.acceleration.rx_min_feed_samples, default.min_samples),
+        ("rx_max_merge_wait_ms", "--rx-max-merge-wait-ms",
+         config.acceleration.rx_max_merge_wait_ms, default.max_wait_s * 1e3),
+    ):
+        given = getattr(args, name, None)
+        if given is not None:
+            value, source = given, flag
+        elif configured is not None:
+            value, source = configured, f"configuration acceleration.{name}"
+        else:
+            value, source = built_in, "app default"
+        values.append(value)
+        sources.append(f"{name} {value:g} from {source}")
+    feed = ReceiveFeed(min_samples=int(values[0]), max_wait_s=float(values[1]) / 1e3)
+    return feed, "; ".join(sources)
 
 
 def _resolve_cpu_cores(args: argparse.Namespace, config: LinkConfig) -> tuple[int, str]:
@@ -650,6 +735,8 @@ def apply_cpu_budget(resolved: ResolvedOptions, args: argparse.Namespace | None 
         line += f"; decode_workers {args.decode_workers} from {source}"
     else:
         line += "; no decode workers (this app does not decode)"
+    if hasattr(args, "rx_min_feed_samples"):
+        line += f"; {resolved.receive_feed_source}"
     print(line, file=sys.stderr, flush=True)
     return budget
 
@@ -824,6 +911,7 @@ __all__ = [
     "add_common_arguments",
     "add_overload_argument",
     "add_performance_arguments",
+    "add_receive_feed_arguments",
     "aggregation_limits",
     "apply_cpu_budget",
     "apply_performance_options",
@@ -836,5 +924,7 @@ __all__ = [
     "require_rf_capability",
     "resolve",
     "resolve_decode_workers",
+    "rx_max_merge_wait_ms_argument",
+    "rx_min_feed_samples_argument",
     "settings_for",
 ]

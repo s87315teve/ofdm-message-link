@@ -213,6 +213,9 @@ class GuiConfig:
 # The same bound as the apps' --decode-workers flag.  The configuration also
 # takes 0, the app's default: v2.0.0-v2.1.2 shipped 0 documented as "auto".
 MAX_DECODE_WORKERS = 64
+# Bounds of the receive feed batching (rx_app / node_app ReceiveWorker).
+MAX_RX_MIN_FEED_SAMPLES = 131_072
+MAX_RX_MERGE_WAIT_MS = 20.0
 
 
 @dataclass(frozen=True)
@@ -222,6 +225,9 @@ class AccelerationConfig:
     # ``None`` (the key left out or null) means the app's built-in default.
     decode_workers: int | None = None
     cpu_cores: int | None = None
+    # Receive feed batching; None keeps 8192 samples / 2 ms.
+    rx_min_feed_samples: int | None = None
+    rx_max_merge_wait_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -568,7 +574,12 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         root,
         "acceleration",
         {"backend", "device"},
-        optional={"decode_workers", "cpu_cores"},
+        optional={
+            "decode_workers",
+            "cpu_cores",
+            "rx_min_feed_samples",
+            "rx_max_merge_wait_ms",
+        },
     )
     acceleration_device = _string(acceleration_raw, "device", "acceleration").lower()
     if not re.fullmatch(r"cpu|cuda(?::(?:0|[1-9][0-9]*))?", acceleration_device):
@@ -583,6 +594,20 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         ),
         cpu_cores=_optional_bounded_int(
             acceleration_raw, "cpu_cores", "acceleration", 0, MAX_CPU_CORES
+        ),
+        rx_min_feed_samples=_optional_bounded_int(
+            acceleration_raw, "rx_min_feed_samples", "acceleration", 0, MAX_RX_MIN_FEED_SAMPLES
+        ),
+        rx_max_merge_wait_ms=(
+            None
+            if acceleration_raw.get("rx_max_merge_wait_ms") is None
+            else _bounded_number(
+                acceleration_raw,
+                "rx_max_merge_wait_ms",
+                "acceleration",
+                0.0,
+                MAX_RX_MERGE_WAIT_MS,
+            )
         ),
     )
     if acceleration.backend == "native" and acceleration.device != "cpu":

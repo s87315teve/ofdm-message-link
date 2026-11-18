@@ -316,14 +316,16 @@ def _prefilter_taps() -> NDArray[np.float64]:
     return taps
 
 
-def prefilter_for_acquisition(samples: ArrayLike) -> NDArray[np.complex64]:
+def prefilter_for_acquisition(
+    samples: ArrayLike, *, assume_finite: bool = False
+) -> NDArray[np.complex64]:
     """Low-pass the acquisition copy of the samples (experiment only).
 
     Linear phase and centred (``mode='same'``), so acquired offsets still
-    index the raw buffer.
+    index the raw buffer.  ``assume_finite``: the caller already checked them.
     """
 
-    values = _as_complex_samples(samples, "samples")
+    values = _as_complex_samples(samples, "samples", assume_finite=assume_finite)
     return np.convolve(values, _prefilter_taps(), mode="same").astype(np.complex64)
 
 
@@ -400,6 +402,8 @@ def v5_candidates(
     samples: ArrayLike,
     shared: SharedCorrelation,
     config: V5SyncConfig,
+    *,
+    assume_finite: bool = False,
 ) -> tuple[V5Acquisition, ...]:
     """Every v5 preamble in the buffer, at most one per 560 samples, by start.
 
@@ -412,7 +416,7 @@ def v5_candidates(
         raise SyncError("config must be a V5SyncConfig")
     if not isinstance(shared, SharedCorrelation) or shared.lag != _CORRELATION_LAG:
         raise SyncError("shared must be the lag-32 SharedCorrelation of the samples")
-    values = _as_complex_samples(samples, "samples")
+    values = _as_complex_samples(samples, "samples", assume_finite=assume_finite)
     if shared.sample_count != values.size:
         raise SyncError("shared correlation does not belong to these samples")
     return _v5_candidates(values, shared, config)
@@ -672,6 +676,7 @@ def measure_ltf_pair(
     *,
     average: bool = True,
     backoff: int = 0,
+    assume_finite: bool = False,
 ) -> LtfMeasurement | None:
     """Channel estimate, noise and signal power from the two LTF symbols.
 
@@ -683,11 +688,12 @@ def measure_ltf_pair(
     comes from the pair.  ``backoff`` starts both FFT windows that many
     samples early, inside the guard and L1 respectively, as the decoder does
     for every v5 window.  ``None`` when the samples do not hold both symbols
-    or the estimate is unusable.
+    or the estimate is unusable.  ``assume_finite`` skips the finite check
+    for samples the caller has already checked.
     """
 
     _require_numerology(numerology)
-    values = _as_complex_samples(samples, "samples")
+    values = _as_complex_samples(samples, "samples", assume_finite=assume_finite)
     start = acquisition.ltf_start - backoff
     if start < 0 or start + 128 > values.size:
         return None

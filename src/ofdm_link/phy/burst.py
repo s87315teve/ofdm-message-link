@@ -640,19 +640,22 @@ def _acquire_one(
     if not rx.v5_acquisition:
         # Legacy only: exactly the scan this function replaced.
         return acquire_preamble(values, settings.sync)
-    checked = _as_complex_samples(values, "samples")
+    # ``values`` passed _input_samples' finite check in this same call.
+    checked = _as_complex_samples(values, "samples", assume_finite=True)
     shared: SharedCorrelation | None = None
     if checked.size > settings.sync.half_length and np.any(checked):
         shared = _shared_correlation(checked, settings.sync.half_length)
     legacy: AcquisitionResult | None = None
     if rx.legacy_acquisition:
         legacy = _unambiguous_candidate(
-            _acquisition_candidates(checked, settings.sync, shared=shared),
+            _acquisition_candidates(
+                checked, settings.sync, shared=shared, assume_finite=True
+            ),
             settings.sync,
         )
     v5: V5Acquisition | None = None
     if rx.v5_acquisition and shared is not None and shared.lag == 32:
-        found = v5_candidates(checked, shared, rx.acquisition)
+        found = v5_candidates(checked, shared, rx.acquisition, assume_finite=True)
         if found:
             best = max(found, key=lambda item: item.confidence)
             competing = any(
@@ -712,6 +715,7 @@ def _decode_burst_with_acquisition(
     symbol_demapper: SymbolDemapper,
     soft_symbol_demapper: SoftSymbolDemapper | None,
     input_noise_variance: float | None,
+    assume_finite: bool = False,
 ) -> AnyDecodedBurst:
     """Decode one burst whose preamble the caller has already acquired.
 
@@ -721,6 +725,8 @@ def _decode_burst_with_acquisition(
     single largest non-FEC cost in the receive path.  The caller owns the
     separation rule it applied; this entry point applies none of its own.
     A :class:`~ofdm_link.phy.sync_v5.V5Acquisition` selects the v5 path.
+    ``assume_finite`` skips the finite check: the continuous decoder hands
+    over its own buffer, every sample of which it checked on the way in.
     """
 
     settings = _require_config(config)
@@ -733,6 +739,7 @@ def _decode_burst_with_acquisition(
         symbol_demapper,
         soft_symbol_demapper,
         input_noise_variance,
+        assume_finite=assume_finite,
     )
     return _decode_any_acquired(
         values,
@@ -752,6 +759,8 @@ def _validated_decode_input(
     symbol_demapper: SymbolDemapper,
     soft_symbol_demapper: SoftSymbolDemapper | None,
     input_noise_variance: float | None,
+    *,
+    assume_finite: bool = False,
 ) -> NDArray[np.complex64]:
     if not callable(frame_decoder):
         raise BurstValidationError("frame_decoder must be callable")
@@ -768,7 +777,7 @@ def _validated_decode_input(
         raise BurstValidationError(
             "soft decoding requires a positive finite input_noise_variance"
         )
-    return _input_samples(samples, settings)
+    return _input_samples(samples, settings, assume_finite=assume_finite)
 
 
 def _decode_acquired_burst(
@@ -798,8 +807,13 @@ def _decode_acquired_burst(
     training_samples = corrected_fixed[:block_length]
     header_samples = corrected_fixed[block_length:]
     try:
+        # ``values`` were checked (or are the stream's checked buffer).
         preamble = measure_preamble(
-            values, acquisition, settings.numerology.active_carriers, settings.sync
+            values,
+            acquisition,
+            settings.numerology.active_carriers,
+            settings.sync,
+            assume_finite=True,
         )
         refined = refine_channel_estimate(
             estimate_channel(training_samples, settings.numerology),
@@ -1489,7 +1503,9 @@ def _correct_cfo(
     return np.multiply(samples, correction, out=correction)
 
 
-def _input_samples(samples: ArrayLike, config: BurstConfig) -> NDArray[np.complex64]:
+def _input_samples(
+    samples: ArrayLike, config: BurstConfig, *, assume_finite: bool = False
+) -> NDArray[np.complex64]:
     array = np.asarray(samples)
     if array.ndim != 1:
         raise BurstDecodeError("samples must be a one-dimensional array")
@@ -1498,7 +1514,7 @@ def _input_samples(samples: ArrayLike, config: BurstConfig) -> NDArray[np.comple
     if array.size > config.max_input_samples:
         raise BurstDecodeError("input exceeds max_input_samples")
     converted = array.astype(np.complex64, copy=False)
-    if not all_finite(converted):
+    if not assume_finite and not all_finite(converted):
         raise BurstDecodeError("samples must contain only finite values")
     return converted
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from ._arrays import all_finite
+from ._arrays import _COMPONENT_DTYPE, all_finite
 from .burst import (
     BurstConfig,
     BurstDecodeError,
@@ -50,6 +50,11 @@ LINK_SNR_HISTORY = 4096
 # A burst is looked up once its payload has decoded, which with decode
 # workers can be several bursts after its acquisition; this is ample.
 SNR_AT_HISTORY = 512
+# Initial sample storage of the decoder's buffer (1 MiB of complex64), never
+# more than ``max_input_samples``.  It grows when a burst outlives it and
+# shrinks back once only a short idle tail is left; see
+# StreamingBurstDecoder._append.
+INITIAL_BUFFER_SAMPLES = 1 << 17
 
 
 def peak_amplitude(samples: NDArray[np.complex64]) -> float | None:
@@ -57,6 +62,12 @@ def peak_amplitude(samples: NDArray[np.complex64]) -> float | None:
 
     if samples.size == 0:
         return None
+    component = _COMPONENT_DTYPE.get(samples.dtype)
+    if component is not None and samples.flags.c_contiguous:
+        # One contiguous pass over I and Q together, and no |x| temporaries:
+        # the largest magnitude is the larger of -min and max.
+        flat = samples.view(component)
+        return float(max(-float(flat.min()), float(flat.max())))
     return float(max(np.max(np.abs(samples.real)), np.max(np.abs(samples.imag))))
 
 
@@ -211,7 +222,17 @@ class StreamingBurstDecoder:
         self._symbol_demapper = symbol_demapper
         self._soft_symbol_demapper = soft_symbol_demapper
         self._input_noise_variance = input_noise_variance
-        self._buffer = np.empty(0, dtype=np.complex64)
+        # The retained samples live in ``_storage[_head:_tail]`` and
+        # ``_buffer`` is always that read-only view: appending writes after
+        # the tail and discarding moves the head, so neither copies the
+        # samples kept.  ``_buffer_start`` is the absolute stream index of
+        # ``_buffer[0]``; only _discard changes it.  A view of ``_buffer`` is
+        # valid until the next _append, which may move the samples.
+        self._initial_capacity = min(config.max_input_samples, INITIAL_BUFFER_SAMPLES)
+        self._storage = np.empty(self._initial_capacity, dtype=np.complex64)
+        self._head = 0
+        self._tail = 0
+        self._buffer = self._view()
         self._buffer_start = 0
         # Whether samples arrived since the last drain finished.  A drain
         # always runs until it can make no more progress on the buffer it
@@ -344,10 +365,15 @@ class StreamingBurstDecoder:
                 acquisition,
                 numerology,
                 backoff=self._config.v5.snr_fft_advance_samples,
+                assume_finite=True,
             )
         else:
             measurement = measure_preamble(
-                self._buffer, acquisition, numerology.active_carriers, self._config.sync
+                self._buffer,
+                acquisition,
+                numerology.active_carriers,
+                self._config.sync,
+                assume_finite=True,
             )
         snr = link_snr_db(measurement, numerology)
         if snr is not None:
@@ -362,16 +388,22 @@ class StreamingBurstDecoder:
                 None if measurement is None else float(measurement.signal_power),
             )
 
-    def feed(self, complex_chunk: ArrayLike) -> tuple[AnyDecodedBurst, ...]:
+    def feed(
+        self, complex_chunk: ArrayLike, *, assume_finite: bool = False
+    ) -> tuple[AnyDecodedBurst, ...]:
         """Consume one contiguous sample chunk and emit every complete burst.
 
         Legacy bursts come back as :class:`DecodedBurst`, v5 bursts as
         :class:`~ofdm_link.phy.burst_v5.DecodedPsduBurst` -- including one
         whose FCS failed, for its CRC-valid subframes.
+
+        ``assume_finite=True`` skips the finite check of a complex64 chunk
+        whose source guarantees finite samples (a radio's integer samples
+        converted to float); any other dtype is still checked.
         """
 
         self._enter_mode("decode")
-        values = _stream_samples(complex_chunk)
+        values = _stream_samples(complex_chunk, assume_finite=assume_finite)
         decoded: list[AnyDecodedBurst] = []
         cursor = 0
         while cursor < values.size:
@@ -388,8 +420,42 @@ class StreamingBurstDecoder:
         decoded.extend(self._drain())
         return tuple(decoded)
 
+    def _view(self) -> NDArray[np.complex64]:
+        view = self._storage[self._head : self._tail]
+        view.flags.writeable = False
+        return view
+
     def _append(self, values: NDArray[np.complex64]) -> None:
-        self._buffer = np.concatenate((self._buffer, values)).astype(np.complex64, copy=False)
+        count = int(values.size)
+        if self._tail + count > self._storage.size:
+            live = self._tail - self._head
+            needed = live + count
+            capacity = self._storage.size
+            limit = self._config.max_input_samples
+            if needed > limit:
+                raise BurstDecodeError("buffered samples would exceed max_input_samples")
+            resized = capacity
+            if needed > capacity // 2 and capacity < limit:
+                # Grow when even a compacted buffer would be over half full,
+                # so a long burst costs a few doublings, not a compaction
+                # per feed.
+                resized = min(limit, max(2 * capacity, needed))
+            elif capacity > 4 * self._initial_capacity and needed <= self._initial_capacity // 2:
+                # A long burst grew the storage and the stream is back to
+                # its short idle tail: give the memory back.
+                resized = self._initial_capacity
+            if resized != capacity:
+                storage = np.empty(resized, dtype=np.complex64)
+                storage[:live] = self._storage[self._head : self._tail]
+                self._storage = storage
+            else:
+                # Overlapping copy; NumPy makes it as if from a temporary.
+                self._storage[:live] = self._storage[self._head : self._tail]
+            self._head = 0
+            self._tail = live
+        self._storage[self._tail : self._tail + count] = values
+        self._tail += count
+        self._buffer = self._view()
         self._unscanned = True
 
     def _drain(self) -> list[AnyDecodedBurst]:
@@ -434,6 +500,7 @@ class StreamingBurstDecoder:
                     symbol_demapper=self._symbol_demapper,
                     soft_symbol_demapper=self._soft_symbol_demapper,
                     input_noise_variance=self._input_noise_variance,
+                    assume_finite=True,
                 )
             except BurstDecodeError as error:
                 if error.required_sample_count is not None and (
@@ -510,7 +577,9 @@ class StreamingBurstDecoder:
             self._next_candidate_start = None
             self._header_validated = False
 
-    def feed_segments(self, complex_chunk: ArrayLike) -> tuple[BurstSegment, ...]:
+    def feed_segments(
+        self, complex_chunk: ArrayLike, *, assume_finite: bool = False
+    ) -> tuple[BurstSegment, ...]:
         """Consume one chunk and emit each header-bounded burst undecoded.
 
         Acquisition, the fixed-header probe and the burst boundary stay here,
@@ -521,10 +590,11 @@ class StreamingBurstDecoder:
         The one behavioural difference from :meth:`feed` is on a payload
         failure: the stream has already moved past the signalled burst end, so
         a failed payload is not rescanned for a preamble inside its own span.
+        ``assume_finite`` is as for :meth:`feed`.
         """
 
         self._enter_mode("segments")
-        values = _stream_samples(complex_chunk)
+        values = _stream_samples(complex_chunk, assume_finite=assume_finite)
         segments: list[BurstSegment] = []
         cursor = 0
         while cursor < values.size:
@@ -625,6 +695,7 @@ class StreamingBurstDecoder:
                         symbol_demapper=self._symbol_demapper,
                         soft_symbol_demapper=self._soft_symbol_demapper,
                         input_noise_variance=self._input_noise_variance,
+                        assume_finite=True,
                     )
                 except BurstDecodeError as error:
                     if error.required_sample_count is not None and (
@@ -643,6 +714,8 @@ class StreamingBurstDecoder:
             if self._buffer.size < wanted:
                 return segments
             segment = BurstSegment(
+                # A copy: the buffer's storage is reused, and a pool pickles
+                # the segment later, on another thread.
                 samples=self._buffer[:wanted].copy(),
                 acquisition=self._pending_acquisition,
                 stream_offset=self._buffer_start,
@@ -659,7 +732,9 @@ class StreamingBurstDecoder:
             self._header_validated = False
 
     def _acquire_next(self) -> bool:
-        candidates = acquire_all(self._buffer, self._legacy_sync, self._v5_sync)
+        candidates = acquire_all(
+            self._buffer, self._legacy_sync, self._v5_sync, assume_finite=True
+        )
         if not candidates:
             self._retain_possible_preamble_prefix()
             return False
@@ -737,8 +812,13 @@ class StreamingBurstDecoder:
             self._discard(self._buffer.size - keep)
 
     def _discard(self, sample_count: int) -> None:
-        self._buffer = self._buffer[sample_count:].copy()
+        # As the old slice-and-copy did: a count past the end empties the
+        # buffer, and the stream position still moves by the whole count.
+        self._head = min(self._head + sample_count, self._tail)
         self._buffer_start += sample_count
+        if self._head == self._tail:
+            self._head = self._tail = 0
+        self._buffer = self._view()
 
 
 def decode_burst_segment(
@@ -770,14 +850,19 @@ def decode_burst_segment(
     )
 
 
-def _stream_samples(complex_chunk: ArrayLike) -> NDArray[np.complex64]:
+def _stream_samples(
+    complex_chunk: ArrayLike, *, assume_finite: bool = False
+) -> NDArray[np.complex64]:
     values = np.asarray(complex_chunk)
     if values.ndim != 1:
         raise BurstDecodeError("complex_chunk must be a one-dimensional array")
     if not np.issubdtype(values.dtype, np.number):
         raise BurstDecodeError("complex_chunk must be numeric")
+    # Only a chunk that already is complex64 may skip the check: narrowing a
+    # finite complex128 can overflow to inf.
+    trusted = assume_finite and values.dtype == np.complex64
     converted = values.astype(np.complex64, copy=False)
-    if not all_finite(converted):
+    if not trusted and not all_finite(converted):
         raise BurstDecodeError("complex_chunk must contain only finite values")
     return converted
 
