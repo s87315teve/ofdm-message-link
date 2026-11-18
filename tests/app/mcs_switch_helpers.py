@@ -119,7 +119,7 @@ def assert_sent_joins_received(sent_rows, rx_rows, datagrams, *, waits: bool):
     return data
 
 
-def assert_la_lines_match_sent(la_events, data):
+def assert_la_lines_match_sent(la_events, data, dropped_sequences=()):
     """The LA log's ``la`` lines against the data ``sent`` lines of the same node.
 
     Two ``la`` lines can name one ``first_sequence`` (a decision taken for a
@@ -128,7 +128,9 @@ def assert_la_lines_match_sent(la_events, data):
     at its MCS.  A burst whose ``planned_mcs`` differs from its ``mcs`` was
     sized while the MCS was still the old one, so the MCS changed at exactly
     that burst and ``planned_mcs`` is that line's ``previous``; a burst with
-    no line at its sequence kept the MCS, and was sized at it.
+    no line at its sequence kept the MCS, and was sized at it.  A line whose
+    burst then failed to encode names a sequence only a ``tx_dropped`` line
+    has (``dropped_sequences``).
     """
 
     last = {}
@@ -137,6 +139,8 @@ def assert_la_lines_match_sent(la_events, data):
     by_first = {row["first_sequence"]: row for row in data}
     assert last
     for sequence, event in last.items():
+        if sequence in dropped_sequences and sequence not in by_first:
+            continue
         assert by_first[sequence]["mcs"] == event["mcs_index"]
     moved = 0
     for row in data:

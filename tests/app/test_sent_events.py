@@ -86,6 +86,16 @@ def _payload(number: int) -> bytes:
     return f"#{number:06d}:".encode() + bytes((number * 11 + i) & 0xFF for i in range(number % 180))
 
 
+def _status_subframes(path):
+    """``tx.subframes`` of the newest ``status`` line written so far (None before one)."""
+
+    try:
+        rows = read_events(str(path), kinds=["status"])
+    except (FileNotFoundError, ValueError):
+        return None
+    return rows[-1]["tx"]["subframes"] if rows else None
+
+
 def _node(node_id, tmp_path, ports):
     ingress, egress, listen, peer, control = ports
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "OMP_NUM_THREADS": "1",
@@ -146,7 +156,11 @@ def test_two_node_apps_log_one_sent_line_per_burst_that_joins_the_peer_burst(tmp
         assert ask(control1, {"cmd": "set_mcs", "mcs": None}) == {"ok": True}
         send(40, 0.001)
         assert delivered()
-        time.sleep(0.6)  # a stats tick after the last burst
+        # Wait for a status line that counts every datagram: the parent
+        # writes one every 0.5 s from child stats that arrive every 0.25 s
+        # (plus batching), so a fixed sleep can catch pre-final counters.
+        assert _wait_for(lambda: _status_subframes(tmp_path / "node1_events.jsonl")
+                         == len(sent), 30.0)
         for port in (control1, control2):
             assert ask(port, {"cmd": "stop"}) == {"ok": True}
         for process in processes:
