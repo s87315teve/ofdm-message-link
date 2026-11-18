@@ -6,7 +6,8 @@ adjacent switch (n -> n+-1) and every cross-level jump (8 <-> 17, 9 <-> 15,
 ...).  ``free_udp_ports`` hands out ephemeral loopback ports outside the
 52000-52999 range the B210 measurement scripts use.
 ``assert_sent_joins_received`` checks a node's ``--events`` ``sent`` lines
-against its peer's ``burst`` lines.
+against its peer's ``burst`` lines, ``assert_la_lines_match_sent`` its LA
+log's ``la`` lines against them.
 """
 
 from __future__ import annotations
@@ -116,3 +117,33 @@ def assert_sent_joins_received(sent_rows, rx_rows, datagrams, *, waits: bool):
     else:
         assert all(row["planned_mcs"] is None for row in sent_rows)
     return data
+
+
+def assert_la_lines_match_sent(la_events, data):
+    """The LA log's ``la`` lines against the data ``sent`` lines of the same node.
+
+    Two ``la`` lines can name one ``first_sequence`` (a decision taken for a
+    control-only burst, then another for the data burst after it), so only
+    the last line per sequence counts: the data burst starting there went out
+    at its MCS.  A burst whose ``planned_mcs`` differs from its ``mcs`` was
+    sized while the MCS was still the old one, so the MCS changed at exactly
+    that burst and ``planned_mcs`` is that line's ``previous``; a burst with
+    no line at its sequence kept the MCS, and was sized at it.
+    """
+
+    last = {}
+    for event in la_events:
+        last[event["first_sequence"]] = event
+    by_first = {row["first_sequence"]: row for row in data}
+    assert last
+    for sequence, event in last.items():
+        assert by_first[sequence]["mcs"] == event["mcs_index"]
+    moved = 0
+    for row in data:
+        if row["planned_mcs"] is None or row["planned_mcs"] == row["mcs"]:
+            continue
+        moved += 1
+        event = last.get(row["first_sequence"])
+        assert event is not None, f"burst {row['first_sequence']} changed MCS without an la line"
+        assert (event["previous"], event["mcs_index"]) == (row["planned_mcs"], row["mcs"])
+    return moved

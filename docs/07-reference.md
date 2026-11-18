@@ -327,7 +327,9 @@ burst 在有 noise、multipath、CFO、DC、sample clock offset 的模擬 channe
 - 兩個視窗的建構，以及**用 README 的指令實際啟動 app 的 subprocess 測試**。
 - 執行中換 MCS 不遺失、不亂序、不用錯 MCS（`test_mcs_switch_guard.py`、`test_mcs_switch_node_udp.py`）；兩個
   `node_app --events` 經 udp 交換時，發送端每個 burst 一行 `sent`，sequence 連續，和 peer 解出的 `burst` 一個對一個、
-  MCS 相同（`test_sent_events.py`）。
+  MCS 相同；在 aggregation 等待中換了 MCS 的 burst，`planned_mcs` 是換之前的 MCS；`--la-log` 的 `la` 行在同一個
+  `first_sequence` 以最後一行為準（7.9 節的 `--la-log`），那一行的 MCS 就是從那裡開始的 data burst 的 MCS
+  （`test_sent_events.py`）。
 
 修改 PHY 之後，除了跑測試，也請重新產生互動導覽的資料：`python -m guide.build_data`。
 
@@ -524,7 +526,7 @@ process 默默分流。
 | `--control-mcs-index N` | Control-only burst 的 MCS，預設 profile 的值（8） |
 | `--decode-workers N` | 1–64；沒給時取 `acceleration.decode_workers`，`null`（預設）時是 3（兩個 node 在同一台 PC 時的 CPU 預算） |
 | `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`tx.health` 是 TX health（見 7.1 節的 `tx_health`）。`wall_time` 是 Unix 時間（秒），`monotonic_s` 是 monotonic 時間。`tx.goodput_bps`、`tx.airtime_frac` 是 2 秒視窗，`tx.goodput_avg_bps`、`tx.airtime_avg_frac` 是第一行以來的平均。`tx.bandwidth_hz`、`rx.bandwidth_hz` 是 UHD 讀回的類比濾波器頻寬（沒有讀回值時是 `null`）。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
-| `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON。v2.1.2 之後，MCS 改變的 `la` 行多一個 `first_sequence`：決定當下下一個要編碼的 DATA sequence，也就是新 MCS 的第一個 DATA subframe（決定的那個 burst 是 control-only 時，是下一個 data burst 的第一個） |
+| `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON。v2.1.2 之後，MCS 改變的 `la` 行多一個 `first_sequence`：決定當下下一個要編碼的 DATA sequence，也就是新 MCS 的第一個 DATA subframe（決定的那個 burst 是 control-only 時，是下一個 data burst 的第一個）。所以兩行 `la` 可能有同一個 `first_sequence`：為 control-only burst 做的決定之後，下一個 data burst 又換了一次，或決定之後那個 burst 的 encode 失敗。**同一個 `first_sequence` 以最後一行為準**：從那裡開始的 data burst 用的是最後一行的 `mcs_index`，前面那行的 MCS 沒有送過 data |
 | `--events PATH` | 只有 `--headless`：逐 burst 的接收事件，一行一個 JSON（preamble SNR、雜訊變異數、clipping、header／payload／FCS 結果、裝置時間與主機時間），加上 gain、頻率、失鎖、overflow 與每 0.5 s 的計數器；v2.1.2 之後也寫發送端每個送出的 burst（`sent`）與丟掉的 burst（`tx_dropped`）。**預設關閉**，關閉時接收端與發送端的程式路徑不變。格式見 [7.11 節](#711-逐-burst-的接收事件--events) |
 | `--events-lock-timeout S` | 配合 `--events`：串流時間連續 S 秒沒有收到 peer 的 header 就算失鎖，預設 1.0 |
 | `--ready-file PATH` | 兩個方向都在跑時建立，停止時刪除 |
@@ -834,13 +836,15 @@ burst 與 lead time）；Pluto 是 push 傳回（大約一個 burst 的 airtime�
 | `subframes` | DATA subframe 數。下一個 data burst 的 `first_sequence` 是 `first_sequence + subframes`（mod 65536），除非中間有 `tx_dropped` |
 | `control_subframes`、`control_sequence` | 放在 data 前面的 CONTROL subframe 數與第一個的 sequence（CONTROL 有自己的計數器；沒有 CONTROL 時 `control_sequence` 是 `null`） |
 | `mcs` | 編碼用的 MCS index |
-| `planned_mcs` | aggregation 等待（`max_wait_ms` 或 `min_burst_interval_ms`）估算這個 burst 能裝多少時用的 MCS：policy 的 `peek_next_entry`，沒有 policy 或它還沒有答案時是 TX 目前的 MCS。真正裝幾個仍由 encode 用的 `mcs` 決定；兩者不同只表示 MCS 在等待與 encode 之間換了（等待可能多等或少等），burst 不會因此超過上限，也不會掉 datagram。沒有等待可估時是 `null`：control-only burst、aggregation 關閉、兩個等待都是 0，以及啟動後的第一個 burst（還沒有上一個 burst 可以算間隔） |
+| `planned_mcs` | aggregation 等待（`max_wait_ms` 或 `min_burst_interval_ms`）估算這個 burst 能裝多少時用的 MCS：policy 的 `peek_next_entry`，沒有 policy 或它還沒有答案時是 TX 目前的 MCS。真正裝幾個仍由 encode 用的 `mcs` 決定；兩者不同只表示 MCS 在等待與 encode 之間換了（等待可能多等或少等），burst 不會因此超過上限，也不會掉 datagram。沒有等待可估時是 `null`：control-only burst、aggregation 關閉、兩個等待都是 0；`max_wait_ms` 是 0 時，啟動後的第一個 burst 也是（`min_burst_interval_ms` 從上一個 burst 算，那時還沒有上一個）。`max_wait_ms` 大於 0 時每個 data burst 都有值 |
 | `sample_count` | burst 的 samples，含前後 guard |
 | `control_only`、`standalone` | 只有 CONTROL frame；`standalone` 是 policy 為了 feedback 在排隊的 data 之前先送的 control-only burst（閒置時的 control burst 是 `false`） |
 | `attempt` | 第幾次交給 transport 時被接受：1 是第一次；大於 1 表示前面的 send 失敗而保留重送（`retry_failed_send` 的 transport），或 radio 在接受它之前被 detach，換了 radio 後再送。重送的是同一份 samples、同樣的 sequence 與 MCS，所以一個 burst 仍只有一行 `sent` |
 
 `tx_dropped` 的欄位：`reason`（`encode_failed` 或 `send_failed`）、`first_sequence`、`subframes`、`control_subframes`、
-`control_sequence`、`mcs`、`attempt`（`send_failed` 是最後一次失敗的 attempt；`encode_failed` 是 0）。`mono`／`wall` 是丟掉
+`control_sequence`、`mcs`、`attempt`（`send_failed` 是最後一次失敗的 attempt；`encode_failed` 是 0）。`encode_failed` 的
+`control_sequence` 一律是 `null`（失敗的 encode 可能已經用掉 CONTROL sequence，但沒有記下來；`control_subframes` 是要放的
+CONTROL 數）。`mono`／`wall` 是丟掉
 的時間。`send_failed` 時這些 sequence 已經用掉，接收端會看到這段缺口；`encode_failed` 時 encode 已經分配 sequence 才失敗的話
 `first_sequence` 是用掉的第一個，在分配之前就失敗時是 `null`（沒有用掉 sequence，接收端看不到缺口），`subframes` 都是丟掉的
 datagram 數。

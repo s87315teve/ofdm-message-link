@@ -24,7 +24,11 @@ import time
 from pathlib import Path
 
 import pytest
-from mcs_switch_helpers import assert_sent_joins_received, free_udp_ports
+from mcs_switch_helpers import (
+    assert_la_lines_match_sent,
+    assert_sent_joins_received,
+    free_udp_ports,
+)
 
 from ofdm_link.phy.mcs_table import mcs_entry
 from ofdm_message_link import link
@@ -32,7 +36,7 @@ from ofdm_message_link.aggregation import AggregationLimits
 from ofdm_message_link.burst_events import EventLogWriter, read_events
 from ofdm_message_link.link import MessageTransmitter, build_phy_profile, load_link_config
 from ofdm_message_link.transport import TransportError
-from ofdm_message_link.tx_app import SentRecord, TransmitWorker
+from ofdm_message_link.tx_app import ControlPlan, SentRecord, TransmitWorker
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEDULE = (12, 8, 17, 9, 16, 10, 15)
@@ -134,8 +138,10 @@ def test_two_node_apps_log_one_sent_line_per_burst_that_joins_the_peer_burst(tmp
         send(60, 0.003)  # the LA (olla) picks the MCS
         assert delivered()
         for index in SCHEDULE:
+            send(20, 0.0005)
+            # Back to back: the change lands mid-queue, often during a wait.
             assert ask(control1, {"cmd": "set_mcs", "mcs": index}) == {"ok": True}
-            send(40, 0.0005)  # back to back: the change lands mid-queue
+            send(20, 0.0005)
             assert delivered()
         assert ask(control1, {"cmd": "set_mcs", "mcs": None}) == {"ok": True}
         send(40, 0.001)
@@ -176,13 +182,12 @@ def test_two_node_apps_log_one_sent_line_per_burst_that_joins_the_peer_burst(tmp
     status = [row for row in rows[1] if row["k"] == "status"][-1]
     assert status["tx"]["bursts"] <= len(sent_rows)
     assert status["tx"]["subframes"] == sum(row["subframes"] for row in data)
-    # The LA log's "la" lines name the first DATA sequence at the new MCS.
+    # The LA log's "la" lines name the first DATA sequence at the new MCS,
+    # and a burst sized before a switch carries the MCS it was sized at.
     la = [json.loads(line) for line in (tmp_path / "la1.jsonl").read_text().splitlines()]
-    switches = [event for event in la if event.get("event") == "la"]
-    by_first = {row["first_sequence"]: row for row in data}
-    assert switches and all(
-        by_first[event["first_sequence"]]["mcs"] == event["mcs_index"] for event in switches
-    )
+    moved = assert_la_lines_match_sent([event for event in la if event.get("event") == "la"],
+                                       data)
+    assert moved >= 1  # each set_mcs above lands mid-queue (7 of 7 in local runs)
     # Node 2 had nothing to send but control bursts.
     node2 = [row for row in rows[2] if row["k"] == "sent"]
     assert node2 and all(row["control_only"] and row["first_sequence"] is None
@@ -236,7 +241,8 @@ class _Sink:
         return True
 
 
-def _run(profile, sink, count, *, events=True, limits=None, transmitter=None):
+def _run(profile, sink, count, *, events=True, limits=None, transmitter=None, policy=None,
+         timeout_s=10.0):
     transmitter = transmitter or MessageTransmitter(profile, mcs_entry=mcs_entry(8))
     bridge = _Bridge()
     log: list[tuple[str, dict]] = []
@@ -244,13 +250,14 @@ def _run(profile, sink, count, *, events=True, limits=None, transmitter=None):
         transmitter, bridge,
         aggregation=limits or AggregationLimits(max_subframes=4, min_burst_interval_s=0.004),
         events=(lambda kind, value: log.append((kind, value))) if events else None,
+        policy=policy,
     )
     for index in range(count):
         assert worker.submit("t", f"message {index:03d} ".encode().ljust(100, b"."))
     worker.attach(sink)
     worker.start()
     try:
-        assert _wait_for(lambda: worker.pending == 0, 10.0)
+        assert _wait_for(lambda: worker.pending == 0, timeout_s)
     finally:
         worker.stop()
     return worker, bridge.sent.values, log
@@ -351,6 +358,121 @@ def test_without_events_nothing_is_stamped_or_logged(profile):
     assert log == [] and worker.dropped_send_failed_bursts == 1
     assert all(record.mono is None and record.wall is None and record.planned_mcs is None
                for record in records)
+
+
+class _DisagreeingPolicy:
+    """``peek_next_entry`` says MCS 8, the decision says 12: a switch during the wait."""
+
+    def peek_next_entry(self):
+        return mcs_entry(8)
+
+    def entry_for_next_burst(self, now):
+        return mcs_entry(12)
+
+    def control_plan(self, now, *, idle):
+        return ControlPlan()
+
+    def control_entry(self):
+        return mcs_entry(8)
+
+    def idle_wait_s(self, now):
+        return None
+
+    def on_sent(self, burst, now):
+        pass
+
+
+@pytest.mark.parametrize("limits", [AggregationLimits(max_subframes=4, max_wait_s=0.003),
+                                    AggregationLimits(max_subframes=4,
+                                                      min_burst_interval_s=0.004)])
+def test_planned_mcs_is_the_peeked_entry_when_the_decision_differs(profile, limits):
+    worker, records, log = _run(profile, _Sink(), 20, policy=_DisagreeingPolicy(),
+                                limits=limits)
+    assert log == [] and sum(record.subframe_count for record in records) == 20
+    waited = records if limits.max_wait_s > 0 else records[1:]  # interval: from the 2nd
+    assert all((record.planned_mcs, record.mcs_index) == (8, 12) for record in waited)
+    assert all(record.mcs_index == 12 for record in records)
+
+
+def test_a_burst_kept_across_a_detach_is_sent_once_with_attempt_2(profile):
+    bridge = _Bridge()
+    worker = TransmitWorker(MessageTransmitter(profile, mcs_entry=mcs_entry(8)), bridge,
+                            aggregation=AggregationLimits(max_subframes=4),
+                            events=lambda kind, value: None)
+
+    class Detaching(_Sink):
+        def send(self, samples):
+            worker.detach()  # the radio goes away while the burst waits for room
+            return False
+
+    for index in range(3):
+        assert worker.submit("t", b"y" * 50)
+    worker.attach(Detaching())
+    worker.start()
+    try:
+        assert _wait_for(lambda: worker.sink is None, 5.0)
+        time.sleep(0.2)
+        assert bridge.sent.values == []
+        worker.attach(_Sink())
+        assert _wait_for(lambda: worker.pending == 0, 5.0)
+    finally:
+        worker.stop()
+    (record,) = bridge.sent.values
+    assert (record.first_sequence, record.subframe_count, record.attempt, record.n) == (0, 3, 2, 1)
+
+
+def test_a_retrying_sink_that_gives_up_logs_the_burst_with_its_attempts(profile):
+    state = {}
+    sink = _Sink(fail=lambda attempt: state["worker"].dropped_send_failed_bursts == 0)
+    bridge = _Bridge()
+    log = []
+    worker = state["worker"] = TransmitWorker(
+        MessageTransmitter(profile, mcs_entry=mcs_entry(8)), bridge,
+        aggregation=AggregationLimits(max_subframes=4),
+        events=lambda kind, value: log.append((kind, value)))
+    for index in range(8):
+        assert worker.submit("t", b"z" * 60)
+    worker.attach(sink)
+    worker.start()
+    try:
+        assert _wait_for(lambda: worker.pending == 0, 10.0)
+    finally:
+        worker.stop()
+    ((kind, drop),) = log
+    assert kind == "tx_dropped" and drop["reason"] == "send_failed"
+    assert drop["attempt"] >= 5 and drop["attempt"] == sink.calls - len(bridge.sent.values)
+    assert (drop["first_sequence"], drop["subframes"]) == (0, 4)
+    assert [record.first_sequence for record in bridge.sent.values] == [4]
+    assert bridge.sent.values[0].attempt == 1
+
+
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_sequences_wrap_at_16_bits_in_sent_and_dropped_lines(profile, monkeypatch, fail_first):
+    import itertools
+
+    transmitter = MessageTransmitter(profile, mcs_entry=mcs_entry(8))
+    transmitter._sequence = itertools.count(65534)
+    transmitter._next_sequence = 65534  # as if 65534 datagrams had gone before
+    if fail_first:
+        original, calls = link.encode_burst_v5, []
+
+        def fail_once(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise ValueError("cannot encode this burst")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(link, "encode_burst_v5", fail_once)
+    worker, records, log = _run(profile, _Sink(), 12, transmitter=transmitter)
+    sequences = [(record.first_sequence, record.subframe_count) for record in records]
+    if fail_first:
+        ((_, drop),) = log
+        assert (drop["first_sequence"], drop["subframes"]) == (65534, 4)  # 65534 .. 1
+        assert sequences == [(2, 4), (6, 4)]
+    else:
+        assert log == []
+        assert sequences == [(65534, 4), (2, 4), (6, 4)]
+    assert transmitter.next_sequence == 10
 
 
 def test_the_writer_writes_the_childs_stamp_and_skips_unstamped_records(tmp_path):

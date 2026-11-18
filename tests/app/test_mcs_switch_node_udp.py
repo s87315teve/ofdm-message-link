@@ -30,6 +30,7 @@ import time
 
 import pytest
 from mcs_switch_helpers import (
+    assert_la_lines_match_sent,
     assert_sent_joins_received,
     every_transition,
     free_udp_ports,
@@ -267,11 +268,7 @@ def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path, deco
     assert [row["mcs"] for row in sparse] == schedule
     assert all(row["subframes"] == 1 for row in sparse)
     # The LA log names the first DATA sequence of every switch.
-    by_first = {row["first_sequence"]: row for row in data}
-    la_events = _log_events(la_log, "la")
-    assert la_events and all(
-        by_first[event["first_sequence"]]["mcs"] == event["mcs_index"] for event in la_events
-    )
+    assert_la_lines_match_sent(_log_events(la_log, "la"), data)
     # Node 2 sent control bursts only.
     node2_sent = [row for row in rows[2] if row["k"] == "sent"]
     assert node2_sent and all(row["control_only"] and row["first_sequence"] is None
