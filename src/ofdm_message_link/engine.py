@@ -126,7 +126,12 @@ class _BatchQueue(multiprocessing.queues.Queue):
                 if not sent:
                     lost, kinds = len(obj), [event[0] for event in obj]
         if self.on_lost is not None:
-            self.on_lost(lost, kinds, error)
+            try:
+                self.on_lost(lost, kinds, error)
+            except Exception:
+                # Runs on the feeder thread: reporting a loss (e.g. a broken
+                # stderr) must never kill it and silence the channel.
+                pass
 
 
 class _EventQueue:
@@ -186,8 +191,11 @@ class _EventQueue:
             self._sent -= count
             self.lost += count
         names = ", ".join(sorted({str(kind) for kind in kinds}))
-        print(f"[engine-events] dropped {count} event(s) that cannot be pickled "
-              f"({names}): {type(error).__name__}: {error}", file=sys.stderr, flush=True)
+        try:
+            print(f"[engine-events] dropped {count} event(s) that cannot be pickled "
+                  f"({names}): {type(error).__name__}: {error}", file=sys.stderr, flush=True)
+        except Exception:
+            pass
 
     def get(self, timeout: float) -> list:
         """Parent side: the next batch, oldest first; ``queue.Empty`` on timeout."""
