@@ -184,7 +184,7 @@ window.GUIDE_CONTENT = (function () {
         },
         input: "TX 的 samples", output: "含 noise 的 samples",
         code: { sim: ["<code>transport.py</code>：<code>UdpSampleSource</code>（加上 AWGN）"], uhd: ["<code>configs/profiles/ota_2p45ghz.yaml</code>"], pluto: ["<code>configs/profiles/ota_2p45ghz.yaml</code>"] },
-        opts: { sim: ["<code>--snr-db</code>（只在 RX 設定）"], uhd: ["<code>--overlay</code>：選擇 center frequency 與 sample rate", "<code>configs/profiles/b210_2p45ghz_15p36msps.yaml</code>：B210 的 15.36 MS/s"], pluto: ["<code>--overlay</code>：選擇 center frequency"] },
+        opts: { sim: ["<code>--snr-db</code>（只在 RX 設定）"], uhd: ["<code>--overlay</code>：選擇 center frequency 與 sample rate", "<code>configs/profiles/b210_2p45ghz_15p36msps.yaml</code>：15.36 MS/s（測過 B210 與 NI USRP-2901）"], pluto: ["<code>--overlay</code>：選擇 center frequency"] },
         gui: "RX 的 spectrum 與 <code>SNR (2 s)</code> card。"
       }]
     },
@@ -634,7 +634,7 @@ window.GUIDE_CONTENT = (function () {
             "TX 與 RX 各開一個 UHD block。兩個都用 <code>--serial</code> 選同一台 B210。",
             "Node 先啟動 TX，再啟動 RX。停止時也先停 TX。",
             "Node 1 在 2.420 GHz 發送，在 2.460 GHz 接收。Node 2 相反。",
-            "B210 也可以用 15.36 MS/s：<code>configs/profiles/duplex_fdd_2420_2460_15p36.yaml</code>。"]),
+            "USRP 也可以用 15.36 MS/s：<code>configs/profiles/duplex_fdd_2420_2460_15p36.yaml</code>。這個速率只在 B210 與 NI USRP-2901 上測過，而且只量過單向。"]),
         input: "TX bursts", output: "RX sample stream",
         code: ota(["<code>node_engine.py</code>：<code>UdpDuplexFactory</code>、<code>DuplexEndpoint</code>"],
           ["<code>pluto.py</code>：<code>SharedPlutoContext</code>", "<code>node_engine.py</code>：<code>PlutoDuplexFactory</code>、<code>NodeWorker</code>"],

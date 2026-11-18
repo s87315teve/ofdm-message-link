@@ -1,11 +1,14 @@
-# One-way profile for tx_app / rx_app on USRP B210s at 15.36 MS/s, 2.45 GHz.
+# One-way profile for tx_app / rx_app on USRPs at 15.36 MS/s, 2.45 GHz.
 #   rx_app --transport uhd --overlay configs/profiles/b210_2p45ghz_15p36msps.yaml
 #   tx_app --transport uhd --overlay configs/profiles/b210_2p45ghz_15p36msps.yaml --enable-rf ...
 #
 # 15.36 MS/s comes from a 30.72 MHz master clock, decimation 2
-# (ofdm_link.radio.uhd.MASTER_CLOCK_RATES).  B210 only.  Signal 2442.32-2457.68
-# MHz.  The aggregate airtime cap is 5 ms (80 000 samples at 50 ppm is 5.21 ms
-# at this rate).  Not measured on hardware yet.  It does not arm the
+# (ofdm_link.radio.uhd.MASTER_CLOCK_RATES).  Tested on a B210 and an NI
+# USRP-2901 only; the code does not restrict it by device.  Signal
+# 2442.32-2457.68 MHz.  The aggregate airtime cap is 5 ms (80 000 samples at
+# 50 ppm is 5.21 ms at this rate).  Measured one-way on 2026-11-11 between a
+# B210 and an NI USRP-2901 on one bench: MCS 17 carried about 35.5 Mb/s,
+# limited by TX airtime (docs/07-reference.md 7.4).  It does not arm the
 # transmitter: every RF run still requires --enable-rf and its acknowledgement.
 phy:
   sample_rate: 15360000

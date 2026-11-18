@@ -82,8 +82,8 @@
 | [`b210_ota_3p8ghz_10msps.yaml`](../configs/profiles/b210_ota_3p8ghz_10msps.yaml) | 選用。同上但 10 MS/s |
 | [`duplex_fdd_2420_2460.yaml`](../configs/profiles/duplex_fdd_2420_2460.yaml) | `node_app` 的預設。兩台 Pluto、5 MS/s；node 1 TX 2420／RX 2460 MHz，node 2 相反 |
 | [`duplex_fdd_2405_2475.yaml`](../configs/profiles/duplex_fdd_2405_2475.yaml) | `node_app` 的備用：70 MHz 間距，2405／2475 MHz |
-| [`duplex_fdd_2420_2460_15p36.yaml`](../configs/profiles/duplex_fdd_2420_2460_15p36.yaml) | `node_app`，兩台 B210、15.36 MS/s，同 2420／2460 MHz（7.4 節） |
-| [`b210_2p45ghz_15p36msps.yaml`](../configs/profiles/b210_2p45ghz_15p36msps.yaml) | `tx_app`／`rx_app`，B210、15.36 MS/s、2.45 GHz（7.4 節） |
+| [`duplex_fdd_2420_2460_15p36.yaml`](../configs/profiles/duplex_fdd_2420_2460_15p36.yaml) | `node_app`，兩台 USRP（`--transport uhd`）、15.36 MS/s，同 2420／2460 MHz（7.4 節）；雙向還沒有量測紀錄 |
+| [`b210_2p45ghz_15p36msps.yaml`](../configs/profiles/b210_2p45ghz_15p36msps.yaml) | `tx_app`／`rx_app`，USRP（`--transport uhd`）、15.36 MS/s、2.45 GHz（7.4 節） |
 | [`legacy_rx.yaml`](../configs/profiles/legacy_rx.yaml) | **附加用**：把 `phy.rx.legacy_acquisition` 打開，也收 v1.0／`improve-rx` 的 TX 送的舊格式 burst（v2.0 起預設不收） |
 | [`b210_measurement.yaml`](../configs/profiles/b210_measurement.yaml) | **附加用**，接在上面任一個 profile 後面：把 `phy.rx.legacy_acquisition` 關掉。v2.0 起預設本來就是關，它只在底下的設定把它打開時才有作用（`run_duplex.sh --transport uhd` 仍會自動加） |
 
@@ -240,17 +240,21 @@ Radio 的 analog filter bandwidth 設成等於 sample rate。這和 OFDM signal 
 |---:|---:|---:|
 | 5 MS/s | 4.06 MHz | 5 MHz |
 | 10 MS/s | 8.13 MHz | 10 MHz |
-| 15.36 MS/s（B210 限定） | 12.48 MHz | 15.36 MHz |
+| 15.36 MS/s（`uhd`；測過 B210 與 NI USRP-2901） | 12.48 MHz | 15.36 MHz |
 | 20 MS/s | 16.25 MHz | 20 MHz |
 
-**15.36 MS/s（只有 B210，`--transport uhd`）。** LTE 的 sample rate：B210 的 master clock 固定設成 30.72 MHz，FPGA 剛好 2 倍
-decimation（`ofdm_link.radio.uhd.MASTER_CLOCK_RATES`；30.72 MHz 也是 B210 兩個 channel 同時用時允許的最高值，`node_app` 一台
-裝置 TX 與 RX 各用一個前端）。其他速率仍由 UHD 自己選 master clock。用 profile
+**15.36 MS/s（`--transport uhd`；只在 B210 與 NI USRP-2901 上測過）。** LTE 的 sample rate：程式要求 UHD 把 master clock 設成
+30.72 MHz，B210／2901 的 FPGA 剛好 2 倍 decimation（`ofdm_link.radio.uhd.MASTER_CLOCK_RATES`；30.72 MHz 也是 B210 兩個 channel
+同時用時允許的最高值，`node_app` 一台裝置 TX 與 RX 各用一個前端）。其他速率仍由 UHD 自己選 master clock。程式不依裝置型號
+限制這個速率，其他 USRP 只是還沒有測過。用 profile
 [`duplex_fdd_2420_2460_15p36.yaml`](../configs/profiles/duplex_fdd_2420_2460_15p36.yaml)（`node_app`）或
 [`b210_2p45ghz_15p36msps.yaml`](../configs/profiles/b210_2p45ghz_15p36msps.yaml)（`tx_app`／`rx_app`）。這個速率下：
 aggregate 的 airtime 上限要 ≤ 5.21 ms（80 000 samples），profile 設 5 ms，沿用 8 ms 預設值的設定檔會被拒絕；RX 的 UHD
 receive frames 與 chunk 依 sample rate 放大到 1024 個 frame 與 4 × 65536 samples；`node_app` 的 TX analog filter 預設是
-35 MHz（見 7.9 節的 `--tx-analog-bw`）。Pluto 不支援。2026-11-11 在兩台 B210 上量過單向 MCS 17：約 35.5 Mb/s，上限是 TX airtime。12.5 MS/s 沒有開放。
+35 MHz（見 7.9 節的 `--tx-analog-bw`）。Pluto 經 USB 2.0 只能跑 5 MS/s，用不到這個速率。2026-11-11 在同一張桌上的一台 B210 與一台
+NI USRP-2901 之間量過單向（`tx_app` → `rx_app`）MCS 17：約 35.5 Mb/s，上限是 TX airtime。雙向的 `node_app` 在 15.36 MS/s
+還沒有量測紀錄（兩台裝置 2x2 串流 15.36 MS/s 沒有 overflow，見 [`experiments/duplex_fdd/`](../experiments/duplex_fdd/README.md)
+4.7 節，那只是 USB 的測試）。12.5 MS/s 沒有開放。
 
 把 analog bandwidth 設成 Fs 會在 signal 兩側留下合理的 transition margin。設得太窄會先衰減外緣的
 subcarrier、提高 EVM；設得太寬則會收進更多帶外 noise 與鄰近 channel 的干擾。
