@@ -6,6 +6,10 @@
 #
 # Writes OUT/{rx_stats.jsonl,load.json,meta.json,...}; meta.json has the 1-min
 # load at start and decode-worker CPU during the load.  Transmits RF.
+# TX_ROOT (default ROOT) supplies tx_app; TX_EXTRA_ARGS and RX_EXTRA_ARGS are
+# word-split extra tx_app / rx_app arguments.  Since v2.0 rx_app finds only wire
+# v5: a legacy TX (TX_ROOT = a v1.0.0 or improve-rx tree) needs
+# RX_EXTRA_ARGS="--overlay $ROOT/configs/profiles/legacy_rx.yaml".
 set -euo pipefail
 
 ROOT=$(realpath "$1"); TX_ROOT=$(realpath "${TX_ROOT:-$1}"); TX_GAIN=$2; MCS=$3; RATE=$4; SECONDS_=$5; OUT=$6; SIZE=${7:-900}
@@ -30,9 +34,10 @@ wait_ready() {
 }
 
 cd "$ROOT"
+# shellcheck disable=SC2086
 PYTHONPATH="$ROOT/src" "$PYTHON" -m ofdm_message_link.rx_app --transport pluto \
     --config "$ROOT/configs/default.yaml" \
-    --overlay "$ROOT/configs/profiles/ota_2p45ghz.yaml" \
+    --overlay "$ROOT/configs/profiles/ota_2p45ghz.yaml" ${RX_EXTRA_ARGS:-} \
     --serial "$RX_SERIAL" --gain 15 --auto-start --ready-file "$OUT/rx.ready" \
     --egress-port 52022 --stats-log "$OUT/rx_stats.jsonl" > "$OUT/rx.log" 2>&1 &
 RX_PID=$!
@@ -54,12 +59,12 @@ SAMPLER_PID=$!
 "$PYTHON" "$HERE/../ota_udp_throughput/udp_load.py" --rate "$RATE" \
     --duration "$SECONDS_" --size "$SIZE" --output "$OUT/load.json" > "$OUT/load.log" 2>&1
 kill "$SAMPLER_PID" 2>/dev/null || true; wait "$SAMPLER_PID" 2>/dev/null || true
-"$PYTHON" - "$OUT" "$RX_PID" "$LOAD_START" "$ROOT" "$TX_GAIN" "$MCS" "$RATE" "$SIZE" "$HERE" "$TX_ROOT" "${TX_EXTRA_ARGS:-}" <<'PY'
+"$PYTHON" - "$OUT" "$RX_PID" "$LOAD_START" "$ROOT" "$TX_GAIN" "$MCS" "$RATE" "$SIZE" "$HERE" "$TX_ROOT" "${TX_EXTRA_ARGS:-}" "${RX_EXTRA_ARGS:-}" <<'PY'
 import json, sys
 sys.path.insert(0, sys.argv[9])
 import cpu_sampler
 out, pid, load, root, gain, mcs, rate, size = sys.argv[1:9]
-meta = {"tx_root": sys.argv[10], "tx_extra_args": sys.argv[11], "root": root, "tx_gain_db": float(gain), "mcs_index": int(mcs), "rate": float(rate),
+meta = {"tx_root": sys.argv[10], "tx_extra_args": sys.argv[11], "rx_extra_args": sys.argv[12], "root": root, "tx_gain_db": float(gain), "mcs_index": int(mcs), "rate": float(rate),
         "size": int(size), "load_1min_at_start": float(load)}
 meta.update(cpu_sampler.summarize(out + "/cpu.jsonl", int(pid)))
 json.dump(meta, open(out + "/meta.json", "w"), indent=1)

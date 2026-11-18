@@ -34,10 +34,10 @@ usage: experiments/duplex_fdd/run_duplex.sh --enable-rf --out DIR [options]
   --enable-rf            required: both nodes key their transmitters
   --dry-run              print the commands and exit (no lock, gate or hardware)
   --overlay PATH         profile overlay (default configs/profiles/duplex_fdd_2420_2460.yaml)
-  --legacy-acquisition   uhd only: keep the legacy (v1-v4) detector on; by default a uhd run adds
-                         the B210 measurement overlay configs/profiles/b210_measurement.yaml after
-                         --overlay, which switches it off (the library default stays on)
-  --transport T          pluto (default) or uhd (two USRP B210s; B210 gains, see below)
+  --transport T          pluto (default) or uhd (two USRP B210s; B210 gains, see below). A uhd run
+                         also adds configs/profiles/b210_measurement.yaml after --overlay: it keeps
+                         the legacy (v1-v4) detector off even if --overlay turned it on. Since v2.0
+                         that is already the default, and node_app sends only wire v5
   --serial1 S --serial2 S   radio serials (defaults: the two Plutos or the two B210s on this bench)
   --rate-ab R  --rate-ba R  datagrams/s per direction (default 450 / 450; 0 = direction idle)
   --size N               datagram bytes (default 900)
@@ -62,7 +62,7 @@ EOF2
 
 ENABLE_RF=0 DRY=0 OUT="" TRANSPORT=pluto EXTRA_OVERLAY= SER_GIVEN=(0 "" "") TXG_GIVEN=0 RXG_GIVEN=0
 OVERLAY=configs/profiles/duplex_fdd_2420_2460.yaml
-MEASUREMENT_OVERLAY=configs/profiles/b210_measurement.yaml KEEP_LEGACY=0
+MEASUREMENT_OVERLAY=configs/profiles/b210_measurement.yaml
 RATE_AB=450 RATE_BA=450 SIZE=900 DURATION=60
 MCS=(0 8 8) LA=(0 fixed fixed) TXG=(0 -20 -20) PROFILE=(0 "" "")
 RX_GAIN=15 WORKERS=3 GATE_LOAD=4 GATE_WAIT=600 SETTLE=3 TAIL=4 READY_TIMEOUT=90
@@ -73,7 +73,6 @@ while [ $# -gt 0 ]; do
         --enable-rf) ENABLE_RF=1 ;;
         --dry-run) DRY=1 ;;
         --overlay) OVERLAY="$2"; shift ;;
-        --legacy-acquisition) KEEP_LEGACY=1 ;;
         --transport) TRANSPORT="$2"; shift ;;
         --serial1) SER_GIVEN[1]="$2"; shift ;;
         --serial2) SER_GIVEN[2]="$2"; shift ;;
@@ -117,7 +116,7 @@ case "$TRANSPORT" in
         SERIAL=("${UHD_SERIAL[@]}")
         if [ "$TXG_GIVEN" -eq 0 ]; then TXG=(0 65 65); fi
         if [ "$RXG_GIVEN" -eq 0 ]; then RX_GAIN=30; fi
-        if [ "$KEEP_LEGACY" -eq 0 ]; then EXTRA_OVERLAY="$MEASUREMENT_OVERLAY"; fi
+        EXTRA_OVERLAY="$MEASUREMENT_OVERLAY"
         export UHD_IMAGES_DIR=${UHD_IMAGES_DIR:-/usr/share/uhd/images} ;;
     *) echo "--transport must be pluto or uhd" >&2; exit 2 ;;
 esac

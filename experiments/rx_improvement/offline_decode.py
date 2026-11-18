@@ -9,6 +9,11 @@ how many of the transmitted bursts came out.  Run it once per receiver:
 
 ``--overlay`` replaces the default 2.45 GHz profile, for example to try other
 acquisition thresholds; ``--only`` restricts the files with a glob.
+
+Since v2.0 this tree's receiver finds only wire v5 unless legacy acquisition is
+on.  The captures recorded for this experiment are the legacy (v1) waveform, so
+with this tree pass ``--overlay configs/profiles/ota_2p45ghz.yaml --overlay
+configs/profiles/legacy_rx.yaml`` (a v1.0.0 receiver needs neither).
 """
 
 from __future__ import annotations

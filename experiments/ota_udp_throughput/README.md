@@ -310,6 +310,10 @@ python $D/sweep.py --enable-rf $RADIOS --out /tmp/ota-udp/size-m12-1472 --mcs 12
 
 `--tx-serial` 與 `--rx-serial` 必填；gain 預設是 `--tx-gain 5 --rx-gain 15`，RX egress 用 UDP 52022。
 `sweep.py` 用 app 的預設值啟動 `tx_app`，現在包括 aggregation（最多 32 個 datagram 一個 burst、burst 間隔至少
-4 ms），所以第 4 節「一個 datagram 一個 burst」的服務速率模型不再是現在 `tx_app` 的上限。
+4 ms），所以第 4 節「一個 datagram 一個 burst」的服務速率模型不再是現在 `tx_app` 的上限。要重現這份報告的條件，
+加 `--aggregation off`。`sweep.py` 接受 `tx_app` 全部的 aggregation 選項（`--aggregation`、`--aggregation-max-subframes`、
+`--aggregation-max-wait-ms`、`--min-burst-interval-ms`、`--max-burst-airtime-ms`，名稱、範圍與預設都相同），原樣傳給每個
+`tx_app`；`--dry-run` 只印出兩支 app 的指令，不啟動任何東西。`--fractions` 用的速率上限是 5 MS/s、968 byte 的值，
+其他 sample rate 請用 `--rates`。
 每個 `--out` 目錄會產生 `results.jsonl`（一個量測點一行）、`rx_stats.jsonl`、`rx.log`、`tx-mcsN.log`
 與每個點的 JSON。原始量測資料不放進 repository。

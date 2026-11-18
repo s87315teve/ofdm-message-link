@@ -58,5 +58,11 @@ def test_run_duplex_adds_the_overlay_for_uhd_only():
         ).stdout
 
     assert MEASUREMENT in dry("--transport", "uhd")
-    assert MEASUREMENT not in dry("--transport", "uhd", "--legacy-acquisition")
     assert MEASUREMENT not in dry()
+    # v2.x: the v1-era switch that left the legacy detector to the base config is gone.
+    removed = subprocess.run(
+        ["bash", str(script), "--dry-run", "--out", "/nonexistent", "--transport", "uhd",
+         "--legacy-acquisition"],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    assert removed.returncode == 2 and "unknown option" in removed.stderr

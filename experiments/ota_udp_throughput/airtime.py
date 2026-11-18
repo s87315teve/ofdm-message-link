@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 
 from ofdm_link.phy.mcs_table import describe_mcs_entry, v5_entries
@@ -23,7 +22,9 @@ from ofdm_message_link.transport import UhdSinkLimits
 
 
 def main() -> None:
-    size = int(sys.argv[1]) if len(sys.argv) > 1 else 968
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("size", nargs="?", type=int, default=968, help="datagram bytes (968)")
+    size = parser.parse_args().size
     limits = UhdSinkLimits()
     for entry in v5_entries():
         parser = argparse.ArgumentParser()

@@ -396,7 +396,8 @@ cd $BASE && PYTHONPATH=src python experiments/rx_improvement/offline_decode.py c
    可以改設定（RX 的 ablation 用這個）。
 3. `decode_all_v5.sh` 跑全部的離線解碼；`analyze_v5.py` 產生 `results/v5/summary.md`。
    （v2.0 起 `configs/default.yaml` 的 `phy.rx.legacy_acquisition` 是 `false`：在現在的 tree 重解 baseline
-   的 legacy 錄音要另加 `--set phy.rx.legacy_acquisition=true`，`decode_all_v5.sh` 沒有加。）
+   的 legacy 錄音要另加 `--set phy.rx.legacy_acquisition=true`，`decode_all_v5.sh` 在兩個 `legacy_on_new_rx*`
+   步驟加了，其他步驟解 v5，用預設值。錄音的位置用 `CAPTURES=...` 指定，`--dry-run` 只印指令。）
 4. `noise_scan_v5.py record` 錄 TX 關閉時的空中訊號，`analyze` 離線算每個 offset 的 M128 與每個 peak
    的 `c_stf`／`c_pair`。
 5. `tx_power_compare.py`：在兩個 tree 各跑一次，算 peak 縮放後的平均功率與 PAPR。

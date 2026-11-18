@@ -71,11 +71,16 @@ CFO_HZ = 10e3
 # --------------------------------------------------------------------------
 
 
-def _profile(overlay: str | None):
+def _profile(overlay: str | None, legacy: bool = False):
     from ofdm_message_link.link import build_phy_profile, load_link_config
     from ofdm_message_link.options import DEFAULT_CONFIG, DEFAULT_OVERLAY
 
-    config = load_link_config(DEFAULT_CONFIG, [overlay or DEFAULT_OVERLAY])
+    # Since v2.0 the receiver finds only wire v5 unless legacy_rx.yaml switches
+    # legacy acquisition on; --family legacy needs it.
+    overlays = [overlay or DEFAULT_OVERLAY]
+    if legacy:
+        overlays.append("configs/profiles/legacy_rx.yaml")
+    config = load_link_config(DEFAULT_CONFIG, overlays)
     return config, build_phy_profile(config)
 
 
@@ -370,7 +375,7 @@ def run(args) -> dict:
     # What the receive engine child does before it starts the worker.
     _bound_numeric_threads()
     sys.setswitchinterval(args.switch_interval)
-    config, profile = _profile(args.overlay)
+    config, profile = _profile(args.overlay, legacy=args.family == "legacy")
     built = time.perf_counter()
     stream, bursts, longest = build_stream(args, config, profile)
     build_s = time.perf_counter() - built

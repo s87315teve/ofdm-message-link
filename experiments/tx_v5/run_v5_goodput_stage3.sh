@@ -13,6 +13,8 @@ for spec in "-15 0 200 a" "-15 0 200 b" "-5 4 300 a" "-5 4 300 b"; do
   set -- $spec
   while [ "$(cut -d. -f1 /proc/loadavg)" -ge 4 ]; do sleep 10; done
   echo "$(date +%T) start H7 legacy mcs$2 gain $1 rate $3 $4 load $(cut -d' ' -f1 /proc/loadavg)" >> $R/driver3.log
-  TX_ROOT=$TX_ROOT_BASE ./live_run.sh $M $1 $2 $3 30 $R/h7/mcs$2_g$1_$4 900 >> $R/driver3.log 2>&1
+  # v2.x rx_app finds only wire v5 unless legacy_rx.yaml is added; this TX is legacy.
+  TX_ROOT=$TX_ROOT_BASE RX_EXTRA_ARGS="--overlay $M/configs/profiles/legacy_rx.yaml" \
+    ./live_run.sh $M $1 $2 $3 30 $R/h7/mcs$2_g$1_$4 900 >> $R/driver3.log 2>&1
 done
 echo "$(date +%T) ALLDONE" >> $R/driver3.log

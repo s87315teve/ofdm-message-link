@@ -7,6 +7,11 @@ exactly what the AD936x delivered -- plus a ``.json`` describing it.  Decoding
 happens later, with ``offline_decode.py``, so two receivers can be compared on
 identical samples.
 
+Since v2.0 that transmitter sends wire v5 only (``--mcs qpsk`` is MCS 8,
+``qam16`` MCS 12), which a v1.0.0 receiver cannot decode.  The captures behind
+this experiment's results are the legacy waveform; recording it again needs
+this script run from a v1.0.0 checkout.
+
 This transmits RF and takes the same explicit acknowledgement as the apps:
 
     PYTHONPATH=src python experiments/rx_improvement/ota_capture.py \\

@@ -863,7 +863,7 @@ GIL（acquisition、header probe、GNU Radio 的 Python block，duplex 時再加
 
 | 項目 | 改了什麼 | 開關 |
 |---|---|---|
-| B210 量測關 legacy acquisition | `configs/profiles/b210_measurement.yaml`（附加 overlay）；`run_duplex.sh --transport uhd` 自動加，`--legacy-acquisition` 不加（v2.0 起 `default.yaml` 本身就關，不加這個 overlay 也不會打開 legacy 偵測） | overlay |
+| B210 量測關 legacy acquisition | `configs/profiles/b210_measurement.yaml`（附加 overlay）；`run_duplex.sh --transport uhd` 自動加（v2.0 起 `default.yaml` 本身就關，這個 overlay 只在 `--overlay` 把 legacy 偵測打開時才有作用；原本跳過它的 `--legacy-acquisition` 在 v2.x 已移除） | overlay |
 | CPU affinity | `--cpu-affinity CPUS\|p-cores`，不寫死核心 | 預設不綁 |
 | Chunk 合併 | `ReceiveWorker` 把短 chunk 併到 ≥ 8192 samples，最多等 2 ms | 無（samples 不變） |
 | Worker 的 NumPy 快速路徑 | `measure_quality` 每軸找最近點（平手照 argmin 的規則），16QAM soft demap 每軸分開 | 無（輸出相同） |
