@@ -688,6 +688,9 @@ payload 失敗（`unclassified_decode_failures`，和 inline decoder 解不出�
 錯誤訊息每次 feed 合成一行 `failed`（`decode worker raised on N burst(s): ...`），pool 快照的 `worker_errors` 計數。整個 task 的結果
 送不回來（例如不能 pickle）時，那個 task 的每個 segment 都這樣算。worker 死掉（`BrokenExecutor`）或 pool 不再接受工作時，pool 關閉並丟出
 `DecodePoolError`。以前一個這樣的例外會一直卡在 pool 的最前面，之後每次 feed 都重丟一次，後面的 burst 全部遺失。
+等待結果逾時（`flush(timeout)`）不算失敗：那個 task 留在最前面，晚一點照常交出結果，即使它剛好在逾時之後才解完。
+Decode worker 忽略 SIGINT：終端機的 Ctrl-C 會送到整個 process group，worker 何時停由擁有它的 receiver（`close()`）決定，
+不會在串流中途變成某個 task 的 `KeyboardInterrupt` 或讓 pool 壞掉。
 
 **Engine 子 process 交給母 process 的事件分批送（不需要開關）。** 視窗與 `node_app` 要的事件（`message`、`symbols`、
 `link_snr`、`sent`、`la`、`feedback`、`bursts`、`stats`、`gain`、`mark`、`failed`……）以前每個事件 put 一次

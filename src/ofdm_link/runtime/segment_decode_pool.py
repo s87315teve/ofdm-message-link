@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import signal
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import BrokenExecutor, Future, ProcessPoolExecutor
@@ -134,6 +135,13 @@ _WORKER: dict[str, Any] = {}
 def _initialize_worker(
     config: LinkConfig, annotate: Annotate | None, give_up_after: int = 0
 ) -> None:
+    # First, before the imports below: Ctrl-C goes to the whole process
+    # group, and the owner decides when the workers stop (close()).  A
+    # KeyboardInterrupt here would come back as a task's exception, or kill
+    # the worker and break the pool, mid-stream.  (A Ctrl-C between the
+    # worker's start and this line still reaches it, as it always did.)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     from ofdm_link.phy.turbo import set_hopeless_block_give_up
 
     from .allocator import keep_freed_memory
@@ -200,6 +208,22 @@ def _run_in_worker(segments: tuple[BurstSegment, ...]) -> tuple[SegmentDecodeRes
         except Exception as error:
             results.append(failed_result(error))
     return tuple(results)
+
+
+def _raised_by_task(future: Future, error: BaseException) -> bool:
+    """Whether ``error``, raised by ``future.result()``, is the task's own outcome.
+
+    Not when the wait for it timed out: the task may finish between the
+    timeout and any later look at the future, and its results must not be
+    thrown away.  A done future raises exactly its stored exception.
+    """
+
+    if not future.done():
+        return False
+    try:
+        return future.exception(timeout=0) is error
+    except BaseException:  # cancelled
+        return False
 
 
 class SegmentDecodePool:
@@ -347,14 +371,17 @@ class SegmentDecodePool:
         except BrokenExecutor as error:
             self.close()
             raise DecodePoolError("a segment decode worker died") from error
-        except Exception as error:
-            if not future.done():
-                # Timed out waiting: still decoding, so it stays at the head.
+        except BaseException as error:
+            if not _raised_by_task(future, error):
+                # The wait timed out (the task is still decoding, or finished
+                # just after), or this thread was interrupted: the task stays
+                # at the head, and its results come with a later call.
                 raise
             # The worker returned, but the task's result did not come back
-            # (it could not be pickled, say).  Each of its segments fails
-            # alone, so the ones behind it, and the results already taken in
-            # this call, still reach the caller in order.
+            # (it could not be pickled, say), or the task itself raised.
+            # Each of its segments fails alone, so the ones behind it, and
+            # the results already taken in this call, still reach the caller
+            # in order.
             results = (failed_result(error),) * count
         self._pending.popleft()
         self._in_flight -= count

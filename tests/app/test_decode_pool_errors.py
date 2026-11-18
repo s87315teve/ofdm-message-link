@@ -9,6 +9,7 @@ collected in the same ``submit_many`` call were dropped with it.
 from __future__ import annotations
 
 import functools
+import os
 import threading
 
 import numpy as np
@@ -206,3 +207,106 @@ def test_the_receive_worker_reports_the_error_and_keeps_delivering():
     assert failed
     assert all(text.startswith("decode worker raised on ") for text in failed)
     assert all(text.endswith("ValueError: injected worker failure") for text in failed)
+
+
+# ------------------------------------------- a wait that times out
+
+
+class _BarePool(SegmentDecodePool):
+    """Just the queue of a pool, around fake futures (no workers)."""
+
+    def __init__(self, future, count):
+        from collections import deque
+
+        self._pending = deque([(future, count)])
+        self._in_flight = count
+        self._completed = 0
+        self._worker_errors = 0
+        self._closed = False
+
+
+class _FinishesJustAfterTheTimeout:
+    """result(timeout) times out; the worker is done by the time anyone looks."""
+
+    def result(self, timeout=None):
+        raise TimeoutError()
+
+    def done(self):
+        return True
+
+    def exception(self, timeout=None):
+        return None  # it succeeded: its results are good
+
+
+class _TaskRaisedTimeoutError:
+    """The task itself raised TimeoutError: that is its outcome."""
+
+    def __init__(self):
+        self.error = TimeoutError("the task's own timeout")
+
+    def result(self, timeout=None):
+        raise self.error
+
+    def done(self):
+        return True
+
+    def exception(self, timeout=None):
+        return self.error
+
+
+def test_a_wait_that_times_out_never_turns_good_bursts_into_failures():
+    pool = _BarePool(_FinishesJustAfterTheTimeout(), 3)
+    with pytest.raises(TimeoutError):
+        pool._take_oldest(timeout=0.5)
+    # Still at the head, still in flight: a later call takes its results.
+    assert len(pool._pending) == 1 and pool._in_flight == 3 and pool._completed == 0
+    assert pool._worker_errors == 0
+
+
+def test_a_timeout_the_task_raised_itself_fails_its_segments_and_moves_on():
+    future = _TaskRaisedTimeoutError()
+    pool = _BarePool(future, 2)
+    results = pool._take_oldest(timeout=0.5)
+    assert [result.error for result in results] == ["TimeoutError: the task's own timeout"] * 2
+    assert not pool._pending and pool._in_flight == 0 and pool._worker_errors == 2
+
+
+# ------------------------------------------------------------ Ctrl-C
+
+
+def _ignores_sigint(pid: int) -> bool:
+    import signal
+
+    with open(f"/proc/{pid}/status", encoding="ascii") as handle:
+        for line in handle:
+            if line.startswith("SigIgn:"):
+                return bool(int(line.split()[1], 16) & (1 << (signal.SIGINT - 1)))
+    return False
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/status"), reason="Linux /proc")
+def test_ctrl_c_on_the_process_group_does_not_reach_the_decode_workers():
+    import os
+    import signal
+    import time
+
+    link = profile(MEASUREMENT)
+    stream, payloads = v5_stream(link, seed=73, bursts=9, mcs_indices=_MCS)
+    receiver = MessageReceiver(link, decode_workers=2)
+    try:
+        workers = list(receiver._pool._executor._processes)
+        assert len(workers) == 2
+        # The ready check can be answered by one worker while the other is
+        # still starting; wait until both have run their initializer.
+        deadline = time.monotonic() + 30.0
+        while not all(_ignores_sigint(pid) for pid in workers):
+            assert time.monotonic() < deadline, "a worker never ignored SIGINT"
+            time.sleep(0.02)
+        for pid in workers:  # what a terminal Ctrl-C does to every process
+            os.kill(pid, signal.SIGINT)
+        time.sleep(0.5)
+        delivered = _feed(receiver, stream, 4096)
+        assert sorted(receiver._pool._executor._processes) == sorted(workers)
+    finally:
+        receiver.close()
+    assert delivered == payloads
