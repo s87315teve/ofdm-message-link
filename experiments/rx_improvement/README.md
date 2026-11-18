@@ -95,7 +95,9 @@ PYTHONPATH=src python experiments/rx_improvement/offline_decode.py caps new.json
 ### 即時 run
 
 - `live_run.sh RX_SRC TX_GAIN MCS RATE SECONDS OUT`：啟動真的 `rx_app`（從 `RX_SRC` import，讀它旁邊的
-  `configs/`）、`tx_app`，用 `../ota_udp_throughput/udp_load.py` 送 datagram 並逐 byte 比對。
+  `configs/`）、`tx_app`，用 `../ota_udp_throughput/udp_load.py` 送 datagram 並逐 byte 比對。v2.x 的 `tx_app` 只送
+  wire v5，所以這個腳本只接受 MCS 8–17；上面表格用的舊格式 MCS 0／4 會被拒絕（不再保留 v1.0 相容），`RX_SRC` 也要是 v2.0
+  以後的接收端。
 - `summarize_live.py`：遺失率、送資料期間的 RX overflow（不含啟動時 decode pool 產生的那一兩次）、
   畫面 SNR 的平均與跳動。
 - 影像用 `scripts/run_ota_video_demo.sh --transport pluto --auto-start --duration 60`，
