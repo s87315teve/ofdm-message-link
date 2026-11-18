@@ -535,6 +535,9 @@ def _tx_main(
                 "active_mcs_entry": transmitter.active_mcs_entry,
                 "ingress_datagrams": ingress.datagrams,
                 "ingress_dropped_queue_full": ingress.dropped_queue_full,
+                "send_failures": worker.send_failures,
+                "dropped_send_failed": worker.dropped_send_failed,
+                "dropped_encode_failed": worker.dropped_encode_datagrams,
                 "transport": None if radio is None else radio.snapshot(),
                 "dropped_display_events": sink.dropped,
                 "max_lag_s": worker.lag_monitor.max_lag_s,
@@ -578,6 +581,9 @@ class ProcessTransmitWorker:
         self._active_mcs_entry = mcs_entry
         self._ingress_datagrams = 0
         self._ingress_dropped = 0
+        self.send_failures = 0
+        self.dropped_send_failed = 0
+        self.dropped_encode_datagrams = 0
         self._sink: _TransportView | None = None
         self._engine = _EngineProcess(
             _tx_main,
@@ -597,6 +603,9 @@ class ProcessTransmitWorker:
             self._active_mcs_entry = value["active_mcs_entry"]
             self._ingress_datagrams = value["ingress_datagrams"]
             self._ingress_dropped = value.get("ingress_dropped_queue_full", 0)
+            self.send_failures = value.get("send_failures", 0)
+            self.dropped_send_failed = value.get("dropped_send_failed", 0)
+            self.dropped_encode_datagrams = value.get("dropped_encode_failed", 0)
             sink = self._sink
             if sink is not None and value["transport"] is not None:
                 sink._snapshot = {

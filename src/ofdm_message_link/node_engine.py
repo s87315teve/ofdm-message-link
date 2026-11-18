@@ -95,6 +95,9 @@ class DutyCappedSink:
     burst may start no earlier than the previous start plus its airtime /
     ``cap``.  Idle time banks at most ``credit_s`` of earlier starts, so a
     short run of bursts after a pause is not held back.
+
+    ``retry_failed_send`` (TransmitWorker) is the wrapped sink's, through
+    ``__getattr__``: this send raises only when the wrapped one does.
     """
 
     def __init__(self, sink, cap: float, sample_rate: float, *, credit_s: float = 0.05,
@@ -691,6 +694,9 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
                         tx_snapshot,
                         queue_datagrams=pending,
                         ingress_dropped_queue_full=submit_failures["count"],
+                        send_failures=tx_worker.send_failures,
+                        dropped_send_failed=tx_worker.dropped_send_failed,
+                        dropped_encode_failed=tx_worker.dropped_encode_datagrams,
                     ),
                 },
                 "rx": {

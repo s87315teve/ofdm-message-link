@@ -69,6 +69,9 @@
 | `bursts_rejected_queue_full` | Radio sink 的 burst queue 滿了而拒絕的 burst |
 | `tx_underflow`、`tx_underflow_in_packet` | UHD 在 burst 之前／之中沒有 sample 可送 |
 | `tx_late` | UHD 的 `tx_time_error`：burst 到 radio 時已經過了它的開始時間 |
+| `dropped_encode_failed` | 因為 encode 丟出例外而丟掉的 datagram（程式錯誤；同樣的輸入重試也會一樣失敗，所以不重試） |
+| `send_failures` | Transport 的 send 丟出例外的次數（之後保留重送或丟掉都算）。udp 與 UHD 的 sink（`retry_failed_send`：丟出例外時沒有送出接收端會收下的東西）會保留那個 burst（原本的 sequence number 與 MCS），每 50 ms 重送，成功後才送下一個；同一個 burst 在同一個 sink 上失敗超過 2 s 就丟掉，之後每個 burst 只試一次，直到有一次成功。Pluto 照舊直接丟掉（push 逾時時可能已經送出，重送會重複）。udp 重送前送出的部分 fragment 會在接收端算成一次 `bursts_incomplete` |
+| `dropped_send_failed` | 因為 send 丟出例外而丟掉的 datagram（Pluto 立刻丟；udp／UHD 重送超過上限才丟） |
 
 ## 7.2 設定檔
 

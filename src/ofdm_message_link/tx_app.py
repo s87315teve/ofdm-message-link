@@ -64,6 +64,22 @@ _SEND_QUEUE_DEPTH = 256
 # per kind at most every _ERROR_REPORT_S (the rest are counted into it).
 _ERROR_BACKOFF_S = 0.05
 _ERROR_REPORT_S = 1.0
+# A sink that declares ``retry_failed_send = True`` has its burst kept and
+# retried after a send raised.  The retries of one burst on one sink stop
+# after _SEND_GIVE_UP_S (and at least _SEND_GIVE_UP_ATTEMPTS attempts): the
+# transient errors a retry is for (an ICMP-driven ECONNREFUSED, ENOBUFS) clear
+# in milliseconds, while 2 s (about 40 attempts at the back-off) bounds how
+# long a dead transport can hold the queue.  A failure streak is reported
+# again every _SEND_STREAK_REPORT_S with its running counts.
+_SEND_GIVE_UP_S = 2.0
+_SEND_GIVE_UP_ATTEMPTS = 5
+_SEND_STREAK_REPORT_S = 5.0
+# A failure that starts more than this after the previous one ended begins a
+# new streak (retries again, counts from 0).  A failing transport is tried
+# again every _ERROR_BACKOFF_S (50 ms) plus at most the aggregation wait
+# (max_wait / min_burst_interval, added per worker), so a gap of 1 s plus
+# that wait only happens when there was nothing to send in between.
+_SEND_STREAK_GAP_S = 1.0
 _MODULATION_LABEL = {"QPSK": "QPSK", "QAM16": "16QAM", "QAM64": "64QAM"}
 
 
@@ -161,6 +177,11 @@ class BurstPolicy(Protocol):
         """Called after the transport accepted ``burst``."""
         ...
 
+    # Optional: ``peek_next_entry() -> McsTableEntry | None``, the format the
+    # next data burst will most likely get, without deciding it (no side
+    # effects).  The worker sizes its aggregation wait with it; without it, or
+    # when it returns None, the wait is sized at the transmitter's active entry.
+
 
 @dataclass(frozen=True, slots=True)
 class _Submitted:
@@ -186,6 +207,21 @@ class _Encoded:
 
     burst: OutgoingBurst
     pieces: tuple[_Pending, ...]
+
+
+@dataclass(slots=True)
+class _SendStreak:
+    """Consecutive raising sends on one sink (a retrying sink only)."""
+
+    sink: object
+    started_at: float
+    attempts: int = 0
+    burst: object = None  # the kept burst being retried
+    burst_since: float = 0.0
+    burst_attempts: int = 0
+    gave_up: bool = False  # bursts now get one attempt until a send succeeds
+    reported_at: float | None = None
+    last_failed_at: float = 0.0  # when the latest failed attempt returned
 
 
 class _Bridge(QtCore.QObject):
@@ -224,6 +260,22 @@ class TransmitWorker:
     stops the data: the burst goes at the transmitter's active entry with no
     CONTROL payload, and the error is reported (rate-limited, counted in
     ``policy_errors``).
+
+    A send that raises is counted in ``send_failures``.  If the sink
+    declares ``retry_failed_send = True`` (a raising send of it put nothing
+    on the air that a receiver could take, see :mod:`.transport`), the burst
+    is kept as after a detach: same samples, sequence numbers and MCS, sent
+    first once a send succeeds, retried every ``_ERROR_BACKOFF_S``.  After
+    ``_SEND_GIVE_UP_S`` of failures of one burst on one sink it is dropped,
+    and until a send succeeds every later burst gets one attempt, as without
+    the retry; a streak is reported when it starts, when it gives up and every
+    ``_SEND_STREAK_REPORT_S``.  Any other sink (a Pluto: a timed-out push may
+    already be on the air) keeps the old behaviour: the burst is dropped and
+    reported.  Dropped bursts are counted in ``dropped_send_failed_bursts``
+    and their datagrams in ``dropped_send_failed``.  A burst whose encoding
+    raises cannot be retried (the same input fails again), so its datagrams
+    are dropped, reported and counted in ``encode_failures`` and
+    ``dropped_encode_datagrams``.
     """
 
     def __init__(
@@ -254,6 +306,19 @@ class TransmitWorker:
         self._policy_failed = False  # the idle worker backs off after a failure
         self._error_reports: dict[str, tuple[float, int]] = {}
         self._last_burst_at: float | None = None
+        # Send attempts that raised; bursts (and their datagrams) dropped
+        # after a raising send; the current failure streak of a retrying sink.
+        self.send_failures = 0
+        self.dropped_send_failed_bursts = 0
+        self.dropped_send_failed = 0
+        self._streak: _SendStreak | None = None
+        self._streak_gap_s = (
+            _SEND_STREAK_GAP_S + self._limits.max_wait_s + self._limits.min_burst_interval_s
+        )
+        # Bursts whose encoding raised, and the datagrams they took with them.
+        self.encode_failures = 0
+        self.dropped_encode_datagrams = 0
+        self._encode_dropped_now = 0
 
     @property
     def pending(self) -> int:
@@ -317,7 +382,9 @@ class TransmitWorker:
         while not self._stop.is_set():
             sink = self.sink
             if sink is None:
-                # Hold the queue rather than draining it into nothing.
+                # Hold the queue rather than draining it into nothing.  Time
+                # without a radio is no failure: a new radio starts afresh.
+                self._streak = None
                 self._stop.wait(0.1)
                 continue
             try:
@@ -339,10 +406,22 @@ class TransmitWorker:
                 # stamping after the push returned would add the whole
                 # interval as idle air after every long burst.
                 handed_at = self._clock()
-                if not self._send_when_there_is_room(sink, unsent.burst.samples):
+                try:
+                    accepted = self._send_when_there_is_room(sink, unsent.burst.samples)
+                except Exception as error:
+                    verdict = self._send_failed(sink, unsent, error, handed_at)
+                    if verdict == "raise":
+                        raise  # not a retrying sink: dropped and reported below, as always
+                    if verdict == "drop":
+                        unsent = None  # retries given up; counted and reported
+                        self._held_messages = sum(piece.is_last for piece in pending)
+                    # "keep": as after a detach (below), it goes out first next time.
+                    continue
+                if not accepted:
                     # The radio was stopped underneath us.  The burst keeps
                     # its sequence numbers and goes out first on the next one.
                     continue
+                self._streak = None
                 self._last_burst_at = handed_at
                 self._plot_buffers.set_samples(unsent.burst.samples)
                 self._report(unsent)
@@ -350,23 +429,117 @@ class TransmitWorker:
                     self._policy_call("on_sent", None, self._policy.on_sent,
                                       unsent.burst, self._clock())
             except Exception as error:  # surfaced in the window, never silent
-                self._report_error("worker", f"{type(error).__name__}: {error}")
+                text = f"{type(error).__name__}: {error}"
+                if self._encode_dropped_now:
+                    text = (
+                        f"encode failed, {self._encode_dropped_now} datagram(s) dropped "
+                        f"({self.dropped_encode_datagrams} so far): {text}"
+                    )
+                    self._encode_dropped_now = 0
+                self._report_error("worker", text)
                 # Never spin on an error that repeats every iteration.
                 self._stop.wait(_ERROR_BACKOFF_S)
             unsent = None
             self._held_messages = sum(piece.is_last for piece in pending)
 
-    def _report_error(self, kind: str, text: str) -> None:
-        """Emit ``text`` at once, then at most once per second per ``kind``."""
+    def _send_failed(
+        self, sink, unsent: _Encoded, error: Exception, attempted_at: float
+    ) -> str:
+        """Count a send that raised; "keep", "drop" or "raise" the burst.
+
+        "raise" (a sink without ``retry_failed_send``): the burst is counted
+        as dropped and the caller's error path drops and reports it, exactly
+        as before retries existed.  A retrying sink detached while sending
+        (``detach`` stops it, so its send may raise) is a detach: "keep",
+        nothing counted.  Otherwise the attempt joins the sink's failure
+        streak and the worker backs off (the wait ends at once on ``stop``):
+        "keep" while the burst is within its retry bound, "drop" (counted)
+        once it is not or the streak has given up.  An attempt that started
+        more than ``_streak_gap_s`` after the previous failure returned opens
+        a new streak: a quiet spell in between is no outage, so a lone later
+        failure is retried again.  The reports are guarded: a failing report
+        never costs the kept burst.
+        """
+
+        retry = getattr(sink, "retry_failed_send", False) is True
+        if retry and self.sink is not sink:
+            return "keep"
+        self.send_failures += 1
+        if not retry:
+            self._count_send_drop(unsent)
+            return "raise"
+        now = self._clock()
+        streak = self._streak
+        if (
+            streak is None
+            or streak.sink is not sink
+            or attempted_at - streak.last_failed_at > self._streak_gap_s
+        ):
+            streak = self._streak = _SendStreak(sink, now)
+        streak.attempts += 1
+        if streak.burst is not unsent:
+            streak.burst, streak.burst_since, streak.burst_attempts = unsent, now, 0
+        streak.burst_attempts += 1
+        verdict = "keep"
+        newly_given_up = False
+        if streak.gave_up or (
+            streak.burst_attempts >= _SEND_GIVE_UP_ATTEMPTS
+            and now - streak.burst_since >= _SEND_GIVE_UP_S
+        ):
+            newly_given_up = not streak.gave_up
+            streak.gave_up = True
+            self._count_send_drop(unsent)
+            verdict = "drop"
+        if (
+            newly_given_up
+            or streak.reported_at is None
+            or now - streak.reported_at >= _SEND_STREAK_REPORT_S
+        ):
+            self._report_streak(streak, now, error)
+        streak.last_failed_at = now
+        self._stop.wait(_ERROR_BACKOFF_S)
+        return verdict
+
+    def _count_send_drop(self, unsent: _Encoded) -> None:
+        self.dropped_send_failed_bursts += 1
+        self.dropped_send_failed += len(unsent.burst.datagrams)
+
+    def _report_streak(self, streak: _SendStreak, now: float, error: Exception) -> None:
+        """Report a failure streak; it counts as reported only once a report went out."""
+
+        state = (
+            f"gave up: {self.dropped_send_failed_bursts} burst(s), "
+            f"{self.dropped_send_failed} datagram(s) dropped so far; one attempt per "
+            "burst until a send succeeds"
+            if streak.gave_up
+            else "the burst is kept and sent again"
+        )
+        text = (
+            f"{type(error).__name__}: {error} (send failing for "
+            f"{now - streak.started_at:.1f} s, {streak.attempts} attempt(s); {state})"
+        )
+        try:
+            emitted = self._report_error("send", text)
+        except Exception:  # e.g. the window is being torn down
+            emitted = False
+        if emitted:
+            streak.reported_at = now
+
+    def _report_error(self, kind: str, text: str) -> bool:
+        """Emit ``text`` at once, then at most once per second per ``kind``.
+
+        Returns whether it was emitted (False: suppressed and counted).
+        """
 
         now = self._clock()
         last, suppressed = self._error_reports.get(kind, (None, 0))
         if last is not None and now - last < _ERROR_REPORT_S:
             self._error_reports[kind] = (last, suppressed + 1)
-            return
+            return False
         suffix = f" (+{suppressed} more)" if suppressed else ""
         self._error_reports[kind] = (now, 0)
         self._bridge.failed.emit(text + suffix)
+        return True
 
     def _policy_call(self, name: str, fallback, method, *args, **kwargs):
         """Call one policy method; on an exception report it and return ``fallback``."""
@@ -420,9 +593,12 @@ class TransmitWorker:
         if not deadlines:
             return
         deadline = max(deadlines)
+        # Sized at the entry the burst will get: a policy's, not the
+        # transmitter's active one (node_app never changes that one).
+        entry = self._fill_entry()
         while len(pending) < cap and not self._stop.is_set():
             datagrams = [piece.datagram for piece in pending]
-            if self._transmitter.plan_burst(datagrams, self._limits) < len(datagrams):
+            if self._transmitter.plan_burst(datagrams, self._limits, entry) < len(datagrams):
                 return  # already more than one burst holds; waiting gains nothing
             remaining = deadline - self._clock()
             if remaining <= 0.0:
@@ -432,6 +608,27 @@ class TransmitWorker:
             except queue.Empty:
                 return
             self._admit(pending, item)
+
+    def _fill_entry(self) -> McsTableEntry | None:
+        """The entry ``_fill`` sizes the burst with; None means the active one.
+
+        ``entry_for_next_burst`` makes the decision and has side effects (the
+        LA algorithm, events, counts), so it is called once per burst, by
+        ``_encode_next`` as always; here the policy's side-effect-free
+        ``peek_next_entry`` is used when it has one.
+        """
+
+        if self._policy is None:
+            return None
+        peek = getattr(self._policy, "peek_next_entry", None)
+        if peek is None:
+            return None
+        entry = self._policy_call("peek_next_entry", None, peek)
+        # Only a v5 entry: anything else would make plan_burst raise in _fill
+        # on every pass instead of waiting at the active entry as before.
+        if isinstance(entry, McsTableEntry) and entry.family == "v5":
+            return entry
+        return None
 
     def _encode_next(self, pending: deque[_Pending]) -> _Encoded:
         """Plan and encode the next burst from the head of ``pending``.
@@ -472,9 +669,18 @@ class TransmitWorker:
             extra_mpdu_lengths=[control_mpdu_length(payload) for payload in payloads],
         )
         pieces = tuple(pending.popleft() for _ in range(take))
-        burst = self._transmitter.encode_datagrams(
-            [piece.datagram for piece in pieces], entry=entry, control_payloads=payloads
-        )
+        try:
+            burst = self._transmitter.encode_datagrams(
+                [piece.datagram for piece in pieces], entry=entry, control_payloads=payloads
+            )
+        except Exception:
+            # Encoding is deterministic: the same pieces would fail again on
+            # every retry and stall the queue behind them, so they are dropped
+            # (as before), counted here and reported by the caller.
+            self.encode_failures += 1
+            self.dropped_encode_datagrams += len(pieces)
+            self._encode_dropped_now = len(pieces)
+            raise
         return _Encoded(burst, pieces)
 
     def _idle_timeout(self) -> float:
@@ -1084,7 +1290,12 @@ class TransmitWindow(QtWidgets.QWidget):
 
     def _tx_health(self, snapshot, pending: int) -> dict:
         return tx_health(
-            snapshot, queue_datagrams=pending, ingress_dropped_queue_full=self._ingress_dropped()
+            snapshot,
+            queue_datagrams=pending,
+            ingress_dropped_queue_full=self._ingress_dropped(),
+            send_failures=getattr(self._worker, "send_failures", None),
+            dropped_send_failed=getattr(self._worker, "dropped_send_failed", None),
+            dropped_encode_failed=getattr(self._worker, "dropped_encode_datagrams", None),
         )
 
     def _write_stats_log(self, now: float, elapsed: float, view: TxView, health, snapshot) -> None:
@@ -1245,7 +1456,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help=(
             "append one JSON line per stats refresh: messages, bursts, goodput, airtime and "
-            "tx_health (queue depths, ingress drops, bursts rejected, UHD underflow and late)"
+            "tx_health (queue depths, ingress drops, bursts rejected, UHD underflow and late, "
+            "send_failures, and datagrams dropped after a failed send or encode: "
+            "dropped_send_failed, dropped_encode_failed)"
         ),
     )
     app.add_argument(

@@ -136,7 +136,15 @@ class UdpSampleSink:
     A burst larger than one datagram is split and tagged, and the receiver
     drops any burst whose fragments do not all arrive.  That is UDP behaving
     like UDP; it is not a model of any particular radio channel.
+
+    ``retry_failed_send``: a send that raised may have sent some fragments,
+    but never all of them, and a retry goes under a new burst id, so the
+    receiver can never hand on the burst twice.  The fragments of the failed
+    attempt stay unmatched and show in the source's ``bursts_incomplete``
+    once evicted (one spurious count per failed attempt that got any out).
     """
+
+    retry_failed_send = True
 
     def __init__(
         self,
@@ -469,6 +477,11 @@ class UhdSampleSink:
         # Read once: a UHD control call holds the GIL for its USB round trip,
         # and these values do not change while the flowgraph runs.
         self._readback = _block_readback(self._sink_block)
+
+    # A raising send never queued anything: every step that can raise (the
+    # started check, scaling, the device time) runs before the enqueue, which
+    # either takes the whole burst or returns False.
+    retry_failed_send = True
 
     def send(self, samples: NDArray[np.complex64]) -> bool:
         if self._source_block is None:

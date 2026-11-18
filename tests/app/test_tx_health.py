@@ -24,7 +24,15 @@ def test_a_uhd_snapshot_gives_every_counter():
         "tx_underflow": 2,
         "tx_underflow_in_packet": 1,
         "tx_late": 5,
+        # The worker's counts; None when the caller does not pass them.
+        "send_failures": None,
+        "dropped_send_failed": None,
+        "dropped_encode_failed": None,
     }
+    worker_counts = tx_health(snapshot, queue_datagrams=0, ingress_dropped_queue_full=0,
+                              send_failures=6, dropped_send_failed=3, dropped_encode_failed=2)
+    assert [worker_counts[key] for key in (
+        "send_failures", "dropped_send_failed", "dropped_encode_failed")] == [6, 3, 2]
 
 
 def test_missing_counters_are_none_not_zero():

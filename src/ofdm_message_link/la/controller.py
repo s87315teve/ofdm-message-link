@@ -346,6 +346,20 @@ class LinkController:
         self._emit(events)
         return entry
 
+    def peek_next_entry(self) -> McsTableEntry | None:
+        """The format the next data burst will most likely get, without deciding.
+
+        No side effects: no LA call, no event, no count, and no lock either
+        (two attribute reads; a racing ``set_fixed`` only skews the transmit
+        worker's aggregation wait for one burst).  The fixed entry in fixed
+        mode (exactly what ``entry_for_next_burst`` returns there), else the
+        last decided entry, None before the first decision.
+        """
+
+        if self._mode == "fixed":
+            return self._fixed_entry
+        return self._entry
+
     def control_plan(self, now: float, *, idle: bool) -> ControlPlan:
         events: list[tuple[str, dict[str, Any]]] = []
         with self._lock:
