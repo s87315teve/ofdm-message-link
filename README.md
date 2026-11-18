@@ -234,7 +234,10 @@ Acquisition、header probe、Turbo decoder 與發送端的 encode 有 C++ 版（
 thread 數可以用 `--decode-workers`／`--cpu-cores` 或設定檔的 `acceleration.decode_workers`／`cpu_cores` 調整，
 預設值不變（[7.2 節](docs/07-reference.md#72-設定檔)）。接收端把短 chunk 併成多大的 feed、最多等多久，可以用
 `--rx-min-feed-samples`／`--rx-max-merge-wait-ms` 或 `acceleration.rx_min_feed_samples`／`rx_max_merge_wait_ms`
-調整；預設（PC）是 8192 samples、2 ms，Jetson 建議 65536、15 ms。UHD 接收端也用同一組值：GNU Radio 先把 samples
+調整；預設（PC）是 8192 samples、2 ms，Jetson 建議 65536、15 ms：接收端的 `--overlay` 會取代預設 profile，所以先寫出
+profile，再加 `--overlay configs/profiles/jetson_rx_feed.yaml`。在 Xavier NX + B210、5 MS/s 量到單向 200/s 遺失 0 %
+（預設約 0.3 %）、雙向 50/25 的 PC→Jetson 1.3 %（預設 9.2 %，各一次）；飽和點（單向約 300/s）不變，單向時推測是
+Jetson 的總 CPU 不夠，雙向的瓶頸還沒找到（量測條件見 [7.10 節](docs/07-reference.md#710-效能開關與-native-模組)）。UHD 接收端也用同一組值：GNU Radio 先把 samples
 湊成 N 的整數倍才交給 Python（N = min(feed 大小, 等待時間內的 samples, 每次上限)，例如 Jetson 在 5 MS/s 是 65536），
 Python sink 每秒被呼叫的次數從約 843 次降到約 76 次。分組時接收端不再為了湊 feed 等待，每次 feed 平常就是 N（上限壓住 N
 時會比 feed 設定小）；sink 到 decoder 之間的 queue 最多放 100 ms 的 samples。所以

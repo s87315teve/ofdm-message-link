@@ -1,0 +1,38 @@
+# Add-on overlay for a receiver on a Jetson: fewer, larger receive feeds.  It
+# is not a profile on its own: an --overlay replaces the app's default
+# profile, so list the profile explicitly and pass this one AFTER it, e.g.
+#   rx_app   --transport uhd --overlay configs/profiles/ota_2p45ghz.yaml \
+#            --overlay configs/profiles/jetson_rx_feed.yaml --realtime
+#   node_app --transport uhd --overlay configs/profiles/duplex_fdd_2420_2460.yaml \
+#            --overlay configs/profiles/jetson_rx_feed.yaml --realtime \
+#            --decode-workers 4 ...
+# (The measurement below used 4 decode workers; node_app defaults to 3.
+# ota_2p45ghz.yaml is 2450 MHz, nearer Wi-Fi channel 6 than the 2460 MHz
+# measured; choose the frequency for your site.)  --rx-min-feed-samples /
+# --rx-max-merge-wait-ms still override it.  On a PC leave it out: the program
+# default (8192 samples, 2 ms) stays the PC setting.
+#
+# Measured 2026-11-19, Jetson Xavier NX (MODE_20W_6CORE, no jetson_clocks) +
+# B210 <-> PC + NI USRP-2901 over the air, 5 MS/s, MCS 12, Jetson --realtime
+# with 4 decode workers, 60 s a point, with the harness's own overlays, not
+# the shipped profiles: one-way PC -> Jetson at 2460 MHz (PC TX
+# mac.aggregation max_wait_ms 20, max_burst_airtime_ms 16), duplex as
+# duplex_fdd_2420_2460.yaml plus min_burst_interval_ms 20.  Raw data in the
+# local runs/jetson_b210_20261118/perf_after_item1/ (runs/ is not in git).
+# Loss with this overlay vs the default 8192 / 2 ms (one run each unless
+# stated):
+#   one-way 200/s: 0 % and 0 % (default 0.25 % and 0.29 %, two runs each);
+#   one-way 100/s: 0 % either way (p50 latency 239 -> 148 ms);
+#   duplex 5/5 and 50/25 (Jetson -> PC / PC -> Jetson), PC -> Jetson:
+#   0 % vs 0.67 %, 1.3 % vs 9.2 %; Jetson -> PC 0 % at every point.
+# It does not raise the saturation point: one-way 300/s loses about 10 % and
+# duplex 100/50 about 23 % with either setting.  One-way the Jetson then has
+# about 5.5 of its 6 cores busy (5.3 already at 200/s with 0 loss), so total
+# CPU is the likely limit (an inference); duplex 100/50 has only about 3.3
+# busy and its bottleneck has not been found.  Latency: a burst can reach the
+# decoder up to 15 ms later (at 5 MS/s the UHD sink hands over 65536
+# samples, 13.1 ms, at a time); measured p50 fell under load (323 -> 205 ms
+# at 200/s) and rose slightly at duplex 5/5 (108 -> 113 ms).
+acceleration:
+  rx_min_feed_samples: 65536
+  rx_max_merge_wait_ms: 15

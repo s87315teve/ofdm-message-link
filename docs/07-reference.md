@@ -52,7 +52,7 @@
 | `--snr-db` | 只適用 `udp`，加上 AWGN。對真實 channel 無效，帶了會被拒絕 |
 | `--decode-workers N` | Payload decode 的 process 數，1–64；1 = 單 thread inline decoder。沒給時取 `acceleration.decode_workers`，設定檔是 `null`（預設）時是 4 |
 | `--rx-recv-frames` | UHD `num_recv_frames`，預設每 5 MS/s 256 個（約 0.1 s）；0 = UHD 預設 |
-| `--rx-min-feed-samples N` / `--rx-max-merge-wait-ms MS` | 把 transport 的短 chunk 併成至少 N samples（0–131072）再交給 decoder，最多為此等 MS 毫秒（0–20）。沒給時取 `acceleration.rx_min_feed_samples`／`rx_max_merge_wait_ms`，設定檔是 `null`（預設）時是 8192 與 2 ms。Jetson 用 65536 與 15。見 [7.10 節](#710-效能開關與-native-模組) |
+| `--rx-min-feed-samples N` / `--rx-max-merge-wait-ms MS` | 把 transport 的短 chunk 併成至少 N samples（0–131072）再交給 decoder，最多為此等 MS 毫秒（0–20）。沒給時取 `acceleration.rx_min_feed_samples`／`rx_max_merge_wait_ms`，設定檔是 `null`（預設）時是 8192 與 2 ms。Jetson 用 65536 與 15（[`jetson_rx_feed.yaml`](../configs/profiles/jetson_rx_feed.yaml)）。見 [7.10 節](#710-效能開關與-native-模組) |
 | `--stats-log PATH` | 每次統計刷新附加一行 JSON，見 [2.7 節](02-gui.md#27---stats-log把統計存成檔案) |
 | `--stats-log-max-mb MB` | `--stats-log` 的大小上限，預設 16 MiB，超過就輪替成 `PATH.1`；0 = 不設限 |
 | `--stats-log-backups N` | 保留幾份輪替後的舊檔，預設 1 |
@@ -90,6 +90,7 @@
 | [`b210_2p45ghz_15p36msps.yaml`](../configs/profiles/b210_2p45ghz_15p36msps.yaml) | `tx_app`／`rx_app`，USRP（`--transport uhd`）、15.36 MS/s、2.45 GHz（7.4 節） |
 | [`legacy_rx.yaml`](../configs/profiles/legacy_rx.yaml) | **附加用**：把 `phy.rx.legacy_acquisition` 打開，也收 v1.0／`improve-rx` 的 TX 送的舊格式 burst（v2.0 起預設不收） |
 | [`b210_measurement.yaml`](../configs/profiles/b210_measurement.yaml) | **附加用**，接在上面任一個 profile 後面：把 `phy.rx.legacy_acquisition` 關掉。v2.0 起預設本來就是關，它只在底下的設定把它打開時才有作用（`run_duplex.sh --transport uhd` 仍會自動加） |
+| [`jetson_rx_feed.yaml`](../configs/profiles/jetson_rx_feed.yaml) | **附加用**，接在 profile 後面，只用在 Jetson 的接收端（`rx_app`／`node_app`）：`acceleration.rx_min_feed_samples` 65536、`rx_max_merge_wait_ms` 15。量測與適用範圍見 7.10 節 |
 
 這個專案實際讀取的區段：
 
@@ -148,8 +149,8 @@
 |---|---|---|---|
 | `decode_workers` | `null` | `null`、0 或 1–64 | `rx_app` 與 `node_app` 的 payload decode process 數。`null`（或不寫）與 0 = 各 app 自己的預設（v2.0.0–v2.1.2 的 `default.yaml` 把 0 寫成「auto」）：`rx_app` 4、`node_app` 3（兩個 node 常在同一台 PC）。1 = 不開 worker，inline decode。`--decode-workers` 優先。`tx_app` 不 decode，不讀它 |
 | `cpu_cores` | 1 | 0–256 | 每個 app 的主 process 與 engine 子 process 各自的 NumPy／BLAS（與 OpenMP）thread 上限；0 = 這個 process 可以跑的 CPU 數（看 affinity／cgroup）。`--cpu-cores` 優先。Decode workers 固定各 1 個 thread，平行度由 `decode_workers` 決定 |
-| `rx_min_feed_samples` | `null` | `null` 或 0–131072（整數） | `rx_app` 與 `node_app`：比這個短的 transport chunk 會和 queue 裡後面的 chunk 併成一次 feed。`null` = 8192；0 = 每個 chunk 直接 feed。Jetson 用 65536。`--rx-min-feed-samples` 優先 |
-| `rx_max_merge_wait_ms` | `null` | `null` 或 0–20（可以有小數） | 為了湊滿上面的大小最多等幾毫秒。`null` = 2；Jetson 用 15。`--rx-max-merge-wait-ms` 優先 |
+| `rx_min_feed_samples` | `null` | `null` 或 0–131072（整數） | `rx_app` 與 `node_app`：比這個短的 transport chunk 會和 queue 裡後面的 chunk 併成一次 feed。`null` = 8192；0 = 每個 chunk 直接 feed。Jetson 用 65536（[`jetson_rx_feed.yaml`](../configs/profiles/jetson_rx_feed.yaml)）。`--rx-min-feed-samples` 優先 |
+| `rx_max_merge_wait_ms` | `null` | `null` 或 0–20（可以有小數） | 為了湊滿上面的大小最多等幾毫秒。`null` = 2；Jetson 用 15（同一個檔）。`--rx-max-merge-wait-ms` 優先 |
 
 優先順序都是：命令列 > 設定檔（`default.yaml` 加上各個 overlay，後面的蓋過前面的）> app 內建預設。內建預設就是這些 key
 生效之前的行為（thread 1、`rx_app` 4 個 worker、`node_app` 3 個、feed 8192 samples／2 ms），所以沒設的人執行結果不變。
@@ -604,12 +605,40 @@ UHD 與 udp transport 的 samples 一定是有限值（`finite_samples`），連
 
 **接收端 feed 的大小（`--rx-min-feed-samples`、`--rx-max-merge-wait-ms`，預設不變）。** `ReceiveWorker` 會把 queue 裡已經
 在等的短 chunk 併成至少 `rx_min_feed_samples` 個 samples 再 feed，最多為此等 `rx_max_merge_wait_ms`：
-命令列 > `acceleration.rx_min_feed_samples`／`rx_max_merge_wait_ms` > 8192 samples、2 ms（PC 的設定，所有版本都是這個）。
-每次 feed 有固定成本，在慢的機器上大一點的 feed 省 receive owner 的 CPU；**Jetson 用 65536 與 15 ms**。`MessageReceiver`
+命令列 > `acceleration.rx_min_feed_samples`／`rx_max_merge_wait_ms` > 8192 samples、2 ms（PC 的設定；這個值一直沒變，但 UHD 接收端現在也用它在 GNU Radio 裡分組，見下）。
+每次 feed 有固定成本，在慢的機器上大一點的 feed 省 receive owner 的 CPU；**Jetson 用 65536 與 15 ms**，設定範例是
+[`configs/profiles/jetson_rx_feed.yaml`](../configs/profiles/jetson_rx_feed.yaml)，接在 profile 後面（例如
+`--overlay configs/profiles/ota_2p45ghz.yaml --overlay configs/profiles/jetson_rx_feed.yaml`）。`--overlay` 會取代 app
+預設的 profile，所以 profile 一定要寫出來，不能只給這個檔。`MessageReceiver`
 仍然把每次 feed 切成 8192 samples 的小塊交給 decoder，所以省下的只是每次 feed 的固定成本。samples、交付的 payload
 與順序都不變；但小塊是從每次 feed 的開頭切的，feed 的邊界一變，decoder 看到的 buffer 就不同，所以一個 burst 的 SNR 與
 雜訊估計可能在最後幾位數不同。啟動時的 `[acceleration]` 那行會印出實際用的兩個值與來源。代價是延遲：一個 burst 最多晚等待的那段時間才交給 decoder，`--events` 的 `mono`
 也會跟著晚（7.11 節）。範圍：0–131072 samples（0 = 不併）、0–20 ms。
+
+**Jetson 上的量測（2026-11-19）。** Jetson Xavier NX（MODE_20W_6CORE，沒有跑 `jetson_clocks`）+ B210 與 PC + NI
+USRP-2901，OTA，5 MS/s、MCS 12，Jetson `--realtime`、4 個 decode worker（`node_app` 預設是 3，要自己加
+`--decode-workers 4`），每點 60 秒。用的是量測 harness 自己的 overlay，不是 repo 裡的 profile：單向 PC→Jetson 在
+2460 MHz，PC TX 的 `mac.aggregation.max_wait_ms` 20、`max_burst_airtime_ms` 16；雙向是 `duplex_fdd_2420_2460.yaml`
+再加 `min_burst_interval_ms` 20。原始資料在作者本機的 `runs/jetson_b210_20261118/perf_after_item1/`；`runs/` 不進版控。
+跟預設的 8192／2 ms 比，65536／15 ms 的遺失（除 200/s 外每格只跑一次）：
+
+| 情境 | 8192／2 ms | 65536／15 ms |
+|---|---|---|
+| 單向 PC→Jetson，100/s | 0 % | 0 % |
+| 單向 PC→Jetson，200/s | 0.25 %、0.29 % | 0 %、0 % |
+| 單向 PC→Jetson，300/s | 10.9 % | 10.4 % |
+| 雙向 5/5（Jetson→PC／PC→Jetson），PC→Jetson | 0.67 % | 0 % |
+| 雙向 50/25，PC→Jetson | 9.2 % | 1.3 % |
+| 雙向 100/50，PC→Jetson | 22.6 % | 22.7 % |
+
+雙向時 Jetson→PC 兩種設定每點都是 0 %。遺失上的差別在單向 200/s 與雙向 5/5、50/25；單向 100/s 兩者都不掉，只有
+PC→Jetson 延遲中位數變短（239 → 148 ms）。200/s 時 transport 收進 queue 的 chunk（`chunks_received`）每秒約 180 → 72 個，
+60 秒內 queue 滿的 back-pressure 約 2.7k–2.9k → 13–134 次，延遲中位數約 323 → 205 ms。飽和點沒有變：單向 300/s、雙向 100/50
+兩種設定掉得差不多。單向時 Jetson 6 核約 5.5 核在忙（200/s、0 遺失時已經約 5.3 核），推測瓶頸是總 CPU；雙向 100/50
+只有約 3.3 核在忙，瓶頸還沒找到。延遲方面，最多晚 15 ms 是上限：有負載時中位數反而變短（上面的 200/s），雙向 5/5 則
+稍微變長（108 → 113 ms）。改善前（`df098bd`，UHD 還沒在 GNU Radio 裡分組）同樣的 8192／2 ms 在 200/s 兩次都是 0 %、雙向
+50/25 是 3.7 %（一次）；也就是加了分組之後，預設值在 Jetson 上變差（200/s 0 → 0.25–0.29 %、雙向 50/25 3.7 → 9.2 %，次數少），這也是 Jetson 要另外加上面 overlay 的原因
+之一。PC 不用加。
 
 **UHD 接收端在 GNU Radio 裡先分組（ingest batching，跟著上面的 feed 設定，不需要另外的開關）。** 沒有分組時，UHD 每送來
 一批 samples，GNU Radio 就呼叫一次 Python 的 RX sink block：B210 在 5 MS/s 約每秒 843 次、每次約 5.9k samples，每次都要拿
@@ -708,7 +737,7 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 |---|---|
 | `off` | preamble 第一個 sample 在接收串流中的位置（從 RX 開始算的 sample 數） |
 | `dev_t` | 那個 sample 的裝置時間（秒）：最近一個不晚於它的 `rx_time` anchor 加上 `(off − anchor) / sample_rate`。只有 UHD 有；B210 的裝置時鐘從開機起算，沒有對主機或 GNSS 對時 |
-| `mono`、`wall` | 接收 thread 把含有這個 preamble 的 chunk 交給 decoder 時的主機時間。比 burst 在空中的時間晚一段 queue 與 USB 的延遲（沒有量），再加上併 chunk 的等待：最多 `rx_max_merge_wait_ms`（預設 2 ms，Jetson 設定 15 ms，見 7.10 節） |
+| `mono`、`wall` | 接收 thread 把含有這個 preamble 的 chunk 交給 decoder 時的主機時間。比 burst 在空中的時間晚一段 queue 與 USB 的延遲（沒有量），再加上併 chunk 的等待：最多 `rx_max_merge_wait_ms`（預設 2 ms，Jetson 設定 15 ms：[`jetson_rx_feed.yaml`](../configs/profiles/jetson_rx_feed.yaml)，見 7.10 節） |
 | `snr_db` | preamble（v5 是 LTF pair）量到的 SNR，換算到 payload samples，和 `link_snr` 事件同一個值。兩個 FFT window 提早 `start` 行的 `snr_fft_advance_samples` 個 sample；不同值的檔案不能直接合併比較 |
 | `noise_var`、`signal_power` | 同一個量測的複數雜訊變異數（每個 sample）與 active carriers 上的平均 `|H|²`；都是線性值，接收的 full scale 是 1.0 |
 | `peak`、`clip` | burst 的 samples 裡最大的 `|I|` 或 `|Q|`（header 失敗時只看 fixed header 那一段）；`clip = peak ≥ 1900/2048`（與 `rx_app` 相同） |
