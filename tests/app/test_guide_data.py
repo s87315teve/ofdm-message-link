@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
-from guide import build_data
 from ofdm_link.radio.uhd import SUPPORTED_SAMPLE_RATES
 
 ROOT = Path(__file__).resolve().parents[2]
+# guide/ is not an installed package: load the script by path, from any cwd.
+_spec = importlib.util.spec_from_file_location("guide_build_data", ROOT / "guide" / "build_data.py")
+build_data = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(build_data)
 
 
 def _guide_data() -> dict:

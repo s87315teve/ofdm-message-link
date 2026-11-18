@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -19,15 +20,15 @@ def _sweep_dry(*argv: str) -> list[list[str]]:
          "--tx-serial", "TX", "--rx-serial", "RX", *argv],
         capture_output=True, text=True, check=True, cwd=ROOT,
     ).stdout
-    return [line.split() for line in out.splitlines()]
+    return [shlex.split(line) for line in out.splitlines()]
 
 
 def _tx_args(words: list[str]):
     """Parse a printed tx_app command with tx_app's own parser."""
 
-    argv = words[words.index("ofdm_message_link.tx_app") + 1:]
-    cut = argv.index("--acknowledgement")
-    return tx_app.build_parser().parse_args([*argv[:cut], "--acknowledgement", "x"])
+    args = tx_app.build_parser().parse_args(words[words.index("ofdm_message_link.tx_app") + 1:])
+    assert args.acknowledgement == options.RF_ACKNOWLEDGEMENT
+    return args
 
 
 def test_sweep_passes_the_aggregation_options_to_tx_app():

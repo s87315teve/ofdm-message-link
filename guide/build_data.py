@@ -34,7 +34,10 @@ from ofdm_message_link.dashboard import MARGIN_DB, SNR_THRESHOLD_DB
 from ofdm_message_link.link import FRAME_OVERHEAD_BYTES, MessageTransmitter
 
 DATA_CARRIERS = 48
-PROFILES = Path("configs/profiles")
+# Paths are resolved against the repository, so this runs (and is tested) from any cwd;
+# the profile names written into data.js stay repository-relative.
+REPO = Path(__file__).resolve().parents[1]
+PROFILES = REPO / "configs" / "profiles"
 # Sizes also checked against a real encoded burst (cheap enough to run each time).
 ENCODER_CHECK_SIZES = (1, 500, 968)
 
@@ -55,12 +58,19 @@ def _page_symbols(psdu_bytes: int, bits_per_symbol: int, num: int, den: int) -> 
 
 
 def _resolve(argv: list[str]) -> options.ResolvedOptions:
-    """What tx_app resolves for these arguments (no radio needed)."""
+    """What tx_app resolves for these arguments (no radio needed).
+
+    ``--overlay`` takes a repository-relative profile; without one, the
+    default profile, as in tx_app.
+    """
 
     parser = argparse.ArgumentParser()
     options.add_common_arguments(parser)
     options.add_aggregation_arguments(parser)
-    return options.resolve(parser.parse_args(argv))
+    args = parser.parse_args(argv)
+    args.config = str(REPO / options.DEFAULT_CONFIG)
+    args.overlay = [str(REPO / path) for path in (args.overlay or [options.DEFAULT_OVERLAY])]
+    return options.resolve(args)
 
 
 def _one_way_profiles() -> dict[int, list[str]]:
@@ -71,7 +81,7 @@ def _one_way_profiles() -> dict[int, list[str]]:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         rate = (raw.get("phy") or {}).get("sample_rate")
         if rate is not None and "duplex" not in raw:
-            found.setdefault(int(rate), []).append(path.as_posix())
+            found.setdefault(int(rate), []).append(path.relative_to(REPO).as_posix())
     return found
 
 

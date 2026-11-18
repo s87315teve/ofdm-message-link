@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -214,9 +215,9 @@ def main(argv: list[str] | None = None) -> None:
     overlays = [part for path in args.overlay for part in ("--overlay", path)]
     out = Path(args.out)
     if args.dry_run:
-        print(" ".join(rx_command(args, overlays, out / "rx.ready", out / "rx_stats.jsonl")))
+        print(shlex.join(rx_command(args, overlays, out / "rx.ready", out / "rx_stats.jsonl")))
         for mcs in mcs_list:
-            print(" ".join(tx_command(args, overlays, out / "tx.ready", mcs)))
+            print(shlex.join(tx_command(args, overlays, out / "tx.ready", mcs)))
         return
     if not args.enable_rf:
         ap.error("refusing to transmit: pass --enable-rf to acknowledge that this keys the USRP")
