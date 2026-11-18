@@ -10,10 +10,10 @@
 | `style.css` | 版面與顏色（light 與 dark） |
 | `content.js` | 全部的說明文字：模組、blocks、導覽步驟、指令、症狀、檔案對照，以及雙向 node 的模組（`NODE_MODULES`） |
 | `app.js` | 互動邏輯 |
-| `data.js` | 自動產生：每種 MCS 與每個 fragment 大小的 payload OFDM symbols |
+| `data.js` | 自動產生：每種 MCS 與每個 fragment 大小的 payload OFDM symbols，以及每個 sample rate 的 aggregation 上限（取自那個速率的 profile，和 `tx_app` 用的一樣） |
 | `build_data.py` | 用這個範例的 encoder 產生 `data.js` |
 
-PHY 改變後，請在 repository root 重新產生 `data.js`：
+PHY 或 `configs/` 的 profile 改變後，請在 repository root 重新產生 `data.js`：
 
 ```bash
 python -m guide.build_data

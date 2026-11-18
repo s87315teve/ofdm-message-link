@@ -5,6 +5,17 @@
 window.GUIDE_CONTENT = (function () {
   "use strict";
 
+  // The aggregation caps, from data.js (build_data.py reads them from configs/).
+  var AGG = window.GUIDE_DATA.aggregation;
+  var AGG_CAPS = "上限是 " + AGG.maxSubframes + " 個 frames、" + AGG.maxPsduBytes + " bytes 與 " +
+    AGG.maxBurstAirtimeMs + " ms airtime（預設 profile 的 <code>mac.aggregation</code>）。" +
+    window.GUIDE_DATA.rates.filter(function (r) {
+      return r.profile && r.maxBurstAirtimeMs !== AGG.maxBurstAirtimeMs;
+    }).map(function (r) {
+      return r.sampleRate / 1e6 + " MS/s 的 profile 設 " + r.maxBurstAirtimeMs + " ms。";
+    }).join("") +
+    "不論設定，一個 burst 也不超過 " + AGG.maxBurstSamples.toLocaleString("en-US") + " samples。";
+
   var MODULES = [
     {
       id: "ext-in", cls: "ext", area: "ext-in", arrow: "right", row: "來源",
@@ -60,7 +71,7 @@ window.GUIDE_CONTENT = (function () {
           does: ["這個 block 把排隊中的 frames 放進同一個 burst。這個格式叫 A-MPDU。",
             "每個 frame 前面有 4-byte delimiter。Delimiter 內有 frame 的 length 與 CRC-8。",
             "Burst 的最後有 4-byte FCS。FCS 是整個 PSDU 的 CRC-32。",
-            "Radio 可以接受下一個 burst 時，這個 block 放入 queue 裡的 frames。上限是 32 個 frames、16384 bytes 與 8 ms airtime。",
+            "Radio 可以接受下一個 burst 時，這個 block 放入 queue 裡的 frames。" + AGG_CAPS,
             "兩個 burst 的開始時間至少相隔 4 ms。等待時，這個 block 把新的 frames 放進同一個 burst。所以 burst 數最多每秒 250 個。",
             "比 4 ms 長的 burst 不等待。閒置之後的第一個 burst 也不等待。滿的 burst 不等待。"],
           input: "一個或多個 PHY frames", output: "一個 PSDU",

@@ -9,6 +9,11 @@ the payload OFDM symbols of a burst that carries one datagram, plus the
 constants the page needs to size an aggregated burst.  It checks the page's
 formula against the encoder, so the page never re-derives FEC block sizes on
 its own.
+
+For every sample rate the radio code accepts it records the aggregation caps
+tx_app resolves with that rate's one-way profile under configs/profiles/ (the
+default profile where it has the rate), so the packet lab plans bursts with
+the same limits as the program, e.g. 5 ms at 15.36 MS/s.
 """
 
 from __future__ import annotations
@@ -17,15 +22,19 @@ import argparse
 import json
 from pathlib import Path
 
+import yaml
+
 from ofdm_link.phy.ampdu import DELIMITER_BYTES, ampdu_body_length
 from ofdm_link.phy.burst_v5 import PSDU_FCS_BYTES, V5_MAX_TRACKED_BURST_SAMPLES
 from ofdm_link.phy.mcs_table import _v5_symbol_count, describe_mcs_entry, v5_entries
 from ofdm_link.phy.sync_v5 import V5_LTF_LENGTH, V5_SIG_LENGTH, V5_STF_LENGTH
+from ofdm_link.radio.uhd import SUPPORTED_SAMPLE_RATES
 from ofdm_message_link import datagram, options
 from ofdm_message_link.dashboard import MARGIN_DB, SNR_THRESHOLD_DB
 from ofdm_message_link.link import FRAME_OVERHEAD_BYTES, MessageTransmitter
 
 DATA_CARRIERS = 48
+PROFILES = Path("configs/profiles")
 # Sizes also checked against a real encoded burst (cheap enough to run each time).
 ENCODER_CHECK_SIZES = (1, 500, 968)
 
@@ -45,14 +54,64 @@ def _page_symbols(psdu_bytes: int, bits_per_symbol: int, num: int, den: int) -> 
     return max(1, -(-(8 * psdu_bytes * den) // (num * DATA_CARRIERS * bits_per_symbol)))
 
 
+def _resolve(argv: list[str]) -> options.ResolvedOptions:
+    """What tx_app resolves for these arguments (no radio needed)."""
+
+    parser = argparse.ArgumentParser()
+    options.add_common_arguments(parser)
+    options.add_aggregation_arguments(parser)
+    return options.resolve(parser.parse_args(argv))
+
+
+def _one_way_profiles() -> dict[int, list[str]]:
+    """Profiles that set a sample rate and have no duplex section, by rate."""
+
+    found: dict[int, list[str]] = {}
+    for path in sorted(PROFILES.glob("*.yaml")):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        rate = (raw.get("phy") or {}).get("sample_rate")
+        if rate is not None and "duplex" not in raw:
+            found.setdefault(int(rate), []).append(path.as_posix())
+    return found
+
+
+def _rate_limits(default: options.ResolvedOptions) -> list[dict]:
+    """Aggregation caps per sample rate, from the profile tx_app would load for it."""
+
+    profiles = _one_way_profiles()
+    rates = []
+    for rate in sorted(SUPPORTED_SAMPLE_RATES):
+        candidates = profiles.get(rate, [])
+        profile = (
+            options.DEFAULT_OVERLAY if options.DEFAULT_OVERLAY in candidates
+            else candidates[0] if candidates else None
+        )
+        resolved = default if profile is None else _resolve(["--overlay", profile])
+        assert resolved.profile.sample_rate == rate or profile is None, (rate, profile)
+        # The page uses one set of guards and symbol shapes for every rate.
+        assert (resolved.profile.guard_pre_samples, resolved.profile.guard_post_samples) == (
+            default.profile.guard_pre_samples, default.profile.guard_post_samples
+        ), profile
+        limits = resolved.aggregation
+        rates.append(
+            {
+                "sampleRate": float(rate),
+                "profile": profile,
+                "isDefault": profile == options.DEFAULT_OVERLAY,
+                "enabled": limits.enabled,
+                "maxSubframes": limits.max_subframes,
+                "maxPsduBytes": limits.max_psdu_bytes,
+                "maxBurstAirtimeMs": limits.max_burst_airtime_s * 1e3,
+            }
+        )
+    return rates
+
+
 def main() -> None:
     table = []
     resolved = None
     for entry in v5_entries():
-        parser = argparse.ArgumentParser()
-        options.add_common_arguments(parser)
-        options.add_aggregation_arguments(parser)
-        resolved = options.resolve(parser.parse_args(["--mcs-index", str(entry.index)]))
+        resolved = _resolve(["--mcs-index", str(entry.index)])
         profile = resolved.profile
         max_payload = profile.max_message_payload_bytes
         guards = profile.guard_pre_samples + profile.guard_post_samples
@@ -122,6 +181,8 @@ def main() -> None:
             "maxBurstAirtimeMs": limits.max_burst_airtime_s * 1e3,
             "maxBurstSamples": V5_MAX_TRACKED_BURST_SAMPLES,
         },
+        # The packet lab's sample-rate menu: the caps tx_app uses at each rate.
+        "rates": _rate_limits(resolved),
         "marginDb": MARGIN_DB,
         "mcs": table,
     }

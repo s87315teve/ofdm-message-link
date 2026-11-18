@@ -184,6 +184,38 @@
     mcsSelect.appendChild(o);
   });
 
+  // Sample rates and their aggregation caps, generated from configs/profiles by build_data.py.
+  var rateSelect = $("rate");
+  var RATE_NOTES = { 15360000: "（USRP；測過 B210 與 NI USRP-2901）" };
+  DATA.rates.forEach(function (r) {
+    var o = el("option", null, fmtRate(r.sampleRate) + (r.isDefault ? "（預設）" : RATE_NOTES[r.sampleRate] || ""));
+    o.value = r.sampleRate;
+    rateSelect.appendChild(o);
+  });
+  function fmtRate(rate) { return rate / 1e6 + " MS/s"; }
+  function selectedRate() {
+    var rate = Number(rateSelect.value);
+    return DATA.rates.filter(function (r) { return r.sampleRate === rate; })[0] || DATA.rates[0];
+  }
+  // The caps tx_app applies at this rate: the profile's, plus the 80 000-sample timing limit.
+  function rateHint(r) {
+    var samplesMs = DATA.aggregation.maxBurstSamples / r.sampleRate * 1e3;
+    var effective = Math.min(r.maxBurstAirtimeMs, samplesMs);
+    var source = r.profile
+      ? "Aggregation 上限取自 <code>" + r.profile + "</code>："
+      : "沒有 " + fmtRate(r.sampleRate) + " 的 profile，這裡用預設 profile 的上限：";
+    var text = source + "一個 burst 最多 " + r.maxSubframes + " 個 frames、" + fmt(r.maxPsduBytes) + " bytes、" +
+      r.maxBurstAirtimeMs + " ms airtime。不論設定，一個 burst 也不超過 " + fmt(DATA.aggregation.maxBurstSamples) +
+      " samples（" + fmtRate(r.sampleRate) + " 是 " + samplesMs.toFixed(2) + " ms）。所以這裡的 airtime 上限是 " +
+      effective.toFixed(2) + " ms。";
+    if (!r.profile && r.maxBurstAirtimeMs > samplesMs) {
+      text += "自己寫這個速率的 profile 時，<code>max_burst_airtime_ms</code> 要 ≤ " +
+        (Math.floor(samplesMs * 100) / 100) + "，否則設定檔會被拒絕。";
+    }
+    if (!r.enabled) { text = source + "aggregation 關閉，一個 burst 一個 frame。"; }
+    return text;
+  }
+
   function selectedMcs() {
     var index = Number(mcsSelect.value);
     return DATA.mcs.filter(function (m) { return m.index === index; })[0] || DATA.mcs[0];
@@ -216,8 +248,8 @@
   }
 
   // Same rule as aggregation.plan_aggregate: the longest FIFO prefix within the caps, at least one.
-  function planBursts(mcs, fragments, rate) {
-    var agg = DATA.aggregation, groups = [], i = 0;
+  function planBursts(mcs, fragments, limits) {
+    var agg = limits, rate = limits.sampleRate, groups = [], i = 0;
     while (i < fragments.length) {
       var take = 1;
       if (agg.enabled) {
@@ -225,7 +257,7 @@
           var part = fragments.slice(i, i + n);
           var samples = burstSamples(mcs, part);
           if (psduBytes(part) > agg.maxPsduBytes || samples / rate * 1e3 > agg.maxBurstAirtimeMs ||
-              samples > agg.maxBurstSamples) { break; }
+              samples > DATA.aggregation.maxBurstSamples) { break; }
           take = n;
         }
       }
@@ -244,14 +276,16 @@
   function renderLab() {
     var size = Number($("size").value);
     var mcs = selectedMcs();
-    var rate = Number($("rate").value);
+    var limits = selectedRate();
+    var rate = limits.sampleRate;
+    $("rate-hint").innerHTML = rateHint(limits);
     var symLen = DATA.fftLen + DATA.cpLen;
     var max = DATA.maxFragmentBytes;
 
     var fragments = [];
     for (var left = size; left > 0; left -= max) { fragments.push(Math.min(left, max)); }
     if (state.frag >= fragments.length) { state.frag = 0; }
-    var groups = planBursts(mcs, fragments, rate);
+    var groups = planBursts(mcs, fragments, limits);
     var samples = groups.map(function (g) { return burstSamples(mcs, g.map(function (i) { return fragments[i]; })); });
     var total = samples.reduce(function (a, b) { return a + b; }, 0);
     var airtimeMs = total / rate * 1e3;

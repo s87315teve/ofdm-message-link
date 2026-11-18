@@ -138,7 +138,7 @@
       <g class="blk tx" data-id="tx-ampdu" tabindex="0" role="button">
         <rect x="426" y="196" width="114" height="88" rx="10"/>
         <text class="t-title" x="483" y="218" text-anchor="middle">A-MPDU</text>
-        <text class="t-sub" x="483" y="237" text-anchor="middle">≤ 32 frames, 8 ms</text>
+        <text class="t-sub" x="483" y="237" text-anchor="middle">≤ 32 frames, airtime cap</text>
         <text class="t-sub" x="483" y="251" text-anchor="middle">PSDU + FCS</text>
         <text class="t-sub" x="483" y="265" text-anchor="middle">min interval 4 ms</text>
       </g>
@@ -360,20 +360,16 @@
     </label>
     <label class="field">
       <span>Sample rate</span>
-      <select id="rate">
-        <option value="5000000">5 MS/s（預設）</option>
-        <option value="10000000">10 MS/s</option>
-        <option value="15360000">15.36 MS/s（USRP；測過 B210 與 NI USRP-2901）</option>
-        <option value="20000000">20 MS/s</option>
-      </select>
+      <select id="rate"></select>
     </label>
+    <p class="hint" id="rate-hint"></p>
   </div>
 
   <div class="tiles" id="tiles"></div>
 
   <div class="card">
     <h2>步驟 1：Message 變成 fragments</h2>
-    <p class="note">一個 fragment 最多 968 bytes。每個 fragment 變成一個 PHY frame。TX 把排隊中的 frames 放進同一個 burst，直到 subframe、byte 或 airtime 的上限。</p>
+    <p class="note">一個 fragment 最多 968 bytes。每個 fragment 變成一個 PHY frame。TX 把排隊中的 frames 放進同一個 burst，直到 subframe、byte 或 airtime 的上限。這些上限取自所選 sample rate 的 profile（見上面的說明），和 <code>tx_app</code> 用的一樣。</p>
     <div class="frags" id="frags"></div>
     <p class="hint" id="frag-hint"></p>
   </div>
