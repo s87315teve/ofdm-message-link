@@ -10,7 +10,7 @@ receive iteration, in one of three modes:
 * ``new``:  today's ``engine._EventSink``: buffered, one put per flush, one
   flush per iteration (as ``ReceiveWorker`` does).
 
-Two scenarios:
+Three scenarios:
 
 * ``paced``: the thread sleeps between iterations to hold ``--rate`` events/s;
   the result is the child's CPU per event (``time.process_time``: every thread,
@@ -20,16 +20,24 @@ Two scenarios:
   engine), and each message is followed by a UDP ``sendto`` like the egress,
   which drops the GIL; the result is the owner's work units per second (what
   the GIL left it) against the baseline.
+* ``busy-parent``: paced like ``paced`` (one iteration every 5 ms), while the
+  parent's main thread hogs its own GIL (sorting a large list, like a busy
+  GUI) so the parent's pump thread is starved; the result is how long the
+  child's puts of one iteration take (median, p99, p99.9, max).  A put must
+  never wait on the parent: an earlier version shared a lock with the pump
+  and waited up to ~27 ms here.
 
 The parent drains the queue like the engine pump.
 
-    PYTHONPATH=src python tools/bench_event_batching.py [--scenario both] [--seconds 10]
+    PYTHONPATH=src python experiments/engine_events/bench_event_batching.py \\
+        [--scenario all] [--seconds 10]
 """
 
 from __future__ import annotations
 
 import argparse
 import queue
+import random
 import socket
 import statistics
 import sys
@@ -41,6 +49,8 @@ import numpy as np
 
 from ofdm_link.runtime.segment_decode_pool import _safe_context
 from ofdm_message_link import engine
+
+_SCENARIOS = ("paced", "owner", "busy-parent")
 
 
 @dataclass(frozen=True)
@@ -85,23 +95,26 @@ def _producer(mode, scenario, rate, seconds, per_iteration, work_s, channel, res
     sink = engine._EventSink(channel, samples_per_second=1.0)
     egress = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     payload = bytes(752)
-    interval = per_iteration / rate
+    interval = 0.005 if scenario == "busy-parent" else per_iteration / rate
     started_cpu = time.process_time()
     started = time.monotonic()
-    sent = iterations = work = 0
+    sent = iterations = work = full = 0
+    latencies: list[float] = []
     while time.monotonic() - started < seconds:
-        if scenario == "paced":
+        if scenario == "owner":
+            work += _busy(work_s)
+        else:
             delay = started + iterations * interval - time.monotonic()
             if delay > 0:
                 time.sleep(delay)
-        else:
-            work += _busy(work_s)
-        for kind, value in _events(iterations, per_iteration):
+        events = _events(iterations, per_iteration)
+        put_started = time.perf_counter()
+        for kind, value in events:
             if mode == "old":
                 try:
                     channel._queue.put_nowait((kind, value))
                 except queue.Full:
-                    pass
+                    full += 1  # what _EventSink.dropped counted
             elif mode == "new":
                 sink.put(kind, value)
             if scenario == "owner" and kind == "message":
@@ -109,6 +122,7 @@ def _producer(mode, scenario, rate, seconds, per_iteration, work_s, channel, res
             sent += 1
         if mode == "new":
             sink.flush_events()
+        latencies.append(time.perf_counter() - put_started)
         iterations += 1
     elapsed = time.monotonic() - started
     sink.flush_events()
@@ -117,7 +131,12 @@ def _producer(mode, scenario, rate, seconds, per_iteration, work_s, channel, res
     channel._queue.join_thread()
     cpu = time.process_time() - started_cpu
     egress.close()
-    result.put((sent, work / elapsed, cpu, sink.dropped))
+    latencies.sort()
+    result.put((sent, work / elapsed, cpu, sink.dropped + full, latencies))
+
+
+def _quantile(values, q):
+    return values[min(len(values) - 1, int(q * len(values)))]
 
 
 def run(mode, scenario, rate, seconds, per_iteration, work_s) -> dict:
@@ -146,18 +165,26 @@ def run(mode, scenario, rate, seconds, per_iteration, work_s) -> dict:
 
     pump = threading.Thread(target=drain, daemon=True)
     pump.start()
-    sent, work_per_s, cpu, dropped = result.get(timeout=seconds + 60)
+    if scenario == "busy-parent":
+        data = [random.random() for _ in range(300_000)]
+        end = time.monotonic() + seconds + 1.0
+        while time.monotonic() < end:  # hogs this interpreter's GIL
+            sorted(data)
+    sent, work_per_s, cpu, dropped, latencies = result.get(timeout=seconds + 60)
     process.join(30)
-    time.sleep(0.2)
+    deadline = time.monotonic() + 5.0
+    while received < sent and time.monotonic() < deadline:
+        time.sleep(0.05)
     stop.set()
     pump.join(1)
     return {"events": sent, "received": received, "dropped": dropped,
-            "work_per_s": work_per_s, "cpu_us_per_event": 1e6 * cpu / sent}
+            "work_per_s": work_per_s, "cpu_us_per_event": 1e6 * cpu / sent,
+            "latencies": latencies}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--scenario", choices=("paced", "owner", "both"), default="both")
+    parser.add_argument("--scenario", choices=(*_SCENARIOS, "all"), default="all")
     parser.add_argument("--rate", type=float, default=280.0, help="paced: events per second")
     parser.add_argument("--work-ms", type=float, default=10.0,
                         help="owner: pure-Python work per iteration")
@@ -166,19 +193,32 @@ def main() -> None:
                         help="events per receive iteration (one flush each)")
     parser.add_argument("--repeats", type=int, default=3)
     args = parser.parse_args()
-    scenarios = ("paced", "owner") if args.scenario == "both" else (args.scenario,)
+    scenarios = _SCENARIOS if args.scenario == "all" else (args.scenario,)
     for scenario in scenarios:
+        detail = {"paced": f"{args.rate:g} events/s",
+                  "owner": f"{args.work_ms:g} ms work per iteration",
+                  "busy-parent": "one iteration per 5 ms, parent main thread hogging its GIL"}
         print(f"[{scenario}] {args.per_iteration} events per iteration, {args.seconds:g} s, "
-              f"{args.repeats} repeats, "
-              + (f"{args.rate:g} events/s" if scenario == "paced"
-                 else f"{args.work_ms:g} ms work per iteration"))
+              f"{args.repeats} repeats, {detail[scenario]}", flush=True)
+        modes = ("old", "new") if scenario == "busy-parent" else ("none", "old", "new")
         results: dict[str, list[dict]] = {}
         for _ in range(args.repeats):
             # Interleaved, so drift in the machine's load hits every mode alike.
-            for mode in ("none", "old", "new"):
+            for mode in modes:
                 results.setdefault(mode, []).append(run(
                     mode, scenario, args.rate, args.seconds, args.per_iteration,
                     args.work_ms / 1e3))
+        if scenario == "busy-parent":
+            for mode in modes:
+                for row in results[mode]:
+                    lat = row["latencies"]
+                    print(f"  {mode}: put per iteration median "
+                          f"{1e6 * _quantile(lat, 0.5):.0f} us, "
+                          f"p99 {1e3 * _quantile(lat, 0.99):.2f} ms, "
+                          f"p99.9 {1e3 * _quantile(lat, 0.999):.2f} ms, max {1e3 * lat[-1]:.2f} ms "
+                          f"(n={len(lat)}); received {row['received']}/{row['events']}, "
+                          f"dropped {row['dropped']}", flush=True)
+            continue
         base_cpu = statistics.median(row["cpu_us_per_event"] for row in results["none"])
         print(f"  none: {base_cpu:.1f} us CPU/event")
         base_rate = statistics.median(row["work_per_s"] for row in results["none"]) or 1.0
@@ -192,7 +232,7 @@ def main() -> None:
             print(f"  {mode}: {statistics.median(cpu):+.1f} us CPU/event "
                   f"(runs {', '.join(f'{value:+.1f}' for value in cpu)}); {work}"
                   f"received {rows[-1]['received']}/{rows[-1]['events']}, "
-                  f"dropped {rows[-1]['dropped']}")
+                  f"dropped {rows[-1]['dropped']}", flush=True)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ by one, in order, so a parent-side timestamp is at most one flush later.
 from __future__ import annotations
 
 import atexit
+import multiprocessing.queues
 import os
 import queue
 import signal
@@ -39,6 +40,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from multiprocessing.reduction import ForkingPickler as _ForkingPickler
 from typing import Any
 
 import numpy as np
@@ -74,42 +76,125 @@ class _Signal:
         self._sink.put(self._kind, value)
 
 
+class _BatchQueue(multiprocessing.queues.Queue):
+    """A multiprocessing queue whose feeder salvages a batch it cannot pickle.
+
+    The stock feeder prints a traceback and loses the whole item.  Here the
+    events of the batch that do pickle are still sent, in place, so one bad
+    value costs only itself, and ``on_lost(count, kinds, error)`` hears of the
+    rest so the event bound gets their room back.
+    """
+
+    def __init__(self, maxsize: int, *, ctx) -> None:
+        super().__init__(maxsize, ctx=ctx)
+        self.on_lost: Callable[[int, list, BaseException], None] | None = None
+
+    def __setstate__(self, state) -> None:
+        super().__setstate__(state)
+        self.on_lost = None
+
+    def _on_queue_feeder_error(self, error, obj) -> None:
+        # Runs on the feeder thread before it takes the next item, so a
+        # salvaged batch keeps its place.  The feeder has already given the
+        # item's slot back to the queue's semaphore.
+        if not isinstance(obj, list):
+            # The send itself failed (the parent is gone): nothing to save.
+            lost, kinds = 0, []
+        else:
+            good, bad = [], []
+            for event in obj:
+                try:
+                    _ForkingPickler.dumps(event)
+                except Exception:
+                    bad.append(event)
+                else:
+                    good.append(event)
+            lost, kinds = len(bad), [event[0] for event in bad]
+            if good:
+                sent = False
+                if self._sem.acquire(False):
+                    try:
+                        data = _ForkingPickler.dumps(good)
+                        if self._wlock is None:
+                            self._send_bytes(data)
+                        else:
+                            with self._wlock:
+                                self._send_bytes(data)
+                        sent = True
+                    except Exception:
+                        self._sem.release()
+                if not sent:
+                    lost, kinds = len(obj), [event[0] for event in obj]
+        if self.on_lost is not None:
+            self.on_lost(lost, kinds, error)
+
+
 class _EventQueue:
     """The engine->parent channel: batches of ``(kind, value)``, bounded in events.
 
-    Built by the parent and handed to the child at start.  ``outstanding``
-    counts events put and not yet taken by the parent, so the bound is on
-    events however they are batched.  The queue's own item bound is the same
-    number, which a batch of at least one event never reaches first.
+    Built by the parent and handed to the child at start.  No lock is shared
+    between the two processes, so a parent pump that is descheduled or
+    starved of its GIL, or a process that dies, can never make the other
+    wait.  The child counts the events it has put (``_sent``, a plain int
+    behind a lock of its own); the parent alone writes how many it has taken
+    (``_taken``, a lock-free shared integer the child only reads); the child
+    drops a batch that would put more than ``depth`` events in flight.  The
+    queue's own item bound is the same number, which a batch of at least one
+    event never reaches first.
     """
 
     def __init__(self, context, depth: int = _EVENT_DEPTH) -> None:
-        self._queue = context.Queue(maxsize=depth)
-        self._outstanding = context.Value("q", 0)
+        self._queue = _BatchQueue(depth, ctx=context.get_context())
+        self._taken = context.RawValue("q", 0)
         self._depth = depth
+        self._reset()
+
+    def _reset(self) -> None:
+        self._sent = 0
+        # Child-local: put_batch and the feeder thread's give-back.
+        self._lock = threading.Lock()
+        # Events lost because they could not be pickled (counted as dropped).
+        self.lost = 0
+        self._queue.on_lost = self._lost
+
+    def __getstate__(self):
+        return (self._queue, self._taken, self._depth)
+
+    def __setstate__(self, state) -> None:
+        self._queue, self._taken, self._depth = state
+        self._reset()
 
     def put_batch(self, batch: list) -> bool:
         """Child side: queue the whole batch, or nothing (False) if it does not fit."""
 
         count = len(batch)
-        with self._outstanding.get_lock():
-            if self._outstanding.value + count > self._depth:
+        with self._lock:
+            if self._sent - self._taken.value + count > self._depth:
                 return False
-            self._outstanding.value += count
+            self._sent += count
         try:
             self._queue.put_nowait(batch)
         except queue.Full:
-            with self._outstanding.get_lock():
-                self._outstanding.value -= count
+            with self._lock:
+                self._sent -= count
             return False
         return True
+
+    def _lost(self, count: int, kinds: list, error: BaseException) -> None:
+        with self._lock:
+            # Never sent, so never taken: their room comes back.
+            self._sent -= count
+            self.lost += count
+        names = ", ".join(sorted({str(kind) for kind in kinds}))
+        print(f"[engine-events] dropped {count} event(s) that cannot be pickled "
+              f"({names}): {type(error).__name__}: {error}", file=sys.stderr, flush=True)
 
     def get(self, timeout: float) -> list:
         """Parent side: the next batch, oldest first; ``queue.Empty`` on timeout."""
 
         batch = self._queue.get(timeout=timeout)
-        with self._outstanding.get_lock():
-            self._outstanding.value -= len(batch)
+        # Only this side writes it; the child only reads it.
+        self._taken.value += len(batch)
         return batch
 
     def close(self) -> None:
@@ -137,12 +222,18 @@ class _EventSink:
         self._buffer: list[tuple[str, object]] = []
         self._max_batch = max_batch
         # Events (not batches) dropped because the parent fell behind.
-        self.dropped = 0
+        self._dropped = 0
         self.message = _Signal(self, "message")
         self.sent = _Signal(self, "sent")
         self.level = _Signal(self, "level")
         self.failed = _Signal(self, "failed")
         self.link_snr = _Signal(self, "link_snr")
+
+    @property
+    def dropped(self) -> int:
+        """Events never delivered: no room in the queue, or not picklable."""
+
+        return self._dropped + getattr(self._events, "lost", 0)
 
     def put(self, kind: str, value: object) -> None:
         with self._lock:
@@ -165,7 +256,7 @@ class _EventSink:
         # Under the lock, so batches leave in the order their events came.
         batch, self._buffer = self._buffer, []
         if not self._events.put_batch(batch):
-            self.dropped += len(batch)
+            self._dropped += len(batch)
 
     # PlotBuffers surface -------------------------------------------------
 
@@ -484,9 +575,12 @@ def _rx_main(
         _serve(worker, control, replies, tick, handle, switch_interval_s=0.005,
                flush=sink.flush_events)
     finally:
-        worker.stop()
-        egress.close()
-        sink.flush_events()
+        try:
+            worker.stop()
+            egress.close()
+        finally:
+            # Even when stopping raised: the events before it still go out.
+            sink.flush_events()
 
 
 class ProcessReceiveWorker:
@@ -659,9 +753,11 @@ def _tx_main(
         _serve(worker, control, replies, tick, handle, switch_interval_s=0.0005,
                flush=sink.flush_events)
     finally:
-        ingress.stop()
-        worker.stop()
-        sink.flush_events()
+        try:
+            ingress.stop()
+            worker.stop()
+        finally:
+            sink.flush_events()
 
 
 class ProcessTransmitWorker:

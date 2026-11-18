@@ -732,13 +732,18 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
         _serve(worker, control, replies, tick, handle, switch_interval_s=SWITCH_INTERVAL_S,
                flush=sink.flush_events)
     finally:
-        worker.detach()
-        ingress.stop()
-        worker.stop()
-        # The last records (after_detach) and the threads' last events.
-        sink.flush_events()
-        if la_log is not None:
-            la_log.close()
+        try:
+            worker.detach()
+            ingress.stop()
+            worker.stop()
+        finally:
+            try:
+                # The last records (after_detach) and the threads' last
+                # events, even when detaching or stopping raised.
+                sink.flush_events()
+            finally:
+                if la_log is not None:
+                    la_log.close()
 
 
 # --------------------------------------------------------------------------

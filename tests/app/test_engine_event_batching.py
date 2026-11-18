@@ -432,3 +432,218 @@ def test_the_transmit_worker_flushes_after_each_burst():
         worker.stop()
     sent = [value for kind, value in channel.events() if kind == "sent"]
     assert [record.message_count for record in sent] == [1, 1, 1]
+
+
+# ------------------------------------- no lock shared between processes
+
+
+def _timed_puts(channel, batches, out):
+    """Child: put ``batches`` batches of 4 and report (accepted, longest put in s)."""
+
+    longest, accepted = 0.0, 0
+    for number in range(batches):
+        started = time.perf_counter()
+        accepted += channel.put_batch([("link_snr", number)] * 4)
+        longest = max(longest, time.perf_counter() - started)
+    out.put((accepted, longest))
+    channel.close()
+    channel.join_thread()
+
+
+def test_the_child_never_waits_on_a_lock_the_parent_holds():
+    """Not even the queue's reader lock, which a pump stuck inside get() holds.
+
+    The event bound used to sit behind a multiprocessing.Value lock that both
+    sides took; a parent pump starved of its GIL while holding it stalled the
+    child's receive owner for tens of ms.  The parent's count is now a
+    lock-free shared integer that only the parent writes.
+    """
+
+    context = _safe_context()
+    channel = engine._EventQueue(context, depth=4096)
+    assert not hasattr(channel._taken, "get_lock")  # a RawValue, not a Value
+    out = context.Queue()
+    with channel._queue._rlock:  # what a pump blocked mid-get holds
+        child = context.Process(target=_timed_puts, args=(channel, 200, out))
+        child.start()
+        accepted, longest = out.get(timeout=60)
+    taken = 0
+    while taken < 200:
+        taken += len(channel.get(10.0)) // 4
+    child.join(30)
+    assert accepted == 200
+    assert longest < 0.2
+
+
+def _put_then_die(channel):
+    import os
+    import signal
+
+    for number in range(50):
+        channel.put_batch([("message", number)] * 3)
+    os.kill(os.getpid(), signal.SIGKILL)  # maybe in the middle of a feeder write
+
+
+def test_a_child_killed_mid_stream_cannot_hang_the_parent():
+    context = _safe_context()
+    channel = engine._EventQueue(context, depth=4096)
+    child = context.Process(target=_put_then_die, args=(channel,))
+    child.start()
+    child.join(30)
+    numbers, started = [], time.monotonic()
+    while True:
+        try:
+            numbers.extend(value for _, value in channel.get(0.5))
+        except (queue.Empty, EOFError, OSError):
+            break
+    assert time.monotonic() - started < 10.0
+    # What arrived is whole batches, in order.
+    assert len(numbers) % 3 == 0
+    assert numbers == sorted(numbers)
+
+
+def test_a_parent_that_stops_reading_never_blocks_the_child():
+    """No reader (a hung or dead parent): puts stay quick and drop past the bound."""
+
+    channel = engine._EventQueue(_safe_context(), depth=400)
+    sink = _sink(channel)
+    longest = 0.0
+    payload = bytes(4096)  # fills the pipe, so the feeder thread blocks in write
+    for number in range(300):
+        started = time.perf_counter()
+        for _ in range(4):
+            sink.put("message", (number, payload))
+        sink.flush_events()
+        longest = max(longest, time.perf_counter() - started)
+    assert longest < 0.2
+    assert sink.dropped == 4 * 300 - 400
+    # Read everything back so the blocked feeder can finish and exit.
+    taken = 0
+    while taken < 400:
+        taken += len(channel.get(10.0))
+    channel.close()
+    channel.join_thread()
+
+
+# ------------------------------------------ a value that cannot be pickled
+
+
+def _drain(channel):
+    events = []
+    while True:
+        try:
+            events.extend(channel.get(0.3))
+        except queue.Empty:
+            return events
+
+
+def test_one_unpicklable_value_costs_only_itself_and_no_room(capsys):
+    channel = engine._EventQueue(_safe_context(), depth=100)
+    sink = _sink(channel)
+    try:
+        for round_ in range(10):  # 31 events a round: without the give-back
+            for number in range(15):  # the bound of 100 is used up by round 4
+                sink.put("message", (round_, number))
+            sink.put("stats", {"transport": threading.Lock()})
+            for number in range(15, 30):
+                sink.put("message", (round_, number))
+            sink.flush_events()
+            events = _drain(channel)
+            assert events == [("message", (round_, number)) for number in range(30)]
+            assert channel._sent - channel._taken.value == 0
+            assert sink.dropped == round_ + 1
+    finally:
+        channel.close()
+        channel.join_thread()
+    assert "dropped 1 event(s) that cannot be pickled (stats)" in capsys.readouterr().err
+
+
+def test_a_batch_of_nothing_but_unpicklable_values_gives_all_its_room_back():
+    channel = engine._EventQueue(_safe_context(), depth=10)
+    sink = _sink(channel)
+    try:
+        for _ in range(5):
+            for _ in range(4):
+                sink.put("stats", threading.Lock())
+            sink.flush_events()
+            time.sleep(0.05)
+        assert _drain(channel) == []
+        assert channel._sent - channel._taken.value == 0
+        sink.put("message", "still fits")
+        sink.flush_events()
+        assert _drain(channel) == [("message", "still fits")]
+        assert sink.dropped == 20
+    finally:
+        channel.close()
+        channel.join_thread()
+
+
+# ----------------------------------------- the final flush of each main
+
+
+class _StopRaises:
+    """A worker whose stop puts one last event, then raises."""
+
+    lag_monitor = None
+    source = None
+    sink = None
+    pending = 0
+    send_failures = dropped_send_failed = dropped_encode_datagrams = 0
+
+    def __init__(self, transmitter_or_receiver, bridge, *_args, **_kwargs):
+        self._bridge = bridge
+
+    def start(self):
+        pass
+
+    def submit(self, source, payload):
+        return True
+
+    def stop(self):
+        self._bridge.failed.emit("last words")
+        raise RuntimeError("stop broke")
+
+
+@pytest.fixture
+def _engine_main(monkeypatch, _restore_switch_interval):
+    import signal
+    from types import SimpleNamespace
+
+    saved = signal.getsignal(signal.SIGINT)
+    monkeypatch.setattr(engine, "_bound_numeric_threads", lambda cores: None)
+    yield SimpleNamespace
+    signal.signal(signal.SIGINT, saved)
+
+
+def test_rx_main_still_flushes_when_stopping_raises(monkeypatch, _engine_main):
+    from ofdm_message_link import link, rx_app
+
+    fake = _engine_main
+    receiver = fake(stats=None, decoder_snapshot=lambda: None,
+                    decode_pool_snapshot=lambda: None, close=lambda: None)
+    monkeypatch.setattr(link, "MessageReceiver", lambda *a, **k: receiver)
+    monkeypatch.setattr(rx_app, "EgressForwarder",
+                        lambda *a: fake(datagrams=0, close=lambda: None))
+    monkeypatch.setattr(rx_app, "ReceiveWorker", _StopRaises)
+    channel, control = _Channel(), queue.Queue()
+    control.put(("stop",))
+    with pytest.raises(RuntimeError, match="stop broke"):
+        engine._rx_main(None, ("127.0.0.1", 9), 10, 1, fake(min_samples=0, max_wait_s=0.0),
+                        1, channel, control, _Replies(channel))
+    assert channel.events()[-1] == ("failed", "last words")
+
+
+def test_tx_main_still_flushes_when_stopping_raises(monkeypatch, _engine_main):
+    from ofdm_message_link import link, tx_app
+
+    fake = _engine_main
+    monkeypatch.setattr(link, "MessageTransmitter",
+                        lambda *a, **k: fake(active_mcs_entry=None))
+    monkeypatch.setattr(tx_app, "TransmitWorker", _StopRaises)
+    monkeypatch.setattr(tx_app, "IngressListener", lambda *a, **k: fake(
+        start=lambda: None, stop=lambda: None, datagrams=0, dropped_queue_full=0))
+    channel, control = _Channel(), queue.Queue()
+    control.put(("stop",))
+    with pytest.raises(RuntimeError, match="stop broke"):
+        engine._tx_main(None, None, 9, 10, None, 1, channel, control, _Replies(channel))
+    assert channel.events()[-1] == ("failed", "last words")

@@ -704,7 +704,12 @@ pump 拆開每一批，照原來的順序一個一個交出去，所以跨 threa
 
 不變的：UDP egress 照舊由接收 thread 在解出 datagram 時依序直接送出，不經過這個 queue；link adaptation 在子 process 裡，
 不受影響。Queue 的上限仍是 4096 個**事件**（不是批）；放不下的那一批整批丟掉，`dropped_display_events`（以及 `--events`
-`status` 行的 `dropped_events`）計的是丟掉的事件數，和以前的意思相同。
+`status` 行的 `dropped_events`）計的是丟掉的事件數，和以前的意思相同。這個上限不靠兩個 process 共用的鎖：子 process 自己
+記送出的事件數，母 process 只寫它取走的事件數（一個沒有鎖的共享整數），子 process 只讀；所以母 process 的 pump 拿不到 GIL、
+被排程延後或整個掛掉，都不會讓子 process 的接收或發送 thread 等它（之前的版本共用一個 `multiprocessing.Value` 的鎖，母 process
+主 thread 忙著時，子 process 的一次 put 量到最多約 27 ms）。一批裡有某個值不能 pickle 時，只丟那個事件：同一批其他事件照原位置
+送出，丟掉的算進 `dropped_display_events`，stderr 印一行 `[engine-events] dropped N event(s) that cannot be pickled`，它占的
+上限也還回來（之前會丟掉整批，而且上限永遠少掉那一批，最後所有事件都被丟掉）。
 
 會變的：母 process 收到事件的時間最多晚一次 flush 的間隔。接收 thread 的事件晚到這次 iteration 結束（通常就是這次 feed
 剩下的處理時間）；發送 thread 的晚到這個 burst 送出；沒有自己 flush 的 thread（從其他 thread 呼叫的 controller 等）最多晚約
@@ -713,18 +718,21 @@ pump 拆開每一批，照原來的順序一個一個交出去，所以跨 threa
 記時間的列（`failed`、`gap`、`lock`、`rx_time`、`overflow` 的 `mono`／`wall`）。`burst` 列的 `mono`／`wall`、`gain` 與 `mark`
 的 `mono` 是子 process 記的，不受影響。
 
-PC 上的 micro-benchmark（`tools/bench_event_batching.py`，子 process 每次 iteration 送幾個接收端的事件，量子 process 的 CPU
+PC 上的 micro-benchmark（`experiments/engine_events/bench_event_batching.py`，子 process 每次 iteration 送幾個接收端的事件，量子 process 的 CPU
 時間，含 feeder thread，減去只建事件不送的 baseline；每秒 280 個事件、10 s、各 3 次的中位數，2026-11-19）：
 
 | 每次 iteration 的事件數 | 每個事件 put 一次（以前） | 每次 iteration 一批（現在） |
 |---|---|---|
-| 1 | 121 µs | 123 µs |
-| 4 | 95 µs | 74 µs |
-| 16 | 48 µs | 27 µs |
+| 1 | 96 µs | 100 µs |
+| 4 | 83 µs | 70 µs |
+| 16 | 33 µs | 23 µs |
 
 成本大部分是每次叫醒 feeder thread 的固定成本，所以省多少看每批有幾個事件；一個 iteration 只有一個事件時沒有差別。
 PC 上模擬 CPU-bound 的 receive owner（每次 iteration 10 ms 純 Python 運算、4 個事件、每個 message 後一次 UDP `sendto`）時，
 兩種做法 owner 完成的工作量都和不送事件時差不到 1 %，看不出差別；Jetson 上 GIL 時間實際省多少還沒有量。
+母 process 主 thread 一直佔著 GIL 時（`busy-parent`，每 5 ms 一次 iteration、4 個事件，各 3 次）：子 process 一次 iteration
+的 put 最長 0.60–1.17 ms（以前）與 0.44–0.87 ms（現在），沒有等母 process 的情形；以前每個事件一個 item，搶不到 GIL 的
+pump 跟不上，3 次裡有 2 次 queue 滿而丟掉 397 與 1742／8004 個事件，現在 3 次都是 0。
 
 **CPU 放置與排程（全部預設關閉）。**
 
