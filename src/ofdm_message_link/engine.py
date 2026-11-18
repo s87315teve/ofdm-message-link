@@ -241,21 +241,22 @@ class _LagMonitor:
         self._stop.set()
 
 
-def _bound_numeric_threads() -> None:
-    """The app's BLAS/OpenMP thread budget (default 1), and freed buffers kept for reuse.
+def _bound_numeric_threads(cpu_cores: int) -> None:
+    """Bound BLAS/OpenMP threads to ``cpu_cores``, and keep freed buffers for reuse.
 
     Unbounded, NumPy's pool spun 19 threads at ~40% CPU each in the receive
     engine during a 330 burst/s video run, and the decode owner starved.
-    The budget is the one the app's ``main`` resolved from ``--cpu-cores`` and
-    ``acceleration.cpu_cores`` and recorded in the environment.
+    ``cpu_cores`` is the budget the app's ``main`` resolved from ``--cpu-cores``
+    and ``acceleration.cpu_cores`` (1 by default), handed to the engine as an
+    argument; a process with no app ``main`` passes 1.
     The allocator setting stops the owner faulting in fresh pages for every
     large temporary (see :mod:`ofdm_link.runtime.allocator`).
     """
 
     from ofdm_link.runtime.allocator import keep_freed_memory
-    from ofdm_link.runtime.cpu_budget import apply_cpu_budget, requested
+    from ofdm_link.runtime.cpu_budget import apply_cpu_budget
 
-    apply_cpu_budget(requested())
+    apply_cpu_budget(cpu_cores)
     keep_freed_memory()
 
 
@@ -335,9 +336,9 @@ def _serve(
 
 
 def _rx_main(
-    profile, egress_address, ui_fps, decode_workers, events, control, replies
+    profile, egress_address, ui_fps, decode_workers, cpu_cores, events, control, replies
 ) -> None:
-    _bound_numeric_threads()
+    _bound_numeric_threads(cpu_cores)
     from .link import MessageReceiver
     from .rx_app import EgressForwarder, ReceiveWorker
 
@@ -389,6 +390,7 @@ class ProcessReceiveWorker:
         egress_address: tuple[str, int],
         ui_fps: int = 15,
         decode_workers: int = 1,
+        cpu_cores: int = 1,
     ) -> None:
         from .link import ReceiveStats
 
@@ -401,7 +403,7 @@ class ProcessReceiveWorker:
         self._source: _TransportView | None = None
         self._engine = _EngineProcess(
             _rx_main,
-            (profile, egress_address, ui_fps, decode_workers),
+            (profile, egress_address, ui_fps, decode_workers, cpu_cores),
             self._dispatch,
         )
 
@@ -485,9 +487,9 @@ class ProcessReceiveWorker:
 
 
 def _tx_main(
-    profile, mcs_entry, ingress_port, ui_fps, aggregation, events, control, replies
+    profile, mcs_entry, ingress_port, ui_fps, aggregation, cpu_cores, events, control, replies
 ) -> None:
-    _bound_numeric_threads()
+    _bound_numeric_threads(cpu_cores)
     from .link import MessageTransmitter
     from .tx_app import IngressListener, TransmitWorker
 
@@ -551,6 +553,7 @@ class ProcessTransmitWorker:
         ingress_port: int,
         ui_fps: int = 15,
         aggregation=None,
+        cpu_cores: int = 1,
     ) -> None:
         self._bridge = bridge
         self._plot_buffers = plot_buffers
@@ -562,7 +565,7 @@ class ProcessTransmitWorker:
         self._sink: _TransportView | None = None
         self._engine = _EngineProcess(
             _tx_main,
-            (profile, mcs_entry, ingress_port, ui_fps, aggregation),
+            (profile, mcs_entry, ingress_port, ui_fps, aggregation, cpu_cores),
             self._dispatch,
         )
 

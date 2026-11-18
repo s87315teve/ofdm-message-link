@@ -210,7 +210,8 @@ class GuiConfig:
     enabled: bool
 
 
-# The same bound as the apps' --decode-workers flag.
+# The same bound as the apps' --decode-workers flag.  The configuration also
+# takes 0, the app's default: v2.0.0-v2.1.2 shipped 0 documented as "auto".
 MAX_DECODE_WORKERS = 64
 
 
@@ -578,7 +579,7 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
         backend=_choice(acceleration_raw, "backend", "acceleration", {"native", "sionna"}),
         device=acceleration_device,
         decode_workers=_optional_bounded_int(
-            acceleration_raw, "decode_workers", "acceleration", 1, MAX_DECODE_WORKERS
+            acceleration_raw, "decode_workers", "acceleration", 0, MAX_DECODE_WORKERS
         ),
         cpu_cores=_optional_bounded_int(
             acceleration_raw, "cpu_cores", "acceleration", 0, MAX_CPU_CORES

@@ -524,8 +524,10 @@ class ResolvedOptions:
     mcs_entry: McsTableEntry
     transport: str
     aggregation: AggregationLimits = AggregationLimits()
-    # NumPy/BLAS thread budget: --cpu-cores, else acceleration.cpu_cores, else 1.
+    # NumPy/BLAS thread budget: --cpu-cores, else acceleration.cpu_cores, else 1;
+    # 0 = the CPUs each process may run on.  The source is logged at startup.
     cpu_cores: int = 1
+    cpu_cores_source: str = "app default"
 
     @property
     def uses_radio(self) -> bool:
@@ -571,24 +573,28 @@ def resolve(args: argparse.Namespace) -> ResolvedOptions:
         raise SystemExit(f"invalid PHY working point: {error}") from error
     if selected_entry is None:
         selected_entry = default_v5_entry(profile.mcs)
+    cpu_cores, cpu_cores_source = _resolve_cpu_cores(args, config)
     return ResolvedOptions(
         config=config,
         profile=profile,
         mcs_entry=selected_entry,
         transport=args.transport,
         aggregation=aggregation_limits(args, config),
-        cpu_cores=_resolve_cpu_cores(args, config),
+        cpu_cores=cpu_cores,
+        cpu_cores_source=cpu_cores_source,
     )
 
 
-def _resolve_cpu_cores(args: argparse.Namespace, config: LinkConfig) -> int:
+def _resolve_cpu_cores(args: argparse.Namespace, config: LinkConfig) -> tuple[int, str]:
     from ofdm_link.runtime.cpu_budget import DEFAULT_CPU_CORES
 
     flag = getattr(args, "cpu_cores", None)
     if flag is not None:
-        return int(flag)
+        return int(flag), "--cpu-cores"
     configured = config.acceleration.cpu_cores
-    return DEFAULT_CPU_CORES if configured is None else int(configured)
+    if configured is None:
+        return DEFAULT_CPU_CORES, "app default"
+    return int(configured), "configuration acceleration.cpu_cores"
 
 
 def resolve_decode_workers(
@@ -596,29 +602,56 @@ def resolve_decode_workers(
 ) -> int:
     """``--decode-workers``, else ``acceleration.decode_workers``, else the app's default.
 
-    The result is written back to ``args.decode_workers`` so everything that
-    reads the parsed options sees the count that is actually used.
+    ``acceleration.decode_workers: 0`` means the app's default too: v2.0.0 to
+    v2.1.2 shipped 0 documented as "auto" while nothing read the key.  The
+    result is written back to ``args.decode_workers`` (and where it came from
+    to ``args.decode_workers_source``) so everything that reads the parsed
+    options sees the count that is actually used.
     """
 
     flag = getattr(args, "decode_workers", None)
     configured = config.acceleration.decode_workers
-    workers = int(flag if flag is not None else default if configured is None else configured)
+    if flag is not None:
+        workers, source = int(flag), "--decode-workers"
+    elif configured is None:
+        workers, source = default, "app default"
+    elif configured == 0:
+        workers, source = default, "configuration acceleration.decode_workers: 0 = app default"
+    else:
+        workers, source = int(configured), "configuration acceleration.decode_workers"
     args.decode_workers = workers
+    args.decode_workers_source = source
     return workers
 
 
-def apply_cpu_budget(resolved: ResolvedOptions):
-    """Bound this process's numeric threads and record the budget for the engine child.
+def apply_cpu_budget(resolved: ResolvedOptions, args: argparse.Namespace | None = None):
+    """Bound this process's numeric threads and log the acceleration settings.
 
-    Call it in ``main`` right after :func:`resolve`, before any engine process
-    starts: the engine reads the recorded budget when it starts.  Decode
-    workers keep one thread each whatever the budget.
+    Call it in ``main`` after :func:`apply_performance_options`, so that
+    ``cpu_cores: 0`` counts the CPUs ``--cpu-affinity`` left this process, and
+    before any engine starts.  The engine gets ``resolved.cpu_cores`` as an
+    argument; decode workers keep one thread each whatever the budget.  Logs
+    one line with the budget, the decode worker count (when ``args`` has one)
+    and where each came from.
     """
+
+    import sys
 
     from ofdm_link.runtime import cpu_budget
 
-    cpu_budget.request(resolved.cpu_cores)
-    return cpu_budget.apply_cpu_budget(resolved.cpu_cores)
+    budget = cpu_budget.apply_cpu_budget(resolved.cpu_cores)
+    cores = (
+        f"{budget.cores} (0 = the CPUs this process may run on)"
+        if resolved.cpu_cores == 0 else str(budget.cores)
+    )
+    line = f"[acceleration] cpu_cores {cores} from {resolved.cpu_cores_source}"
+    source = getattr(args, "decode_workers_source", None)
+    if source is not None:
+        line += f"; decode_workers {args.decode_workers} from {source}"
+    else:
+        line += "; no decode workers (this app does not decode)"
+    print(line, file=sys.stderr, flush=True)
+    return budget
 
 
 def settings_for(

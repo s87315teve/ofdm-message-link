@@ -579,7 +579,6 @@ def main(argv: list[str] | None = None) -> int:
     args = node_options.parse_args(argv)
     node_options.check_paths(args)
     setup = node_options.resolve_node(args)
-    options.apply_cpu_budget(setup.resolved)
     node_options.warn(setup)
     if setup.resolved.uses_radio:
         # Before any window or child exists: an unauthorised process never transmits.
@@ -587,6 +586,8 @@ def main(argv: list[str] | None = None) -> int:
     spec = build_spec(args, setup)
     validate_algorithms(spec, setup.resolved.profile.sample_rate)
     options.apply_performance_options(args)
+    # After --cpu-affinity, so cpu_cores 0 counts the pinned CPUs.
+    options.apply_cpu_budget(setup.resolved, args)
     if args.headless:
         return run_headless(args, setup, spec)
     from .node_window import run_gui
@@ -671,6 +672,7 @@ def run_headless(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:
         ui_fps=args.ui_fps,
         decode_workers=args.decode_workers,
         aggregation=setup.resolved.aggregation,
+        cpu_cores=setup.resolved.cpu_cores,
     )
     node = HeadlessNode(
         worker,

@@ -364,6 +364,7 @@ class ReceiveWindow(QtWidgets.QWidget):
                 egress_address=egress_address,
                 ui_fps=ui_fps,
                 decode_workers=decode_workers,
+                cpu_cores=resolved.cpu_cores,
             )
         else:
             self._worker = ReceiveWorker(
@@ -1051,12 +1052,13 @@ def main(argv: list[str] | None = None) -> int:
 
     keep_freed_memory()
     resolved = options.resolve(args)
-    # Plots use NumPy too; keep its BLAS pool from spinning idle cores.
-    options.apply_cpu_budget(resolved)
     options.resolve_decode_workers(args, resolved.config, DEFAULT_DECODE_WORKERS)
     if args.snr_db is not None and resolved.uses_radio:
         raise SystemExit("--snr-db applies to the udp transport only; the radio has a real channel")
     options.apply_performance_options(args)
+    # After --cpu-affinity, so cpu_cores 0 counts the pinned CPUs.  Plots use
+    # NumPy too; keep its BLAS pool from spinning idle cores.
+    options.apply_cpu_budget(resolved, args)
 
     # The QApplication must stay referenced: collecting it before the first
     # QWidget is constructed aborts the process.

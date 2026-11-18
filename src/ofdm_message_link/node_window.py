@@ -110,6 +110,7 @@ class NodeWindow(QtWidgets.QWidget):
             ui_fps=args.ui_fps,
             decode_workers=args.decode_workers,
             aggregation=setup.resolved.aggregation,
+            cpu_cores=setup.resolved.cpu_cores,
         )
         self._control = None
         if control_port:

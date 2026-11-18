@@ -373,7 +373,8 @@ def run(args) -> dict:
     from ofdm_message_link.rx_app import ReceiveWorker
 
     # What the receive engine child does before it starts the worker.
-    _bound_numeric_threads()
+    # No app main resolved a budget here: one numeric thread, like the default.
+    _bound_numeric_threads(1)
     sys.setswitchinterval(args.switch_interval)
     config, profile = _profile(args.overlay, legacy=args.family == "legacy")
     built = time.perf_counter()

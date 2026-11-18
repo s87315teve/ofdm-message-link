@@ -29,6 +29,7 @@ TX 和 RX 是**兩個各自啟動的 process**，彼此只透過 sample transpor
 
 | 版本 | 在哪裡 | 內容 |
 |---|---|---|
+| **未發布**（`docs/v2-refresh`） | branch | `acceleration.cpu_cores` 與 `acceleration.decode_workers` 開始生效（以前程式不讀），新增 `--cpu-cores`；優先順序：命令列 > 設定檔 > app 預設（thread 1、`rx_app` 4、`node_app` 3），每個 app 啟動時印一行實際的值與來源。**從 v2.0–v2.1.2 複製的設定檔若還寫著 `decode_workers: 1`、`cpu_cores: 4`，現在會真的用這兩個值**；`decode_workers: 0`（舊的「auto」）等於 app 預設。見 [7.2 節](docs/07-reference.md#72-設定檔) |
 | **v2.1.2**（目前） | `main`，tag `v2.1.2` | 修正 `--events`：接收端停住一次只寫一組 `lock lost`／`acquired`（v2.1.1 會寫 2–5 組；缺口前 payload 結果晚回來的 burst 被當成重新收到對方），其他輸出不變，見 [7.11 節](docs/07-reference.md#711-逐-burst-的接收事件--events) |
 | **v2.1.1** | tag `v2.1.1` | 修正 `--events`：接收端自己 overflow 超過逾時也會寫 `lock lost`（UHD 改用裝置時間計時，`lock` 行加 `dev_t`）；兩個量測選項，預設不變：`--tx-guard-us`（B210 每個 burst 前的零值保護段，預設仍是 250 µs）與 `--snr-fft-advance`（preamble SNR 的 FFT window 提早量，預設仍是 0）；`start` 行記下兩者的值，見 [7.9 節](docs/07-reference.md#79-node_app雙向-node-的命令列)、[7.11 節](docs/07-reference.md#711-逐-burst-的接收事件--events) |
 | **v2.1.0** | tag `v2.1.0` | `node_app --events`：逐 burst 的接收事件（preamble SNR、雜訊變異數、clipping、header／payload／FCS 結果、裝置與主機時間，加上 gain、頻率、失鎖與 overflow），預設關閉，見 [7.11 節](docs/07-reference.md#711-逐-burst-的接收事件--events) |

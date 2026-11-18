@@ -24,9 +24,6 @@ MAX_CPU_CORES = 256
 # The budget each app process and its radio engine use unless
 # ``acceleration.cpu_cores`` or ``--cpu-cores`` says otherwise.
 DEFAULT_CPU_CORES = 1
-# How an app's ``main`` hands its resolved budget to the engine child process,
-# which inherits the environment.  Not a user setting: ``main`` overwrites it.
-ENVIRONMENT = "OFDM_LINK_CPU_CORES"
 
 # Each entry is a library name pattern and the symbols that set and read back
 # its thread count.  Only libraries this process has already loaded are touched.
@@ -63,7 +60,8 @@ def resolve_cpu_cores(cpu_cores: int) -> int:
 
     ``N > 0`` is taken literally and ``0`` means auto.  Auto asks which CPUs
     this process may actually run on rather than how many the machine has, so
-    a cgroup or a ``taskset`` is respected instead of being reported through.
+    a cgroup or a ``taskset`` is respected instead of being reported through,
+    and is clamped to :data:`MAX_CPU_CORES` on a larger machine.
     """
 
     if type(cpu_cores) is not int or not 0 <= cpu_cores <= MAX_CPU_CORES:
@@ -72,8 +70,8 @@ def resolve_cpu_cores(cpu_cores: int) -> int:
         return cpu_cores
     getaffinity = getattr(os, "sched_getaffinity", None)
     if getaffinity is not None:
-        return max(1, len(getaffinity(0)))
-    return max(1, os.cpu_count() or 1)
+        return min(MAX_CPU_CORES, max(1, len(getaffinity(0))))
+    return min(MAX_CPU_CORES, max(1, os.cpu_count() or 1))
 
 
 def apply_cpu_budget(cpu_cores: int) -> CpuBudget:
@@ -95,23 +93,6 @@ def apply_cpu_budget(cpu_cores: int) -> CpuBudget:
         numeric_threads=cores,
         bounded_libraries=tuple(sorted(set(bounded))),
     )
-
-
-def request(cpu_cores: int) -> None:
-    """Record the budget for child processes started after this call."""
-
-    resolve_cpu_cores(cpu_cores)
-    os.environ[ENVIRONMENT] = str(cpu_cores)
-
-
-def requested() -> int:
-    """The budget recorded by :func:`request`, else :data:`DEFAULT_CPU_CORES`."""
-
-    try:
-        cpu_cores = int(os.environ.get(ENVIRONMENT, "").strip())
-    except ValueError:
-        return DEFAULT_CPU_CORES
-    return cpu_cores if 0 <= cpu_cores <= MAX_CPU_CORES else DEFAULT_CPU_CORES
 
 
 def numeric_thread_count() -> int | None:

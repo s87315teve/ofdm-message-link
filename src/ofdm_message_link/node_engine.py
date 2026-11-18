@@ -536,9 +536,9 @@ class NodeWorker:
         self.rx.stop()
 
 
-def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation,
+def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu_cores,
                events, control, replies) -> None:
-    _bound_numeric_threads()
+    _bound_numeric_threads(cpu_cores)
     from ofdm_link.phy.mcs_table import mcs_entry
 
     from .la.controller import LinkController
@@ -754,6 +754,7 @@ class ProcessNodeWorker:
         ui_fps: int = 10,
         decode_workers: int = 3,
         aggregation=None,
+        cpu_cores: int = 1,
         target: Callable[..., None] = _node_main,
     ) -> None:
         self._spec = spec
@@ -762,7 +763,7 @@ class ProcessNodeWorker:
         self._attached: str | None = None
         self._engine = _EngineProcess(
             target,
-            (profile, spec, ui_fps, decode_workers, aggregation),
+            (profile, spec, ui_fps, decode_workers, aggregation, cpu_cores),
             self._dispatch,
         )
 

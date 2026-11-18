@@ -142,12 +142,17 @@
 
 | Key | 預設 | 範圍 | 說明 |
 |---|---|---|---|
-| `decode_workers` | `null` | `null` 或 1–64 | `rx_app` 與 `node_app` 的 payload decode process 數。`null`（或不寫）= 各 app 自己的預設：`rx_app` 4、`node_app` 3（兩個 node 常在同一台 PC）。1 = 不開 worker，inline decode。`--decode-workers` 優先。`tx_app` 不 decode，不讀它 |
+| `decode_workers` | `null` | `null`、0 或 1–64 | `rx_app` 與 `node_app` 的 payload decode process 數。`null`（或不寫）與 0 = 各 app 自己的預設（v2.0.0–v2.1.2 的 `default.yaml` 把 0 寫成「auto」）：`rx_app` 4、`node_app` 3（兩個 node 常在同一台 PC）。1 = 不開 worker，inline decode。`--decode-workers` 優先。`tx_app` 不 decode，不讀它 |
 | `cpu_cores` | 1 | 0–256 | 每個 app 的主 process 與 engine 子 process 各自的 NumPy／BLAS（與 OpenMP）thread 上限；0 = 這個 process 可以跑的 CPU 數（看 affinity／cgroup）。`--cpu-cores` 優先。Decode workers 固定各 1 個 thread，平行度由 `decode_workers` 決定 |
 
 優先順序都是：命令列 > 設定檔（`default.yaml` 加上各個 overlay，後面的蓋過前面的）> app 內建預設。內建預設就是這兩個 key
 生效之前的行為（thread 1、`rx_app` 4 個 worker、`node_app` 3 個），所以沒設的人執行結果不變。輸出不會因這兩個值而改變，
-只影響 CPU 用量。超出範圍、不是整數（包含 `true`、`"4"`、2.5）會在啟動時被拒絕。例如在 overlay 裡寫：
+只影響 CPU 用量。超出範圍、不是整數（包含 `true`、`"4"`、2.5）會在啟動時被拒絕。每個 app 啟動時印一行，寫出實際用的值與
+來源，例如 `[acceleration] cpu_cores 1 from app default; decode_workers 4 from app default`。
+
+**從 v2.0–v2.1.2 複製來的設定檔要注意（v2.1.2 之後）：** 那幾版的 `default.yaml` 寫 `decode_workers: 1`、`cpu_cores: 4`，
+但程式從來不讀。現在這兩個 key 會生效，所以這樣的設定檔會真的用 1 個 decode worker（inline decode）與 4 個 NumPy thread。
+要維持以前的行為，把兩行刪掉或改成 `null`。例如在 overlay 裡寫：
 
 ```yaml
 acceleration:
@@ -580,8 +585,9 @@ Turbo BLER 差 ≤ 0.1 dB 且 iteration ±1、固定 seed 的端到端 delivered
 **NumPy thread 數與 decode workers（`acceleration`，預設不變）。** NumPy 內建的 BLAS 會依機器的核心數開 thread pool，
 而且在呼叫之間空轉；在 20 核心的機器上它吃掉 15.6 個核心、少了三分之一的 throughput。所以每個 app 的主 process 與
 engine 子 process 都會把已載入的 BLAS／OpenMP 函式庫限制在 `cpu_cores` 個 thread（`ofdm_link/runtime/cpu_budget.py`）：
-`--cpu-cores` > `acceleration.cpu_cores` > 1。主 process 把結果放在環境變數 `OFDM_LINK_CPU_CORES`，engine 啟動時讀它
-（這是內部傳遞用的，`main` 每次都會覆寫）。Decode workers 不管這個值，固定各 1 個 thread：平行度來自 worker 數，
+`--cpu-cores` > `acceleration.cpu_cores` > 1。`main` 在 `--cpu-affinity` 之後才套用（所以 0 算的是綁定後的 CPU，超過 256 時取
+256），再把值當參數交給 engine 子 process；不經過環境變數，所以 shell 裡殘留的 export 或已經在跑的 forkserver 改變不了它。
+沒有 app `main` 的 process（例如 `experiments/tx_v5/rx_throughput_bench.py`）自己傳 1。Decode workers 不管這個值，固定各 1 個 thread：平行度來自 worker 數，
 `--decode-workers` > `acceleration.decode_workers` > app 預設（`rx_app` 4、`node_app` 3）。兩個 key 的範圍見 7.2 節。
 Receive path 沒有大到能從多個 BLAS thread 得到好處的線性代數，所以 `cpu_cores` 調大通常不會更快；它是限制浪費的上限。
 

@@ -146,10 +146,11 @@ acceleration:
   device: cpu
   # Payload decode worker processes for rx_app and node_app; acquisition and
   # headers stay on one receive owner.  null (or the key left out) keeps each
-  # app's own default: rx_app 4, node_app 3 (two nodes often share one PC).
-  # 1-64 sets the count for both; 1 decodes inline with no worker process.
-  # --decode-workers overrides it.  tx_app does not decode.  The output never
-  # depends on this value.
+  # app's own default: rx_app 4, node_app 3 (two nodes often share one PC);
+  # so does 0, which v2.0.0-v2.1.2 documented as "auto".  1-64 sets the count
+  # for both; 1 decodes inline with no worker process.  --decode-workers
+  # overrides it.  tx_app does not decode.  Each app logs the value it uses
+  # and where it came from at startup.  The output never depends on it.
   decode_workers: null
   # NumPy/BLAS and OpenMP threads that each app's main process and its radio
   # engine process may use (tx_app, rx_app, node_app).  0 asks which CPUs this

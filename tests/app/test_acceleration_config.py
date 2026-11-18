@@ -8,6 +8,7 @@ rx_app 4 decode workers and node_app 3.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -61,9 +62,22 @@ def recorded_budget(monkeypatch):
     """Record budgets instead of changing this test process's thread pools."""
 
     applied: list[int] = []
-    monkeypatch.delenv(cpu_budget.ENVIRONMENT, raising=False)
-    monkeypatch.setattr(cpu_budget, "apply_cpu_budget", applied.append)
+
+    def record(cores: int) -> cpu_budget.CpuBudget:
+        applied.append(cores)
+        resolved = cpu_budget.resolve_cpu_cores(cores)
+        return cpu_budget.CpuBudget(cores=resolved, numeric_threads=resolved, bounded_libraries=())
+
+    monkeypatch.setattr(cpu_budget, "apply_cpu_budget", record)
     return applied
+
+
+@pytest.fixture(autouse=True)
+def no_budget_in_the_environment():
+    """The budget travels as an engine argument; nothing may leak through os.environ."""
+
+    yield
+    assert "OFDM_LINK_CPU_CORES" not in os.environ
 
 
 # --------------------------------------------------------------------------
@@ -92,11 +106,27 @@ def test_a_configuration_without_the_keys_gets_the_same_defaults(tmp_path):
     assert _tx("--config", base) == 1
 
 
-def test_the_engine_budget_defaults_to_one_thread(monkeypatch):
-    monkeypatch.delenv(cpu_budget.ENVIRONMENT, raising=False)
-    assert cpu_budget.requested() == 1
-    monkeypatch.setenv(cpu_budget.ENVIRONMENT, "not a number")
-    assert cpu_budget.requested() == 1
+def test_the_engines_default_to_one_thread():
+    import inspect
+
+    from ofdm_message_link.engine import ProcessReceiveWorker, ProcessTransmitWorker
+    from ofdm_message_link.node_engine import ProcessNodeWorker
+
+    for worker in (ProcessReceiveWorker, ProcessTransmitWorker, ProcessNodeWorker):
+        assert inspect.signature(worker).parameters["cpu_cores"].default == 1
+
+
+def test_decode_workers_zero_from_v2_0_configs_means_the_app_default(tmp_path):
+    overlay = _overlay(tmp_path, decode_workers=0)
+    assert load_config(DEFAULT, [overlay]).acceleration.decode_workers == 0
+    assert _rx("--overlay", ONE_WAY, "--overlay", overlay) == (1, 4)
+    assert _node("--overlay", DUPLEX, "--overlay", overlay) == (1, 3)
+
+
+def test_v2_0_default_values_now_take_effect(tmp_path):
+    # default.yaml of v2.0.0-v2.1.2 said decode_workers 1 and cpu_cores 4.
+    overlay = _overlay(tmp_path, decode_workers=1, cpu_cores=4)
+    assert _rx("--overlay", ONE_WAY, "--overlay", overlay) == (4, 1)
 
 
 # --------------------------------------------------------------------------
@@ -111,10 +141,13 @@ def test_the_configuration_overrides_the_built_in_defaults(tmp_path):
     assert _tx("--overlay", ONE_WAY, "--overlay", overlay) == 2
 
 
-def test_cpu_cores_zero_is_kept_for_the_affinity_lookup(tmp_path):
+def test_cpu_cores_zero_is_kept_for_the_affinity_lookup(tmp_path, monkeypatch):
     overlay = _overlay(tmp_path, cpu_cores=0)
     assert _tx("--overlay", ONE_WAY, "--overlay", overlay) == 0
     assert cpu_budget.resolve_cpu_cores(0) >= 1
+    # Auto on a machine larger than the cap is clamped, not refused.
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(1000)), raising=False)
+    assert cpu_budget.resolve_cpu_cores(0) == cpu_budget.MAX_CPU_CORES
 
 
 def test_the_flags_override_the_configuration(tmp_path):
@@ -139,7 +172,6 @@ def test_flags_without_any_configuration_value(tmp_path):
 @pytest.mark.parametrize(
     "acceleration",
     [
-        {"decode_workers": 0},
         {"decode_workers": -1},
         {"decode_workers": 65},
         {"decode_workers": 2.5},
@@ -198,11 +230,11 @@ class _Reached(Exception):
 
 
 def test_rx_app_main_hands_the_resolved_count_to_the_window(tmp_path, monkeypatch,
-                                                            recorded_budget):
+                                                            recorded_budget, capsys):
     seen = {}
 
     def window(resolved, egress, **kwargs):
-        seen.update(kwargs)
+        seen.update(kwargs, cpu_cores=resolved.cpu_cores)
         raise _Reached
 
     monkeypatch.setattr(rx_app, "ReceiveWindow", window)
@@ -215,12 +247,15 @@ def test_rx_app_main_hands_the_resolved_count_to_the_window(tmp_path, monkeypatc
         rx_app.main(["--config", DEFAULT, "--overlay", ONE_WAY, "--overlay", overlay])
     assert seen["decode_workers"] == 2
     assert recorded_budget == [3]
-    # The engine child reads the same budget from the environment it inherits.
-    assert cpu_budget.requested() == 3
+    # The window hands resolved.cpu_cores to the engine process (below).
+    assert seen["cpu_cores"] == 3
+    line = capsys.readouterr().err
+    assert ("[acceleration] cpu_cores 3 from configuration acceleration.cpu_cores; "
+            "decode_workers 2 from configuration acceleration.decode_workers") in line
 
 
 def test_node_app_main_hands_the_resolved_count_to_the_worker(tmp_path, monkeypatch,
-                                                             recorded_budget):
+                                                             recorded_budget, capsys):
     seen = {}
 
     def worker(profile, spec, listener, **kwargs):
@@ -232,13 +267,16 @@ def test_node_app_main_hands_the_resolved_count_to_the_worker(tmp_path, monkeypa
     with pytest.raises(_Reached):
         node_app.main(["--node-id", "1", "--headless", "--config", DEFAULT,
                        "--overlay", DUPLEX, "--overlay", overlay, "--decode-workers", "2"])
-    assert seen["decode_workers"] == 2
+    assert seen["decode_workers"] == 2 and seen["cpu_cores"] == 2
     assert recorded_budget == [2]
-    assert cpu_budget.requested() == 2
+    assert ("cpu_cores 2 from configuration acceleration.cpu_cores; decode_workers 2 from "
+            "--decode-workers") in capsys.readouterr().err
 
 
-def test_tx_app_main_applies_the_configured_budget(tmp_path, monkeypatch, recorded_budget):
-    def window(*args, **kwargs):
+def test_tx_app_main_applies_the_configured_budget(tmp_path, monkeypatch, recorded_budget,
+                                                   capsys):
+    def window(resolved, *args, **kwargs):
+        assert resolved.cpu_cores == 4
         raise _Reached
 
     monkeypatch.setattr(tx_app, "TransmitWindow", window)
@@ -247,18 +285,49 @@ def test_tx_app_main_applies_the_configured_budget(tmp_path, monkeypatch, record
     with pytest.raises(_Reached):
         tx_app.main(["--config", DEFAULT, "--overlay", ONE_WAY, "--overlay", overlay])
     assert recorded_budget == [4]
-    assert cpu_budget.requested() == 4
+    assert "cpu_cores 4 from configuration acceleration.cpu_cores; no decode workers" in (
+        capsys.readouterr().err
+    )
 
 
-def test_the_engine_process_applies_the_recorded_budget(monkeypatch, recorded_budget):
+def test_the_budget_is_applied_after_cpu_affinity(tmp_path, monkeypatch, recorded_budget):
+    from ofdm_link.runtime import cpu_affinity
+
+    order = []
+    monkeypatch.setattr(cpu_affinity, "apply", lambda spec: order.append("affinity"))
+    monkeypatch.setattr(cpu_budget, "apply_cpu_budget",
+                        lambda cores: order.append("budget") or cpu_budget.CpuBudget(1, 1, ()))
+    monkeypatch.setattr(tx_app, "TransmitWindow", lambda *a, **k: (_ for _ in ()).throw(_Reached))
+    monkeypatch.setattr(tx_app.qt_runtime, "create_application", lambda: None)
+    with pytest.raises(_Reached):
+        tx_app.main(["--config", DEFAULT, "--overlay", ONE_WAY])
+    assert order == ["affinity", "budget"]
+
+
+def test_the_engine_processes_get_the_budget_as_an_argument(monkeypatch, recorded_budget):
     from ofdm_link.runtime import allocator
-    from ofdm_message_link import engine
+    from ofdm_message_link import engine, node_engine
 
+    started = []
+
+    class Engine:
+        def __init__(self, target, arguments, dispatch):
+            started.append((target.__name__, arguments))
+
+    monkeypatch.setattr(engine, "_EngineProcess", Engine)
+    monkeypatch.setattr(node_engine, "_EngineProcess", Engine)
+    engine.ProcessReceiveWorker(None, None, None, egress_address=("h", 1), cpu_cores=3)
+    engine.ProcessTransmitWorker(None, None, None, None, ingress_port=1, cpu_cores=5)
+    node_engine.ProcessNodeWorker(None, None, lambda kind, value: None, cpu_cores=7)
+    assert [(name, arguments[-1]) for name, arguments in started] == [
+        ("_rx_main", 3), ("_tx_main", 5), ("_node_main", 7)
+    ]
+    # The child applies exactly what it was handed, whatever the environment says.
     monkeypatch.setattr(allocator, "keep_freed_memory", lambda: None)
-    engine._bound_numeric_threads()
-    monkeypatch.setenv(cpu_budget.ENVIRONMENT, "6")
-    engine._bound_numeric_threads()
-    assert recorded_budget == [1, 6]
+    monkeypatch.setenv("OFDM_LINK_CPU_CORES", "9")
+    engine._bound_numeric_threads(6)
+    monkeypatch.delenv("OFDM_LINK_CPU_CORES")
+    assert recorded_budget == [6]
 
 
 def test_the_resolved_count_sizes_the_decode_pool(tmp_path):

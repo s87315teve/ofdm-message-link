@@ -670,6 +670,7 @@ class TransmitWindow(QtWidgets.QWidget):
                 ingress_port=ingress_port,
                 ui_fps=ui_fps,
                 aggregation=resolved.aggregation,
+                cpu_cores=resolved.cpu_cores,
             )
             self._ingress = None
         else:
@@ -1291,9 +1292,10 @@ def _airtime_ms(resolved: options.ResolvedOptions, entry: McsTableEntry) -> floa
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     resolved = options.resolve(args)
-    # Plots use NumPy too; keep its BLAS pool from spinning idle cores.
-    options.apply_cpu_budget(resolved)
     options.apply_performance_options(args)
+    # After --cpu-affinity, so cpu_cores 0 counts the pinned CPUs.  Plots use
+    # NumPy too; keep its BLAS pool from spinning idle cores.
+    options.apply_cpu_budget(resolved)
     if resolved.uses_radio:
         # Taken before any window exists, so a process that was not authorised
         # to transmit cannot become one by clicking Start.
