@@ -743,7 +743,7 @@ def test_rx_sink_block_chunks_the_stream_and_applies_back_pressure():
     received: list[np.ndarray] = []
     accept = True
 
-    def enqueue(values):
+    def enqueue(values, tags):
         if not accept:
             return False
         received.append(values)
@@ -753,7 +753,7 @@ def test_rx_sink_block_chunks_the_stream_and_applies_back_pressure():
     # Both blocks are held in locals: a Python block reachable only from the
     # C++ flowgraph is collected under it and segfaults the scheduler.
     source = blocks.vector_source_c(stream.tolist(), False)
-    sink = _build_rx_sink_block(512, enqueue, lambda offset, seconds: None)()
+    sink = _build_rx_sink_block(512, enqueue)()
     top = gr.top_block("rx_sink_block_test")
     top.connect(source, sink)
     top.start()
@@ -788,7 +788,13 @@ def test_rx_sink_block_feeds_rx_time_tags_to_the_gap_counter():
     tags = [rx_time(0, 7, 0.0), rx_time(3000, 7, 0.005)]
     source = blocks.vector_source_c([0j] * 5000, False, 1, tags)
     counter = RxTimeGapCounter(sample_rate=1_000_000.0)
-    sink = _build_rx_sink_block(512, lambda values: True, counter.observe)()
+
+    def enqueue(values, tags):
+        for offset, seconds in tags:
+            counter.observe(offset, seconds)
+        return True
+
+    sink = _build_rx_sink_block(512, enqueue)()
     top = gr.top_block("rx_sink_gap_test")
     top.connect(source, sink)
     top.start()

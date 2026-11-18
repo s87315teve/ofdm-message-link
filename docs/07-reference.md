@@ -611,6 +611,40 @@ UHD 與 udp transport 的 samples 一定是有限值（`finite_samples`），連
 雜訊估計可能在最後幾位數不同。啟動時的 `[acceleration]` 那行會印出實際用的兩個值與來源。代價是延遲：一個 burst 最多晚等待的那段時間才交給 decoder，`--events` 的 `mono`
 也會跟著晚（7.11 節）。範圍：0–131072 samples（0 = 不併）、0–20 ms。
 
+**UHD 接收端在 GNU Radio 裡先分組（ingest batching，跟著上面的 feed 設定，不需要另外的開關）。** 沒有分組時，UHD 每送來
+一批 samples，GNU Radio 就呼叫一次 Python 的 RX sink block：B210 在 5 MS/s 約每秒 843 次、每次約 5.9k samples，每次都要拿
+GIL 並付固定的 gateway 成本。現在 `ReceiveWorker` 在 transport 啟動前把 feed 設定交給它（`set_receive_feed`），
+`UhdSampleSource` 啟動時算出 N，對 sink 設 `set_output_multiple(N)`：GNU Radio 先湊滿 N 個 samples 才交給 Python，
+每次交的都是 N 的整數倍（落後時一次拿可用的最大倍數，上限仍是 65536 × ⌈fs / 5 MS/s⌉）。
+N = min(`rx_min_feed_samples`, `rx_max_merge_wait_ms` × fs, 上限)；`rx_min_feed_samples` 為 0、或等待時間不到 2 個 samples 時
+N = 1（不分組，和以前一樣）。例：PC 預設 8192／2 ms 在 10 MS/s 是 N = 8192（每秒約 1.2k 次）；Jetson
+65536／15 ms 在 5 MS/s 是 N = 65536（13.1 ms，每秒約 76 次）；65536／15 ms 在 1 MS/s 是 N = 15000。N 是用裝置回報的實際
+sample rate 算的，每次啟動（重新 attach）都重算；GNU Radio 的 buffer 也加大到 2 × 上限 + N。因為 sample 已經在 GNU Radio
+裡等過 N 了，`ReceiveWorker` 對分組的 transport **完全不再等**，只把 queue 裡已經在等的 chunk 併進來；所以分組時每次 feed
+平常就是 N 個 samples，落後時較多。N 被等待時間或上限限制時，feed 會比 `rx_min_feed_samples` 小：例如 131072／20 ms 在
+5 MS/s，上限 65536 讓 N = 65536，feed 就是 65536（不會為了湊 131072 再等）。udp、Pluto 照舊等完整的
+`rx_max_merge_wait_ms`。samples 與順序不變，最多晚 N 個 samples（≤ `rx_max_merge_wait_ms`）才交出去；停止時不滿 N 的
+最後一段會被丟掉。
+
+每個 chunk 和它裡面的 `rx_time` tag 一起進 queue。遺失的計數（`rx_samples_lost`、`rx_time_discontinuities`）和以前一樣
+在 sink 把 chunk 放進 queue 成功之後就算，所以停止時還在 queue 裡的 overflow 也算得到；但 tag 要等 `recv()` 交出那個
+chunk 時才成為 device time anchor（`time_anchors()`，`--events` 的 `rx_time`／`overflow`／`dev_t` 用的就是它），所以
+anchor 不會早於它描述的 samples 被 decoder 看到。因此 `rx_samples_lost`／`rx_time_discontinuities` 可能比
+`time_anchors()` 與 `--events` 的 `overflow` 列早一個 queue 的量（≤ 約 100 ms）；停止時還在 queue 裡的 overflow 會被計數，
+但沒有對應的 events 列。sink 因為 queue 滿而重讀同一段時，tag 也不會算兩次。anchor 的 offset
+仍是「啟動後交給 `recv()` 的 samples 數」。
+`set_receive_feed` 只能在啟動前呼叫（已啟動時拋 `TransportError`），開關在 `transport.RX_BATCH_DEFAULT_FEED`：設成
+`False` 時預設的 feed（8192／2 ms）N = 1、PC 的 sink 行為和以前一樣，有設定的 feed（Jetson）照樣分組。
+
+Sink 與 `recv()` 之間的 queue 分組時用 samples 計：queue 裡的 samples 加上新 chunk 超過 ⌈0.1 × fs⌉（裝置實際的 fs，
+即 100 ms）就拒收（back-pressure），只有 queue 空的時候一定收下一個 chunk（所以最多是 100 ms 或一個 chunk，取大者）。
+不用 chunk 數計，是因為 back-pressure 之後 sink 每次會拿到上限那麼多，而不是 N。不分組時照舊最多 16 個 chunk。
+transport 快照多了 `ingest_multiple`（N）、`queue_budget_samples`（上面的上限，不分組時是 None）、`queued_samples`
+與 `queue_depth_chunks`（chunk 數上限，分組時是 None）。**計數的尺度變了：** `chunks_received` 是交給 queue 的 chunk 數，
+分組後約少 N／5.9k 倍；`queue_full_backpressure_events` 是 sink 遇到 queue 滿、等 5 ms 後退回的次數，queue 從約 19 ms
+變成 100 ms 之後，同樣的停頓比較晚、比較少觸發它，所以和之前版本的數字不能直接比較（`judge_run.py` 只看它是否持續
+增加，判定方式不變）。
+
 **NumPy thread 數與 decode workers（`acceleration`，預設不變）。** NumPy 內建的 BLAS 會依機器的核心數開 thread pool，
 而且在呼叫之間空轉；在 20 核心的機器上它吃掉 15.6 個核心、少了三分之一的 throughput。所以每個 app 的主 process 與
 engine 子 process 都會把已載入的 BLAS／OpenMP 函式庫限制在 `cpu_cores` 個 thread（`ofdm_link/runtime/cpu_budget.py`）：

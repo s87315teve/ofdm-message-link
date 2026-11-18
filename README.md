@@ -234,7 +234,11 @@ Acquisition、header probe、Turbo decoder 與發送端的 encode 有 C++ 版（
 thread 數可以用 `--decode-workers`／`--cpu-cores` 或設定檔的 `acceleration.decode_workers`／`cpu_cores` 調整，
 預設值不變（[7.2 節](docs/07-reference.md#72-設定檔)）。接收端把短 chunk 併成多大的 feed、最多等多久，可以用
 `--rx-min-feed-samples`／`--rx-max-merge-wait-ms` 或 `acceleration.rx_min_feed_samples`／`rx_max_merge_wait_ms`
-調整；預設（PC）是 8192 samples、2 ms，Jetson 建議 65536、15 ms。
+調整；預設（PC）是 8192 samples、2 ms，Jetson 建議 65536、15 ms。UHD 接收端也用同一組值：GNU Radio 先把 samples
+湊成 N 的整數倍才交給 Python（N = min(feed 大小, 等待時間內的 samples, 每次上限)，例如 Jetson 在 5 MS/s 是 65536），
+Python sink 每秒被呼叫的次數從約 843 次降到約 76 次。分組時接收端不再為了湊 feed 等待，每次 feed 平常就是 N（上限壓住 N
+時會比 feed 設定小）；sink 到 decoder 之間的 queue 最多放 100 ms 的 samples。所以
+`chunks_received` 與 `queue_full_backpressure_events` 的數字尺度和之前版本不同（7.10 節）。
 
 **v2.0 的預設值：** aggregation 最多 32 個 subframe、PSDU 最多 16384 byte；RX 只找 wire v5（legacy acquisition 關）。
 要收 v1.0 的 TX，RX 加 `--overlay configs/profiles/ota_2p45ghz.yaml --overlay configs/profiles/legacy_rx.yaml`。細節見

@@ -26,6 +26,7 @@ import struct
 import threading
 import time
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -47,9 +48,12 @@ _TX_IDLE_WAIT_S = 0.05
 # the sample rate so every rate keeps that much time in each buffer.
 DEFAULT_RX_RECV_FRAMES = 256
 _RX_REFERENCE_RATE = 5_000_000
-# The Python sink block needs the GIL once per chunk.  While the decode owner
-# is busy that wait can reach the 5 ms switch interval; 8192 samples (1.6 ms
-# at 5 MS/s) then fell behind OTA at 330 burst/s, 65536 (13 ms) does not.
+# The Python sink block needs the GIL once per work() call.  While the decode
+# owner is busy that wait can reach the 5 ms switch interval; a cap of 8192
+# samples (1.6 ms at 5 MS/s) then fell behind OTA at 330 burst/s, 65536
+# (13 ms) does not.  This caps one call; how many samples a call usually gets
+# is the ingest multiple N (rx_ingest_multiple), or without it whatever UHD
+# has delivered (~5.9k samples, ~843 calls/s at 5 MS/s on a B210).
 _RX_CHUNK_SAMPLES = 65536
 _MAX_RX_RECV_FRAMES = 1024
 # A full receive queue makes the sink block return 0, and GNU Radio calls it
@@ -60,6 +64,17 @@ _MAX_RX_RECV_FRAMES = 1024
 _RX_QUEUE_WAIT_S = 0.005
 # rx_time tags kept for device time: one at start and one per overflow or retune.
 ANCHOR_HISTORY = 64
+# Chunks the UHD receive queue holds when GNU Radio is not batching (N = 1):
+# the depth every release before ingest batching used.
+_RX_QUEUE_DEPTH_UNBATCHED = 16
+# With batching the queue is bounded in samples instead: at most this much of
+# the stream (one chunk is always accepted into an empty queue).
+_RX_QUEUE_BUDGET_S = 0.1
+# The one switch for ingest batching on the PC defaults.  True: the default
+# ReceiveFeed (8192 samples, 2 ms) batches like any other feed.  False: the
+# default feed gives N = 1, so a PC run without acceleration settings keeps
+# the pre-batching sink behaviour; a configured feed (Jetson) still batches.
+RX_BATCH_DEFAULT_FEED = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +86,10 @@ class ReceiveFeed:
     Each feed has a fixed cost, so larger feeds save CPU on a slow host
     (Jetson: 65536 samples, 15 ms); the samples and their order never change.
     The defaults are the PC setting every release has used.
+
+    A UHD source also uses it to batch earlier, in GNU Radio itself (see
+    :func:`rx_ingest_multiple`), so the Python sink block runs once per
+    batch instead of once per few thousand samples.
     """
 
     min_samples: int = 8192
@@ -79,6 +98,91 @@ class ReceiveFeed:
 
 def _rx_rate_scale(sample_rate: float) -> int:
     return max(1, math.ceil(float(sample_rate) / _RX_REFERENCE_RATE))
+
+
+def rx_ingest_multiple(feed: ReceiveFeed, sample_rate: float, chunk_samples: int) -> int:
+    """How many samples GNU Radio groups before the Python RX sink sees them (N).
+
+    The sink block then receives only whole multiples of N (``set_output_multiple``),
+    so its fixed per-call cost (the GIL, the gateway, a copy and a queue put)
+    is paid once per N samples instead of once per UHD packet group (~843
+    calls/s at 5 MS/s).  N is the feed's ``min_samples``, but never more than
+    ``max_wait_s`` of samples (GNU Radio waits for a whole N, so N is also the
+    longest a sample waits before the decoder can see it) nor than the sink's
+    chunk cap.  1 means no batching: a feed of 0 samples, a wait shorter than
+    two samples, or the default feed while :data:`RX_BATCH_DEFAULT_FEED` is off.
+    """
+
+    if not RX_BATCH_DEFAULT_FEED and feed == ReceiveFeed():
+        return 1
+    within_wait = int(feed.max_wait_s * float(sample_rate))
+    if feed.min_samples <= 0 or within_wait < 2:
+        return 1
+    return max(1, min(int(feed.min_samples), within_wait, int(chunk_samples)))
+
+
+def rx_queue_limits(
+    sample_rate: float, ingest_multiple: int, fixed_depth: int | None = None
+) -> tuple[int | None, int | None]:
+    """(most chunks, most samples) the UHD receive queue holds; None is no limit.
+
+    Without batching the queue keeps the 16 chunks it always had.  With
+    batching it is bounded in samples, to :data:`_RX_QUEUE_BUDGET_S` of the
+    stream: a chunk is refused (back-pressure) when the samples already queued
+    plus its own would pass that, unless the queue is empty.  A bound in chunks
+    would not do, because after back-pressure the sink takes up to its chunk
+    cap per call, not N.  ``fixed_depth`` (the ``queue_depth`` argument) also
+    caps the number of chunks.
+    """
+
+    if ingest_multiple <= 1:
+        return (_RX_QUEUE_DEPTH_UNBATCHED if fixed_depth is None else fixed_depth), None
+    return fixed_depth, math.ceil(_RX_QUEUE_BUDGET_S * float(sample_rate))
+
+
+class _RxChunkQueue:
+    """FIFO of (chunk, tags) bounded in chunks and in queued samples."""
+
+    def __init__(self, max_chunks: int | None, max_samples: int | None) -> None:
+        self.max_chunks = max_chunks
+        self.max_samples = max_samples
+        self._items: deque[tuple[Any, int]] = deque()
+        self._samples = 0
+        self._ready = threading.Condition()
+
+    @property
+    def queued_samples(self) -> int:
+        return self._samples
+
+    def _fits(self, count: int) -> bool:
+        if self.max_chunks is not None and len(self._items) >= self.max_chunks:
+            return False
+        return (
+            self.max_samples is None
+            or not self._items
+            or self._samples + count <= self.max_samples
+        )
+
+    def put(self, item: Any, count: int, timeout: float) -> bool:
+        """Queue ``item`` of ``count`` samples, waiting up to ``timeout`` for room."""
+
+        with self._ready:
+            if not self._ready.wait_for(lambda: self._fits(count), timeout):
+                return False
+            self._items.append((item, count))
+            self._samples += count
+            self._ready.notify_all()
+            return True
+
+    def get(self, timeout: float) -> Any | None:
+        with self._ready:
+            if not self._ready.wait_for(lambda: bool(self._items), max(0.0, timeout)):
+                return None
+            item, count = self._items.popleft()
+            self._samples -= count
+            self._ready.notify_all()
+            return item
+
 
 DEFAULT_TX_PORT = 52101
 DEFAULT_PEAK_AMPLITUDE = 0.7
@@ -576,6 +680,16 @@ class UhdSampleSource:
     Receiving transmits nothing, so this needs no RF authorisation.  UHD
     converts the radio's 16-bit integer samples to complex64, so every
     sample is finite (``finite_samples``).
+
+    With a :class:`ReceiveFeed` set (:meth:`set_receive_feed`, before
+    :meth:`start`), GNU Radio hands the Python sink block only whole multiples
+    of N samples (:func:`rx_ingest_multiple`), and the queue between the sink
+    and :meth:`recv` holds at most 100 ms of samples (:func:`rx_queue_limits`).
+    The sink counts the samples each ``rx_time`` tag says were lost as soon as
+    it has queued the chunk holding the tag (``rx_samples_lost``,
+    ``rx_time_discontinuities``); the tag becomes a device-time anchor
+    (:meth:`time_anchors`) only when :meth:`recv` returns that chunk, so an
+    anchor is never published ahead of the samples it describes.
     """
 
     # The receive worker may skip the decoder's finite check for this source.
@@ -586,12 +700,14 @@ class UhdSampleSource:
         settings: Any,
         *,
         chunk_samples: int | None = None,
-        queue_depth: int = 16,
+        queue_depth: int | None = None,
         recv_frames: int | None = None,
     ) -> None:
         """``None`` scales chunk size and UHD receive frames with the sample
         rate, keeping the buffering time of the 5 MS/s defaults; an explicit
-        ``recv_frames=0`` leaves UHD's own default in place."""
+        ``recv_frames=0`` leaves UHD's own default in place.  ``queue_depth``
+        ``None`` sizes the chunk queue at each start (:func:`rx_queue_limits`);
+        a number also caps it at that many chunks."""
 
         scale = _rx_rate_scale(getattr(settings, "sample_rate", _RX_REFERENCE_RATE))
         if chunk_samples is None:
@@ -600,10 +716,17 @@ class UhdSampleSource:
             recv_frames = min(_MAX_RX_RECV_FRAMES, DEFAULT_RX_RECV_FRAMES * scale)
         if type(chunk_samples) is not int or chunk_samples < 256:
             raise TransportError("chunk_samples must be an integer at least 256")
+        if queue_depth is not None and (type(queue_depth) is not int or queue_depth < 1):
+            raise TransportError("queue_depth must be a positive integer or None")
         self._settings = settings
         self._recv_frames = recv_frames or None
         self._chunk_samples = chunk_samples
-        self._queue: queue.Queue[NDArray[np.complex64]] = queue.Queue(maxsize=queue_depth)
+        self._fixed_queue_depth = queue_depth
+        # Each item is one chunk and the rx_time tags inside it, as (stream
+        # offset, device seconds, samples lost before it); recv publishes them.
+        self._queue = _RxChunkQueue(*rx_queue_limits(0.0, 1, queue_depth))
+        self._feed: ReceiveFeed | None = None
+        self._ingest_multiple = 1
         self._top: Any | None = None
         self._source_block: Any | None = None
         self._sink_block: Any | None = None
@@ -613,6 +736,9 @@ class UhdSampleSource:
         self._chunks_received = 0
         self._samples_received = 0
         self._gaps: RxTimeGapCounter | None = None
+        # The queue recv reads and the counter its chunks' tags go to, swapped
+        # together at each start.
+        self._stream: tuple[_RxChunkQueue, RxTimeGapCounter | None] = (self._queue, None)
         self._readback: dict[str, object] | None = None
         # Gain read back after an operator change; None until the first one.
         self._gain_db: float | None = None
@@ -639,12 +765,34 @@ class UhdSampleSource:
                 self._settings, recv_frames=self._recv_frames
             )
         require_tuned(self._source_block, self._settings.center_frequency)
-        # Room for the sink to take a whole chunk per work() call.
-        self._source_block.set_min_output_buffer(2 * self._chunk_samples)
-        self._gaps = RxTimeGapCounter(float(self._settings.sample_rate))
+        # Batching, the queue bound and the gap counter all use the rate the
+        # device actually runs at, decided again at every start.  A fresh
+        # queue: chunks left from the previous run would hand recv samples
+        # (and tags) from before this start.
+        rate = _actual_sample_rate(self._source_block, self._settings.sample_rate)
+        self._gaps = RxTimeGapCounter(rate)
+        self._ingest_multiple = (
+            1
+            if self._feed is None
+            else rx_ingest_multiple(self._feed, rate, self._chunk_samples)
+        )
+        # Room for the sink to take a whole chunk per work() call, and for
+        # GNU Radio to fill the next multiple of N while it does.
+        self._source_block.set_min_output_buffer(
+            2 * self._chunk_samples + (self._ingest_multiple if self._ingest_multiple > 1 else 0)
+        )
+        self._queue = _RxChunkQueue(
+            *rx_queue_limits(rate, self._ingest_multiple, self._fixed_queue_depth)
+        )
+        self._stream = (self._queue, self._gaps)
         self._sink_block = _build_rx_sink_block(
-            self._chunk_samples, self._enqueue, self._gaps.observe
+            self._chunk_samples, self._enqueue, ingest_multiple=self._ingest_multiple
         )()
+        if self._ingest_multiple > 1:
+            # GNU Radio then calls work() only with whole multiples of N
+            # samples, tags and offsets intact; a sink stopped while it waits
+            # for the rest of a multiple returns at once.
+            self._sink_block.set_output_multiple(self._ingest_multiple)
         self._fault_collector = UhdFaultCollector(max_events=64)
         self._async_block = _build_uhd_async_sink_block(
             "ofdm_message_link_rx_async",
@@ -668,24 +816,57 @@ class UhdSampleSource:
         self._gain_db = _apply_gain(self._source_block, gain_db, self._readback)
         return self._gain_db
 
-    def _enqueue(self, samples: NDArray[np.complex64]) -> bool:
-        try:
-            self._queue.put(samples, timeout=_RX_QUEUE_WAIT_S)
-            self._chunks_received += 1
-            self._samples_received += int(samples.size)
-            return True
-        except queue.Full:
+    def set_receive_feed(self, feed: ReceiveFeed | None) -> None:
+        """Batch the stream in GNU Radio for this feed (see :func:`rx_ingest_multiple`).
+
+        Takes effect at the next :meth:`start`; ``None`` turns batching off.
+        """
+
+        if self._top is not None:
+            raise TransportError("set the receive feed before the source is started")
+        self._feed = feed
+
+    @property
+    def ingest_multiple(self) -> int:
+        """N of the running stream: every chunk :meth:`recv` returns is a multiple of it."""
+
+        return self._ingest_multiple
+
+    def _enqueue(
+        self,
+        samples: NDArray[np.complex64],
+        tags: tuple[tuple[int, float], ...] = (),
+    ) -> bool:
+        # Called from the sink block's thread only.  The losses are measured
+        # here but counted only once the chunk is queued: a refused chunk is
+        # offered again with the same tags, and must not count them twice.
+        gaps = self._stream[1]
+        measured = gaps.measure(tags) if tags and gaps is not None else ()
+        if not self._queue.put((samples, measured), int(samples.size), _RX_QUEUE_WAIT_S):
             # The GNU Radio sink returns zero, so this is backpressure rather
             # than a dropped sample chunk. UHD may still overflow upstream;
             # that distinct event is collected from its async message port.
             self._queue_full_backpressure += 1
             return False
+        if measured:
+            gaps.count(measured)
+        self._chunks_received += 1
+        self._samples_received += int(samples.size)
+        return True
 
     def recv(self, timeout: float) -> NDArray[np.complex64] | None:
-        try:
-            return self._queue.get(timeout=timeout)
-        except queue.Empty:
+        # One read of the pair: a chunk from a previous run's queue can only
+        # ever publish its tags in that run's counter.
+        chunks, gaps = self._stream
+        item = chunks.get(timeout)
+        if item is None:
             return None
+        samples, tags = item
+        # The chunk's rx_time tags become anchors only as it is handed on, so
+        # time_anchors (--events device time) never runs ahead of the samples.
+        if tags and gaps is not None:
+            gaps.publish(tags)
+        return samples
 
     def stop(self) -> None:
         if self._top is None:
@@ -703,7 +884,8 @@ class UhdSampleSource:
 
         Returns (tags seen since start, the most recent ones as (stream offset,
         device seconds, samples lost just before)).  Stream offsets count the
-        samples handed to :meth:`recv` since :meth:`start`.  The device clock
+        samples handed to :meth:`recv` since :meth:`start`; a tag appears here
+        when :meth:`recv` returns the chunk that holds it.  The device clock
         is the B210's own; nothing here sets it to host or GNSS time.
         """
 
@@ -729,6 +911,10 @@ class UhdSampleSource:
             ),
             "uhd_num_recv_frames": self._recv_frames,
             "chunk_samples": self._chunk_samples,
+            "ingest_multiple": self._ingest_multiple,
+            "queue_depth_chunks": self._queue.max_chunks,
+            "queue_budget_samples": self._queue.max_samples,
+            "queued_samples": self._queue.queued_samples,
             "chunks_received": self._chunks_received,
             "samples_received": self._samples_received,
             "chunks_dropped_overflow": 0,
@@ -770,24 +956,69 @@ class RxTimeGapCounter:
         self._anchor_lock = threading.Lock()
 
     def observe(self, offset: int, seconds: float) -> None:
-        lost = 0
-        if self._anchor is not None:
-            anchor_offset, anchor_seconds = self._anchor
-            expected = anchor_seconds + (offset - anchor_offset) / self._rate
-            lost = int(round((seconds - expected) * self._rate))
+        """Count one tag's loss and publish it as an anchor at once."""
+
+        measured = self.measure(((offset, seconds),))
+        self.count(measured)
+        self.publish(measured)
+
+    def measure(
+        self, tags: Sequence[tuple[int, float]]
+    ) -> tuple[tuple[int, float, int], ...]:
+        """(offset, seconds, samples lost before it) of each tag, in order; changes nothing.
+
+        Each tag is measured against the one before it (the last counted, then
+        the earlier ones in ``tags``).  :meth:`count` makes the result count.
+        """
+
+        anchor = self._anchor
+        measured = []
+        for offset, seconds in tags:
+            lost = 0
+            if anchor is not None:
+                anchor_offset, anchor_seconds = anchor
+                expected = anchor_seconds + (offset - anchor_offset) / self._rate
+                lost = max(0, int(round((seconds - expected) * self._rate)))
+            anchor = (int(offset), float(seconds))
+            measured.append((int(offset), float(seconds), lost))
+        return tuple(measured)
+
+    def count(self, measured: Sequence[tuple[int, float, int]]) -> None:
+        """Add measured tags to ``discontinuities`` and ``samples_lost``."""
+
+        for offset, seconds, lost in measured:
             if lost > 0:
                 self.discontinuities += 1
                 self.samples_lost += lost
-        self._anchor = (int(offset), float(seconds))
+            self._anchor = (offset, seconds)
+
+    def publish(self, measured: Sequence[tuple[int, float, int]]) -> None:
+        """Make counted tags visible as device-time anchors (:meth:`anchors`)."""
+
         with self._anchor_lock:
-            self._anchors.append((int(offset), float(seconds), max(lost, 0)))
-            self._anchors_total += 1
+            for entry in measured:
+                self._anchors.append(entry)
+                self._anchors_total += 1
 
     def anchors(self) -> tuple[int, tuple[tuple[int, float, int], ...]]:
         """(tags seen in all, the most recent ones as (offset, seconds, lost))."""
 
         with self._anchor_lock:
             return self._anchors_total, tuple(self._anchors)
+
+
+def _actual_sample_rate(block: Any, requested: float) -> float:
+    """The rate the device reports it runs at, else the requested one."""
+
+    getter = getattr(block, "get_samp_rate", None)
+    if callable(getter):
+        try:
+            rate = float(getter())
+        except Exception:  # a readback that fails must not stop the radio
+            rate = math.nan
+        if math.isfinite(rate) and rate > 0.0:
+            return rate
+    return float(requested)
 
 
 def _device_time_now(sink_block: Any) -> float:
@@ -912,13 +1143,22 @@ def _build_tx_source_block(capacity: int) -> type:
     return TxBurstSource
 
 
-def _build_rx_sink_block(chunk_samples: int, enqueue: Any, observe_time: Any) -> type:
-    """Build the chunking RX sink block. Lazy for the same reason as above."""
+def _build_rx_sink_block(chunk_samples: int, enqueue: Any, *, ingest_multiple: int = 1) -> type:
+    """Build the chunking RX sink block. Lazy for the same reason as above.
+
+    Each work() call hands ``enqueue(samples, tags)`` one chunk of at most
+    ``chunk_samples`` and the ``rx_time`` tags inside it, as (absolute stream
+    offset, device seconds).  With ``ingest_multiple`` N > 1 (and the block's
+    ``set_output_multiple(N)``, which UhdSampleSource.start sets), a chunk is
+    the largest whole multiple of N available: N when the sink keeps up, more
+    when it catches up.
+    """
 
     import pmt
     from gnuradio import gr
 
     time_key = pmt.intern("rx_time")
+    multiple = max(1, int(ingest_multiple))
 
     class RxChunkSink(gr.sync_block):  # type: ignore[misc]
         def __init__(self) -> None:
@@ -932,21 +1172,25 @@ def _build_rx_sink_block(chunk_samples: int, enqueue: Any, observe_time: Any) ->
             del output_items
             incoming = input_items[0]
             count = min(len(incoming), chunk_samples)
+            count -= count % multiple
             if count == 0:
                 return 0
             values = np.array(incoming[:count], dtype=np.complex64, copy=True)
             values.setflags(write=False)
+            tags = tuple(
+                (
+                    int(tag.offset),
+                    pmt.to_uint64(pmt.tuple_ref(tag.value, 0))
+                    + pmt.to_double(pmt.tuple_ref(tag.value, 1)),
+                )
+                for tag in self.get_tags_in_window(0, 0, count, time_key)
+            )
             # Returning 0 leaves the samples for the next call and applies
             # back-pressure rather than silently dropping a burst mid-way.
-            if not enqueue(values):
+            # The tags travel with the samples, so nothing is counted twice
+            # when the same window is offered again.
+            if not enqueue(values, tags):
                 return 0
-            for tag in self.get_tags_in_window(0, 0, count, time_key):
-                value = tag.value
-                observe_time(
-                    int(tag.offset),
-                    pmt.to_uint64(pmt.tuple_ref(value, 0))
-                    + pmt.to_double(pmt.tuple_ref(value, 1)),
-                )
             return count
 
     return RxChunkSink

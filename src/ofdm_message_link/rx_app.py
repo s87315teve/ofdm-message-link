@@ -154,6 +154,11 @@ class ReceiveWorker:
     def attach(self, source) -> None:
         """Start one transport and decode from it until it is detached."""
 
+        # A source that can batch in its own pipeline (UHD: GNU Radio groups
+        # samples before the Python sink) learns the feed before it starts.
+        configure = getattr(source, "set_receive_feed", None)
+        if callable(configure):
+            configure(ReceiveFeed(self._min_feed_samples, self._max_merge_wait_s))
         source.start()
         with self._lock:
             self._source = source
@@ -223,13 +228,17 @@ class ReceiveWorker:
     def _next_chunk(self, source):
         """One transport chunk, merged with the ones queued behind it up to a minimum size.
 
-        A B210 at 5 MS/s hands the sink about 2.5k samples per call, and each
-        feed pays a fixed cost (a whole acquisition pass, the pool handoff)
-        whatever its size: offline, 2560-sample feeds cost the receive owner
-        14% more than 8192-sample ones (cpp_eval phase 2, E3, n=2).  So chunks
-        already queued are taken at once, and a short one waits at most
-        ``max_merge_wait_s`` (2 ms) for more.  The samples and their order are
-        unchanged; only the feed boundaries move.
+        Without batching in the transport, a B210 at 5 MS/s hands the sink a
+        few thousand samples per call, and each feed pays a fixed cost (a whole
+        acquisition pass, the pool handoff) whatever its size: offline,
+        2560-sample feeds cost the receive owner 14% more than 8192-sample
+        ones (cpp_eval phase 2, E3, n=2).  So chunks already queued are taken
+        at once, and a short one waits at most ``max_merge_wait_s`` (2 ms) for
+        more.  A source that already batches for this feed (``ingest_multiple``
+        above 1, see :meth:`attach`) has waited for its N samples already, so
+        its chunk is not waited on again; only chunks already queued are merged
+        (see :meth:`_merge_wait`).  The samples and their order are unchanged; only
+        the feed boundaries move.
         """
 
         chunk = source.recv(0.2)
@@ -237,7 +246,7 @@ class ReceiveWorker:
             return chunk
         parts = [chunk]
         total = int(chunk.size)
-        deadline = time.monotonic() + self._max_merge_wait_s
+        deadline = time.monotonic() + self._merge_wait(source)
         while total < self._min_feed_samples and not self._stop.is_set():
             more = source.recv(max(0.0, deadline - time.monotonic()))
             if more is None:
@@ -245,6 +254,23 @@ class ReceiveWorker:
             parts.append(more)
             total += int(more.size)
         return parts[0] if len(parts) == 1 else np.concatenate(parts)
+
+    def _merge_wait(self, source) -> float:
+        """How long a short chunk may wait for more (after the first ``recv``).
+
+        Without batching in the source, ``max_merge_wait_s``.  A source that
+        batches (``ingest_multiple`` above 1) has already waited for its N
+        samples in GNU Radio, so it is never waited on again: its feeds are N
+        = min(``min_feed_samples``, ``max_merge_wait_s`` of samples, its chunk
+        cap), plus whatever is already queued.  Waiting for the next N would
+        take N / fs, which the rest of the wait never covers once N is set by
+        the wait or the cap.
+        """
+
+        multiple = getattr(source, "ingest_multiple", 1)
+        if isinstance(multiple, int) and multiple > 1:
+            return 0.0
+        return self._max_merge_wait_s
 
     def _notify_observer(self, source, chunk, snrs: tuple[float, ...]) -> None:
         assert self._observer is not None
