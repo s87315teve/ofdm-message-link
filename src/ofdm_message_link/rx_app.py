@@ -923,11 +923,9 @@ def _profile_label(resolved: options.ResolvedOptions) -> QtWidgets.QLabel:
     return label
 
 
-def _decode_workers(value: str) -> int:
-    parsed = int(value)
-    if not 1 <= parsed <= 64:
-        raise argparse.ArgumentTypeError("must be between 1 and 64")
-    return parsed
+# Payload decode workers when neither --decode-workers nor
+# acceleration.decode_workers gives a count.
+DEFAULT_DECODE_WORKERS = 4
 
 
 def _stats_log_max_mb(value: str) -> float:
@@ -1001,10 +999,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     app.add_argument(
         "--decode-workers",
-        type=_decode_workers,
-        default=4,
+        type=options.decode_workers_argument,
+        default=None,
+        metavar="N",
         help=(
-            "payload decode worker processes (default: 4); acquisition and "
+            "payload decode worker processes, 1-64 (default: acceleration.decode_workers "
+            f"in the configuration, else {DEFAULT_DECODE_WORKERS}); acquisition and "
             "headers stay on one owner. 1 keeps the original inline decoder"
         ),
     )
@@ -1046,14 +1046,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    # Plots use NumPy too; keep its BLAS pool from spinning idle cores.  With
-    # --engine thread the receive path runs here, so keep freed buffers too.
+    # With --engine thread the receive path runs here, so keep freed buffers.
     from ofdm_link.runtime.allocator import keep_freed_memory
-    from ofdm_link.runtime.cpu_budget import apply_cpu_budget
 
-    apply_cpu_budget(1)
     keep_freed_memory()
     resolved = options.resolve(args)
+    # Plots use NumPy too; keep its BLAS pool from spinning idle cores.
+    options.apply_cpu_budget(resolved)
+    options.resolve_decode_workers(args, resolved.config, DEFAULT_DECODE_WORKERS)
     if args.snr_db is not None and resolved.uses_radio:
         raise SystemExit("--snr-db applies to the udp transport only; the radio has a real channel")
     options.apply_performance_options(args)

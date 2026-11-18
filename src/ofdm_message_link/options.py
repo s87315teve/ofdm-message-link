@@ -268,6 +268,28 @@ def _cpu_affinity(value: str) -> str:
         raise argparse.ArgumentTypeError(str(error)) from error
 
 
+def _cpu_cores(value: str) -> int:
+    from ofdm_link.runtime.cpu_budget import MAX_CPU_CORES
+
+    parsed = int(value)
+    if not 0 <= parsed <= MAX_CPU_CORES:
+        raise argparse.ArgumentTypeError(
+            f"must be between 0 (the CPUs this process may run on) and {MAX_CPU_CORES}"
+        )
+    return parsed
+
+
+def decode_workers_argument(value: str) -> int:
+    """``--decode-workers``: the bound ``acceleration.decode_workers`` also has."""
+
+    from ofdm_link.config import MAX_DECODE_WORKERS
+
+    parsed = int(value)
+    if not 1 <= parsed <= MAX_DECODE_WORKERS:
+        raise argparse.ArgumentTypeError(f"must be between 1 and {MAX_DECODE_WORKERS}")
+    return parsed
+
+
 DEFAULT_REALTIME_PRIORITY = 15
 
 
@@ -282,6 +304,17 @@ def add_performance_arguments(parser: argparse.ArgumentParser) -> None:
     """CPU placement and scheduling switches; every one is off by default."""
 
     group = parser.add_argument_group("CPU placement and scheduling (all off by default)")
+    group.add_argument(
+        "--cpu-cores",
+        type=_cpu_cores,
+        default=None,
+        metavar="N",
+        help=(
+            "NumPy/BLAS and OpenMP threads this app and its radio engine process may each "
+            "use; 0 = the CPUs this process may run on. Decode workers always use one each. "
+            "Default: acceleration.cpu_cores in the configuration, else 1"
+        ),
+    )
     group.add_argument(
         "--cpu-affinity",
         type=_cpu_affinity,
@@ -491,6 +524,8 @@ class ResolvedOptions:
     mcs_entry: McsTableEntry
     transport: str
     aggregation: AggregationLimits = AggregationLimits()
+    # NumPy/BLAS thread budget: --cpu-cores, else acceleration.cpu_cores, else 1.
+    cpu_cores: int = 1
 
     @property
     def uses_radio(self) -> bool:
@@ -542,7 +577,48 @@ def resolve(args: argparse.Namespace) -> ResolvedOptions:
         mcs_entry=selected_entry,
         transport=args.transport,
         aggregation=aggregation_limits(args, config),
+        cpu_cores=_resolve_cpu_cores(args, config),
     )
+
+
+def _resolve_cpu_cores(args: argparse.Namespace, config: LinkConfig) -> int:
+    from ofdm_link.runtime.cpu_budget import DEFAULT_CPU_CORES
+
+    flag = getattr(args, "cpu_cores", None)
+    if flag is not None:
+        return int(flag)
+    configured = config.acceleration.cpu_cores
+    return DEFAULT_CPU_CORES if configured is None else int(configured)
+
+
+def resolve_decode_workers(
+    args: argparse.Namespace, config: LinkConfig, default: int
+) -> int:
+    """``--decode-workers``, else ``acceleration.decode_workers``, else the app's default.
+
+    The result is written back to ``args.decode_workers`` so everything that
+    reads the parsed options sees the count that is actually used.
+    """
+
+    flag = getattr(args, "decode_workers", None)
+    configured = config.acceleration.decode_workers
+    workers = int(flag if flag is not None else default if configured is None else configured)
+    args.decode_workers = workers
+    return workers
+
+
+def apply_cpu_budget(resolved: ResolvedOptions):
+    """Bound this process's numeric threads and record the budget for the engine child.
+
+    Call it in ``main`` right after :func:`resolve`, before any engine process
+    starts: the engine reads the recorded budget when it starts.  Decode
+    workers keep one thread each whatever the budget.
+    """
+
+    from ofdm_link.runtime import cpu_budget
+
+    cpu_budget.request(resolved.cpu_cores)
+    return cpu_budget.apply_cpu_budget(resolved.cpu_cores)
 
 
 def settings_for(
@@ -715,8 +791,10 @@ __all__ = [
     "add_common_arguments",
     "add_overload_argument",
     "add_performance_arguments",
-    "apply_performance_options",
     "aggregation_limits",
+    "apply_cpu_budget",
+    "apply_performance_options",
+    "decode_workers_argument",
     "build_sink",
     "build_source",
     "clear_ready",
@@ -724,5 +802,6 @@ __all__ = [
     "mark_ready",
     "require_rf_capability",
     "resolve",
+    "resolve_decode_workers",
     "settings_for",
 ]

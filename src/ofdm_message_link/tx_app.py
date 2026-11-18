@@ -1290,11 +1290,9 @@ def _airtime_ms(resolved: options.ResolvedOptions, entry: McsTableEntry) -> floa
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    # Plots use NumPy too; keep its BLAS pool from spinning idle cores.
-    from ofdm_link.runtime.cpu_budget import apply_cpu_budget
-
-    apply_cpu_budget(1)
     resolved = options.resolve(args)
+    # Plots use NumPy too; keep its BLAS pool from spinning idle cores.
+    options.apply_cpu_budget(resolved)
     options.apply_performance_options(args)
     if resolved.uses_radio:
         # Taken before any window exists, so a process that was not authorised

@@ -577,11 +577,9 @@ def validate_algorithms(spec: NodeSpec, sample_rate: float) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = node_options.parse_args(argv)
-    from ofdm_link.runtime.cpu_budget import apply_cpu_budget
-
-    apply_cpu_budget(1)
     node_options.check_paths(args)
     setup = node_options.resolve_node(args)
+    options.apply_cpu_budget(setup.resolved)
     node_options.warn(setup)
     if setup.resolved.uses_radio:
         # Before any window or child exists: an unauthorised process never transmits.

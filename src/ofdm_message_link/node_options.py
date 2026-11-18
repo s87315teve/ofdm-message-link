@@ -220,13 +220,6 @@ def _kernel_buffers(value: str) -> int:
     return parsed
 
 
-def _decode_workers(value: str) -> int:
-    parsed = int(value)
-    if not 1 <= parsed <= 64:
-        raise argparse.ArgumentTypeError("must be between 1 and 64")
-    return parsed
-
-
 def _v5_index(value: str) -> int:
     index = int(value)
     try:
@@ -315,9 +308,11 @@ def build_parser() -> argparse.ArgumentParser:
                             "(gains in the --tx-gain range of the transport)"))
     node.add_argument("--control-port", type=_port, default=None, metavar="P",
                       help="localhost UDP JSON control socket (default: per node; 0 = off)")
-    node.add_argument("--decode-workers", type=_decode_workers,
-                      default=DEFAULT_DECODE_WORKERS,
-                      help=f"payload decode worker processes (default {DEFAULT_DECODE_WORKERS})")
+    node.add_argument("--decode-workers", type=options.decode_workers_argument,
+                      default=None, metavar="N",
+                      help=("payload decode worker processes, 1-64 (default: "
+                            "acceleration.decode_workers in the configuration, else "
+                            f"{DEFAULT_DECODE_WORKERS})"))
     node.add_argument("--snr-db", type=float, default=None,
                       help="udp transport only: add AWGN at this SNR")
     node.add_argument("--snr-fft-advance", type=_snr_fft_advance, default=None, metavar="N",
@@ -458,6 +453,7 @@ def _resolve_gains(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
 
 def resolve_node(args: argparse.Namespace) -> NodeSetup:
     resolved = options.resolve(args)
+    options.resolve_decode_workers(args, resolved.config, DEFAULT_DECODE_WORKERS)
     duplex = resolved.config.duplex
     if duplex is None:
         raise SystemExit(

@@ -21,6 +21,12 @@ import re
 from dataclasses import dataclass
 
 MAX_CPU_CORES = 256
+# The budget each app process and its radio engine use unless
+# ``acceleration.cpu_cores`` or ``--cpu-cores`` says otherwise.
+DEFAULT_CPU_CORES = 1
+# How an app's ``main`` hands its resolved budget to the engine child process,
+# which inherits the environment.  Not a user setting: ``main`` overwrites it.
+ENVIRONMENT = "OFDM_LINK_CPU_CORES"
 
 # Each entry is a library name pattern and the symbols that set and read back
 # its thread count.  Only libraries this process has already loaded are touched.
@@ -89,6 +95,23 @@ def apply_cpu_budget(cpu_cores: int) -> CpuBudget:
         numeric_threads=cores,
         bounded_libraries=tuple(sorted(set(bounded))),
     )
+
+
+def request(cpu_cores: int) -> None:
+    """Record the budget for child processes started after this call."""
+
+    resolve_cpu_cores(cpu_cores)
+    os.environ[ENVIRONMENT] = str(cpu_cores)
+
+
+def requested() -> int:
+    """The budget recorded by :func:`request`, else :data:`DEFAULT_CPU_CORES`."""
+
+    try:
+        cpu_cores = int(os.environ.get(ENVIRONMENT, "").strip())
+    except ValueError:
+        return DEFAULT_CPU_CORES
+    return cpu_cores if 0 <= cpu_cores <= MAX_CPU_CORES else DEFAULT_CPU_CORES
 
 
 def numeric_thread_count() -> int | None:

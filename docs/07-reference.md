@@ -28,6 +28,7 @@
 | `--realtime[=PRIO]` | 只限 Linux：engine process 的 thread 用 SCHED_RR、優先權 PRIO（1–49，只寫 `--realtime` 時是 15），decode workers 維持一般排程，不動 RT throttling。可用 CPU 少於 4 個時拒絕，除非加 `--force`。**預設關閉** |
 | `--force` | 允許在少於 4 個可用 CPU 的機器上用 `--realtime` |
 | `--native-backend {auto,python,native}` | Acquisition、header probe、Turbo kernel、TX encode 用 native 還是 Python 參考實作；預設 `auto`（有 build 就用 native，沒有就退回 Python 並警告一次）。設定 `OFDM_LINK_NATIVE` |
+| `--cpu-cores N` | App 的主 process 與 engine 子 process 各自可用的 NumPy／BLAS（與 OpenMP）thread 數，0–256；0 = 這個 process 可以跑的 CPU 數（看 affinity）。沒給時取 `acceleration.cpu_cores`，設定檔也沒有時是 1。Decode workers 固定各 1 個 thread。見 [7.10 節](#710-效能開關與-native-模組) |
 
 ### 只有發送端
 
@@ -49,7 +50,7 @@
 |---|---|
 | `--egress-host` / `--egress-port` | 轉發已交付訊息的目的地，預設 `127.0.0.1:52002` |
 | `--snr-db` | 只適用 `udp`，加上 AWGN。對真實 channel 無效，帶了會被拒絕 |
-| `--decode-workers` | Payload decode 的 process 數，預設 4；1 = 單 thread inline decoder |
+| `--decode-workers N` | Payload decode 的 process 數，1–64；1 = 單 thread inline decoder。沒給時取 `acceleration.decode_workers`，設定檔是 `null`（預設）時是 4 |
 | `--rx-recv-frames` | UHD `num_recv_frames`，預設每 5 MS/s 256 個（約 0.1 s）；0 = UHD 預設 |
 | `--stats-log PATH` | 每次統計刷新附加一行 JSON，見 [2.7 節](02-gui.md#27---stats-log把統計存成檔案) |
 | `--stats-log-max-mb MB` | `--stats-log` 的大小上限，預設 16 MiB，超過就輪替成 `PATH.1`；0 = 不設限 |
@@ -93,7 +94,7 @@
 | `phy` | Sample rate、center frequency、預設 MCS 與 FEC、synchronization 的門檻；`phy.v5`、`phy.rx` 見下 |
 | `mac.aggregation` | v5 TX 的 aggregation 上限，見下 |
 | `radio` | `adapter`（`uhd` 才能用 `--transport uhd`）、預設 gain 與 antenna、clock source |
-| `acceleration` | `cpu_cores`：限制 NumPy 的 thread 數 |
+| `acceleration` | `decode_workers`、`cpu_cores`：decode worker 數與 NumPy 的 thread 數，見下 |
 | `duplex` | 只有 `node_app` 讀（選用）：`mode`、`control_mcs_index`、`nodes`，見下 |
 
 `simulation` 區段是 PHY 測試用的 channel 模型參數。`node`、`network` 與 `mac` 的其他欄位是設定 schema
@@ -136,6 +137,23 @@
 | `mode` | 必填 | `fdd`：每個 node 有自己的 TX 頻率，兩個頻率至少相隔一個 sample rate。`lbt`（同一個頻率）只有設定 schema 與 `duplex.lbt` 的參數，`node_app` 沒有實作 listen-before-talk（M1 量到不需要） |
 | `control_mcs_index` | 8 | Control-only burst 的 MCS（8–17）；`--control-mcs-index` 會蓋過它 |
 | `nodes` | 必填 | 剛好兩個 `{node_id, tx_frequency, rx_frequency}`；id 不能相同，一個 node 的 `tx_frequency` 必須是另一個的 `rx_frequency`。Schema 接受 id 1–254，`node_app --node-id` 只接受 1 與 2 |
+
+`acceleration`（三支 app 都讀；命令列的同名選項會蓋過它）：
+
+| Key | 預設 | 範圍 | 說明 |
+|---|---|---|---|
+| `decode_workers` | `null` | `null` 或 1–64 | `rx_app` 與 `node_app` 的 payload decode process 數。`null`（或不寫）= 各 app 自己的預設：`rx_app` 4、`node_app` 3（兩個 node 常在同一台 PC）。1 = 不開 worker，inline decode。`--decode-workers` 優先。`tx_app` 不 decode，不讀它 |
+| `cpu_cores` | 1 | 0–256 | 每個 app 的主 process 與 engine 子 process 各自的 NumPy／BLAS（與 OpenMP）thread 上限；0 = 這個 process 可以跑的 CPU 數（看 affinity／cgroup）。`--cpu-cores` 優先。Decode workers 固定各 1 個 thread，平行度由 `decode_workers` 決定 |
+
+優先順序都是：命令列 > 設定檔（`default.yaml` 加上各個 overlay，後面的蓋過前面的）> app 內建預設。內建預設就是這兩個 key
+生效之前的行為（thread 1、`rx_app` 4 個 worker、`node_app` 3 個），所以沒設的人執行結果不變。輸出不會因這兩個值而改變，
+只影響 CPU 用量。超出範圍、不是整數（包含 `true`、`"4"`、2.5）會在啟動時被拒絕。例如在 overlay 裡寫：
+
+```yaml
+acceleration:
+  decode_workers: 6
+  cpu_cores: 2
+```
 
 `mac.aggregation`（只影響 TX；命令列的 aggregation 選項會蓋過它）：
 
@@ -477,7 +495,7 @@ process 默默分流。
 | `--feedback-reporter SPEC` / `--feedback-reporter-arg K=V` | RX 端量測與回報模組，預設 `default` |
 | `--mcs-index N` | 起始的 MCS（`fixed` 時是固定的 MCS），預設 8 |
 | `--control-mcs-index N` | Control-only burst 的 MCS，預設 profile 的值（8） |
-| `--decode-workers N` | 1–64，預設 3（兩個 node 在同一台 PC 時的 CPU 預算） |
+| `--decode-workers N` | 1–64；沒給時取 `acceleration.decode_workers`，`null`（預設）時是 3（兩個 node 在同一台 PC 時的 CPU 預算） |
 | `--stats-log PATH` | 每 0.5 s 一行 JSON：`tx`、`rx`、`la`、`feedback`、`cpu`、`device`；control socket 的 `mark` 與 gain profile 的每一步也寫入。`tx.health` 是 TX health（見 7.1 節的 `tx_health`）。`wall_time` 是 Unix 時間（秒），`monotonic_s` 是 monotonic 時間。`tx.goodput_bps`、`tx.airtime_frac` 是 2 秒視窗，`tx.goodput_avg_bps`、`tx.airtime_avg_frac` 是第一行以來的平均。`tx.bandwidth_hz`、`rx.bandwidth_hz` 是 UHD 讀回的類比濾波器頻寬（沒有讀回值時是 `null`）。`--stats-log-max-mb`／`--stats-log-backups` 與 2.7 節相同 |
 | `--la-log PATH` | 每個 LA decision 與 feedback report 一行 JSON |
 | `--events PATH` | 只有 `--headless`：逐 burst 的接收事件，一行一個 JSON（preamble SNR、雜訊變異數、clipping、header／payload／FCS 結果、裝置時間與主機時間），加上 gain、頻率、失鎖、overflow 與每 0.5 s 的計數器。**預設關閉**，關閉時接收端的程式路徑不變。格式見 [7.11 節](#711-逐-burst-的接收事件--events) |
@@ -488,7 +506,7 @@ process 默默分流。
 | `--enable-rf` / `--acknowledgement` | `--transport pluto` 與 `uhd` 必要，和 `tx_app` 相同 |
 | Aggregation | `--aggregation`、`--aggregation-max-subframes`、`--aggregation-max-wait-ms`、`--min-burst-interval-ms`、`--max-burst-airtime-ms`，與 `tx_app` 相同（7.1 節） |
 | 其他共用的選項 | `--config`、`--mcs`、`--frame-payload-bytes`、`--ui-fps`、`--log-lines`、`--geometry`，與 7.1 節相同 |
-| 效能開關 | `--cpu-affinity`、`--realtime[=PRIO]`、`--force`、`--native-backend`、`--overload-protection`，與 7.1 節相同（7.10 節）；全部預設關閉 |
+| 效能開關 | `--cpu-cores`、`--cpu-affinity`、`--realtime[=PRIO]`、`--force`、`--native-backend`、`--overload-protection`，與 7.1 節相同（7.10 節）；除了 `--cpu-cores`（預設取設定檔，再來是 1）全部預設關閉 |
 
 **TX analog filter 的預設值（`node_engine.default_uhd_tx_bandwidth`）。** LO 偏離載波 `lo` 時，取樣的頻帶離 LO 最遠是
 `|lo| + fs/2`，濾波器的半寬要蓋住它：頻寬 ≥ `2|lo| + fs`，再乘 1.1 的餘量（AD9361 濾波器的 roll-off），進位到整數 MHz，
@@ -554,6 +572,14 @@ Turbo BLER 差 ≤ 0.1 dB 且 iteration ±1、固定 seed 的端到端 delivered
 
 **接收端的其他改變（不需要開關）。** `ReceiveWorker` 會把 queue 裡已經在等的短 chunk 併成至少 8192 samples 再 feed，
 最多為此等 2 ms；`measure_quality` 改成每軸各自找最近點，16QAM soft demap 改成每軸分開算，輸出與原本相同。
+
+**NumPy thread 數與 decode workers（`acceleration`，預設不變）。** NumPy 內建的 BLAS 會依機器的核心數開 thread pool，
+而且在呼叫之間空轉；在 20 核心的機器上它吃掉 15.6 個核心、少了三分之一的 throughput。所以每個 app 的主 process 與
+engine 子 process 都會把已載入的 BLAS／OpenMP 函式庫限制在 `cpu_cores` 個 thread（`ofdm_link/runtime/cpu_budget.py`）：
+`--cpu-cores` > `acceleration.cpu_cores` > 1。主 process 把結果放在環境變數 `OFDM_LINK_CPU_CORES`，engine 啟動時讀它
+（這是內部傳遞用的，`main` 每次都會覆寫）。Decode workers 不管這個值，固定各 1 個 thread：平行度來自 worker 數，
+`--decode-workers` > `acceleration.decode_workers` > app 預設（`rx_app` 4、`node_app` 3）。兩個 key 的範圍見 7.2 節。
+Receive path 沒有大到能從多個 BLAS thread 得到好處的線性代數，所以 `cpu_cores` 調大通常不會更快；它是限制浪費的上限。
 
 **CPU 放置與排程（全部預設關閉）。**
 

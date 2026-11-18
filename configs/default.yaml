@@ -144,16 +144,20 @@ gui:
 acceleration:
   backend: native
   device: cpu
-  # Worker processes for the per-burst receive path. 1 keeps everything inline
-  # with no process and no IPC, N > 1 fixes the count, and 0 asks which CPUs
-  # this process may actually run on. The output never depends on this value.
-  decode_workers: 1
-  # How many CPU cores one endpoint may occupy. N > 0 is taken literally and 0
-  # asks which CPUs this process may actually run on. It caps every numeric
-  # library's thread pool: NumPy's BLAS otherwise sizes its pool from the
-  # machine and spins those threads between calls, which cost 15.6 of 20 cores
-  # and a third of the link's throughput on a 20-core host. The budget is a
-  # cap on waste, not a throughput dial -- one endpoint process is limited by
-  # one interpreter lock to roughly 1.2 cores until per-burst decode moves into
-  # worker processes. The output never depends on this value.
-  cpu_cores: 4
+  # Payload decode worker processes for rx_app and node_app; acquisition and
+  # headers stay on one receive owner.  null (or the key left out) keeps each
+  # app's own default: rx_app 4, node_app 3 (two nodes often share one PC).
+  # 1-64 sets the count for both; 1 decodes inline with no worker process.
+  # --decode-workers overrides it.  tx_app does not decode.  The output never
+  # depends on this value.
+  decode_workers: null
+  # NumPy/BLAS and OpenMP threads that each app's main process and its radio
+  # engine process may use (tx_app, rx_app, node_app).  0 asks which CPUs this
+  # process may actually run on; N > 0 is taken literally, up to 256.
+  # --cpu-cores overrides it.  Decode workers always use one thread each: their
+  # parallelism is decode_workers.  Unbounded, NumPy's BLAS sizes its pool from
+  # the machine and spins those threads between calls, which cost 15.6 of 20
+  # cores and a third of the link's throughput on a 20-core host; nothing in
+  # the link is large enough linear algebra to gain from more than one.  The
+  # output never depends on this value.
+  cpu_cores: 1

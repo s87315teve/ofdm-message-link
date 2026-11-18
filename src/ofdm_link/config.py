@@ -17,6 +17,8 @@ from typing import Any
 
 import yaml
 
+from .runtime.cpu_budget import MAX_CPU_CORES
+
 
 class ConfigError(ValueError):
     """Raised when a configuration file violates the project schema."""
@@ -208,12 +210,17 @@ class GuiConfig:
     enabled: bool
 
 
+# The same bound as the apps' --decode-workers flag.
+MAX_DECODE_WORKERS = 64
+
+
 @dataclass(frozen=True)
 class AccelerationConfig:
     backend: str
     device: str
-    decode_workers: int
-    cpu_cores: int
+    # ``None`` (the key left out or null) means the app's built-in default.
+    decode_workers: int | None = None
+    cpu_cores: int | None = None
 
 
 @dataclass(frozen=True)
@@ -559,7 +566,8 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
     acceleration_raw = _section(
         root,
         "acceleration",
-        {"backend", "device", "decode_workers", "cpu_cores"},
+        {"backend", "device"},
+        optional={"decode_workers", "cpu_cores"},
     )
     acceleration_device = _string(acceleration_raw, "device", "acceleration").lower()
     if not re.fullmatch(r"cpu|cuda(?::(?:0|[1-9][0-9]*))?", acceleration_device):
@@ -569,19 +577,11 @@ def validate_config(raw: Mapping[str, Any]) -> LinkConfig:
     acceleration = AccelerationConfig(
         backend=_choice(acceleration_raw, "backend", "acceleration", {"native", "sionna"}),
         device=acceleration_device,
-        decode_workers=_bounded_int(
-            acceleration_raw,
-            "decode_workers",
-            "acceleration",
-            0,
-            256,
+        decode_workers=_optional_bounded_int(
+            acceleration_raw, "decode_workers", "acceleration", 1, MAX_DECODE_WORKERS
         ),
-        cpu_cores=_bounded_int(
-            acceleration_raw,
-            "cpu_cores",
-            "acceleration",
-            0,
-            256,
+        cpu_cores=_optional_bounded_int(
+            acceleration_raw, "cpu_cores", "acceleration", 0, MAX_CPU_CORES
         ),
     )
     if acceleration.backend == "native" and acceleration.device != "cpu":
@@ -788,6 +788,16 @@ def _bounded_int(
     if not minimum <= result <= maximum:
         raise ConfigError(f"{location}.{key} must be between {minimum} and {maximum}")
     return result
+
+
+def _optional_bounded_int(
+    value: Mapping[str, Any], key: str, location: str, minimum: int, maximum: int
+) -> int | None:
+    """A bounded integer, or ``None`` when the key is absent or null."""
+
+    if value.get(key) is None:
+        return None
+    return _bounded_int(value, key, location, minimum, maximum)
 
 
 def _number(value: Mapping[str, Any], key: str, location: str) -> float:
