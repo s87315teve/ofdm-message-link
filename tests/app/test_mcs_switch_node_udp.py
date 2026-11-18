@@ -24,6 +24,7 @@ import socket
 import threading
 import time
 
+import pytest
 from mcs_switch_helpers import every_transition, free_udp_ports, required_transitions, transitions
 
 from ofdm_link.phy.mcs_table import mcs_entry, v5_entries
@@ -110,7 +111,10 @@ def _payload(number: int, size: int) -> bytes:
     return head + bytes((number * 7 + i) & 0xFF for i in range(size))
 
 
-def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path):
+# Node 2 decodes inline (1) or on a decode pool (2), whose results come back
+# out of step with the feeds that carried them.
+@pytest.mark.parametrize("decode_workers", [1, 2])
+def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path, decode_workers):
     config = load_link_config("configs/default.yaml", [node_options.DEFAULT_NODE_OVERLAY])
     profile = build_phy_profile(config)
     ingress1, egress1, samples1, ingress2, egress2, samples2 = free_udp_ports(6)
@@ -150,7 +154,7 @@ def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path):
                 la_log_path=str(la_log) if node_id == 1 else None,
             )
             workers[node_id] = ProcessNodeWorker(
-                profile, spec, listeners[node_id], decode_workers=1
+                profile, spec, listeners[node_id], decode_workers=decode_workers
             )
             workers[node_id].start()
         for node_id, (_, _, listen, peer) in plan.items():

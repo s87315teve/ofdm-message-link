@@ -178,7 +178,12 @@ class ReceiveWorker:
             source.stop()
 
     def _run(self) -> None:
+        # An engine child's bridge batches its events (engine._EventSink):
+        # send them once per iteration.  The flush at the top of the loop
+        # ends the previous iteration, whichever ``continue`` ended it.
+        flush = getattr(self._bridge, "flush_events", None) or (lambda: None)
         while not self._stop.is_set():
+            flush()
             source = self.source
             if source is None:
                 self._attached.wait(0.1)
@@ -232,6 +237,7 @@ class ReceiveWorker:
                     self._notify_observer(source, chunk, snrs)
                 except Exception as error:  # surfaced in the window, never silent
                     self._bridge.failed.emit(f"observer {type(error).__name__}: {error}")
+        flush()
 
     def _next_chunk(self, source):
         """One transport chunk, merged with the ones queued behind it up to a minimum size.

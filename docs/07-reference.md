@@ -689,6 +689,40 @@ payload 失敗（`unclassified_decode_failures`，和 inline decoder 解不出�
 送不回來（例如不能 pickle）時，那個 task 的每個 segment 都這樣算。worker 死掉（`BrokenExecutor`）或 pool 不再接受工作時，pool 關閉並丟出
 `DecodePoolError`。以前一個這樣的例外會一直卡在 pool 的最前面，之後每次 feed 都重丟一次，後面的 burst 全部遺失。
 
+**Engine 子 process 交給母 process 的事件分批送（不需要開關）。** 視窗與 `node_app` 要的事件（`message`、`symbols`、
+`link_snr`、`sent`、`la`、`feedback`、`bursts`、`stats`、`gain`、`mark`、`failed`……）以前每個事件 put 一次
+multiprocessing queue；每次 put 都要叫醒 queue 的 feeder thread，在 GIL 下 pickle 再寫 pipe。Jetson 上 profiling 量到這個
+feeder thread 佔 engine GIL 時間的 18.5 %（約每秒 280 個小事件，每個約 0.4 ms）。現在子 process 的每個 thread（接收、發送、
+LA controller、主迴圈的 stats tick 與 gain／mark／failed、detach 時 `--events` 的最後一批）都放進同一個有鎖的 buffer，照放入
+的順序；在下面幾個時間點把整個 buffer 當成 queue 的一個 item 送出：每個工作單位結束時（一次 receive iteration，包括中途
+`continue` 的；一個 TX burst 或一次 idle 等待；一個 control 命令；一次 stats tick）、buffer 到 64 個事件時、每一個回覆母
+process 的 reply 之前（attach、detach、`gain_sync`）、`_serve` 迴圈的每一輪（最多約 50 ms 一次），以及停止時。母 process 的
+pump 拆開每一批，照原來的順序一個一個交出去，所以跨 thread 的順序也不變。
+
+不變的：UDP egress 照舊由接收 thread 在解出 datagram 時依序直接送出，不經過這個 queue；link adaptation 在子 process 裡，
+不受影響。Queue 的上限仍是 4096 個**事件**（不是批）；放不下的那一批整批丟掉，`dropped_display_events`（以及 `--events`
+`status` 行的 `dropped_events`）計的是丟掉的事件數，和以前的意思相同。
+
+會變的：母 process 收到事件的時間最多晚一次 flush 的間隔。接收 thread 的事件晚到這次 iteration 結束（通常就是這次 feed
+剩下的處理時間）；發送 thread 的晚到這個 burst 送出；沒有自己 flush 的 thread（從其他 thread 呼叫的 controller 等）最多晚約
+50 ms 加一次 stats tick；主 thread 被一個很久的 attach 卡住時，其他 thread 的事件仍各自送出。母 process 用「收到的時間」記錄的
+值會跟著晚這麼多：`node_app` 的 RX SNR 曲線（`link_snr`）、LA 歷史（`stats` 收到的時間），以及 `--events` 檔裡由母 process
+記時間的列（`failed`、`gap`、`lock`、`rx_time`、`overflow` 的 `mono`／`wall`）。`burst` 列的 `mono`／`wall`、`gain` 與 `mark`
+的 `mono` 是子 process 記的，不受影響。
+
+PC 上的 micro-benchmark（`tools/bench_event_batching.py`，子 process 每次 iteration 送幾個接收端的事件，量子 process 的 CPU
+時間，含 feeder thread，減去只建事件不送的 baseline；每秒 280 個事件、10 s、各 3 次的中位數，2026-11-19）：
+
+| 每次 iteration 的事件數 | 每個事件 put 一次（以前） | 每次 iteration 一批（現在） |
+|---|---|---|
+| 1 | 121 µs | 123 µs |
+| 4 | 95 µs | 74 µs |
+| 16 | 48 µs | 27 µs |
+
+成本大部分是每次叫醒 feeder thread 的固定成本，所以省多少看每批有幾個事件；一個 iteration 只有一個事件時沒有差別。
+PC 上模擬 CPU-bound 的 receive owner（每次 iteration 10 ms 純 Python 運算、4 個事件、每個 message 後一次 UDP `sendto`）時，
+兩種做法 owner 完成的工作量都和不送事件時差不到 1 %，看不出差別；Jetson 上 GIL 時間實際省多少還沒有量。
+
 **CPU 放置與排程（全部預設關閉）。**
 
 - `--cpu-affinity CPUS` 在 `main` 一開始就套用，engine、forkserver、decode workers 都繼承。不寫死任何核心編號。

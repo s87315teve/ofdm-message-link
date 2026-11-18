@@ -379,7 +379,13 @@ class TransmitWorker:
     def _run(self) -> None:
         pending: deque[_Pending] = deque()
         unsent: _Encoded | None = None
+        # An engine child's bridge batches its events (engine._EventSink):
+        # send them once per iteration (one burst, or one idle wait).  The
+        # flush at the top ends the previous iteration, whichever
+        # ``continue`` ended it.
+        flush = getattr(self._bridge, "flush_events", None) or (lambda: None)
         while not self._stop.is_set():
+            flush()
             sink = self.sink
             if sink is None:
                 # Hold the queue rather than draining it into nothing.  Time
@@ -441,6 +447,7 @@ class TransmitWorker:
                 self._stop.wait(_ERROR_BACKOFF_S)
             unsent = None
             self._held_messages = sum(piece.is_last for piece in pending)
+        flush()
 
     def _send_failed(
         self, sink, unsent: _Encoded, error: Exception, attempted_at: float

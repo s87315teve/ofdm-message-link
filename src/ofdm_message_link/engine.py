@@ -14,6 +14,18 @@ child too, so application datagrams never wait for the GUI event loop.  What
 the window needs flows back over one bounded queue; display events are dropped
 when it is full rather than ever stalling the radio path, and the drops are
 counted.
+
+Events cross in batches.  Every queue put costs the child a wake-up of the
+queue's feeder thread, which pickles and writes under the GIL the receive
+owner needs: on a Jetson at about 280 small events/s that was 18.5 % of the
+engine's GIL time.  So :class:`_EventSink` keeps one buffer, in put order,
+for every thread of the child, and sends it as one item when a producer ends
+its unit of work (a receive iteration, a transmit burst, a control command or
+stats tick), when it reaches ``_MAX_BATCH`` events, before every reply to the
+parent, and at least every ``_serve`` loop pass (50 ms).  The queue is bounded
+in events, not batches (``_EVENT_DEPTH``), and a batch that does not fit is
+dropped and counted as its events.  The parent's pump hands the events on one
+by one, in order, so a parent-side timestamp is at most one flush later.
 """
 
 from __future__ import annotations
@@ -36,7 +48,10 @@ from ofdm_link.runtime.segment_decode_pool import _safe_context
 
 from .transport import ReceiveFeed, TransportError
 
+# Events (not batches) the engine->parent queue may hold.
 _EVENT_DEPTH = 4096
+# Events per queue item at most; a fuller buffer is sent at once.
+_MAX_BATCH = 64
 _CONTROL_DEPTH = 1024
 _STATS_INTERVAL_S = 0.25
 _ATTACH_TIMEOUT_S = 60.0
@@ -59,13 +74,69 @@ class _Signal:
         self._sink.put(self._kind, value)
 
 
-class _EventSink:
-    """Child-side stand-in for the Qt bridge and the plot buffers."""
+class _EventQueue:
+    """The engine->parent channel: batches of ``(kind, value)``, bounded in events.
 
-    def __init__(self, events: Any, *, samples_per_second: float) -> None:
+    Built by the parent and handed to the child at start.  ``outstanding``
+    counts events put and not yet taken by the parent, so the bound is on
+    events however they are batched.  The queue's own item bound is the same
+    number, which a batch of at least one event never reaches first.
+    """
+
+    def __init__(self, context, depth: int = _EVENT_DEPTH) -> None:
+        self._queue = context.Queue(maxsize=depth)
+        self._outstanding = context.Value("q", 0)
+        self._depth = depth
+
+    def put_batch(self, batch: list) -> bool:
+        """Child side: queue the whole batch, or nothing (False) if it does not fit."""
+
+        count = len(batch)
+        with self._outstanding.get_lock():
+            if self._outstanding.value + count > self._depth:
+                return False
+            self._outstanding.value += count
+        try:
+            self._queue.put_nowait(batch)
+        except queue.Full:
+            with self._outstanding.get_lock():
+                self._outstanding.value -= count
+            return False
+        return True
+
+    def get(self, timeout: float) -> list:
+        """Parent side: the next batch, oldest first; ``queue.Empty`` on timeout."""
+
+        batch = self._queue.get(timeout=timeout)
+        with self._outstanding.get_lock():
+            self._outstanding.value -= len(batch)
+        return batch
+
+    def close(self) -> None:
+        self._queue.close()
+
+    def join_thread(self) -> None:
+        self._queue.join_thread()
+
+
+class _EventSink:
+    """Child-side stand-in for the Qt bridge and the plot buffers.
+
+    Every thread of the child puts here; one lock keeps a single buffer in
+    put order, and :meth:`flush_events` sends it as one queue item.  Producers
+    call it at the end of each unit of work, and ``_serve`` at least every
+    loop pass, so nothing waits longer than that (see the module docstring).
+    """
+
+    def __init__(self, events: Any, *, samples_per_second: float,
+                 max_batch: int = _MAX_BATCH) -> None:
         self._events = events
         self._samples_interval = 1.0 / samples_per_second
         self._last_samples = 0.0
+        self._lock = threading.Lock()
+        self._buffer: list[tuple[str, object]] = []
+        self._max_batch = max_batch
+        # Events (not batches) dropped because the parent fell behind.
         self.dropped = 0
         self.message = _Signal(self, "message")
         self.sent = _Signal(self, "sent")
@@ -74,10 +145,27 @@ class _EventSink:
         self.link_snr = _Signal(self, "link_snr")
 
     def put(self, kind: str, value: object) -> None:
-        try:
-            self._events.put_nowait((kind, value))
-        except queue.Full:
-            self.dropped += 1
+        with self._lock:
+            self._buffer.append((kind, value))
+            if len(self._buffer) >= self._max_batch:
+                self._send_locked()
+
+    def flush_events(self) -> None:
+        """Send what is buffered now, as one batch (nothing if empty)."""
+
+        # Unlocked fast path: a put racing past it is sent by its own
+        # producer's flush, which always follows its put.
+        if not self._buffer:
+            return
+        with self._lock:
+            if self._buffer:
+                self._send_locked()
+
+    def _send_locked(self) -> None:
+        # Under the lock, so batches leave in the order their events came.
+        batch, self._buffer = self._buffer, []
+        if not self._events.put_batch(batch):
+            self.dropped += len(batch)
 
     # PlotBuffers surface -------------------------------------------------
 
@@ -100,7 +188,7 @@ class _EngineProcess:
 
     def __init__(self, target: Callable[..., None], arguments: tuple, dispatch) -> None:
         context = _safe_context()
-        self._events = context.Queue(maxsize=_EVENT_DEPTH)
+        self._events = _EventQueue(context, _EVENT_DEPTH)
         self._control = context.Queue(maxsize=_CONTROL_DEPTH)
         self._replies = context.Queue()
         self._process = context.Process(
@@ -132,7 +220,7 @@ class _EngineProcess:
     def _run_pump(self) -> None:
         while not self._stopping.is_set():
             try:
-                kind, value = self._events.get(timeout=0.1)
+                batch = self._events.get(timeout=0.1)
             except queue.Empty:
                 if not self._process.is_alive():
                     self._dispatch("failed", "radio engine process exited")
@@ -140,7 +228,9 @@ class _EngineProcess:
                 continue
             except (EOFError, OSError):
                 return
-            self._dispatch(kind, value)
+            # One queue item is a batch; its events go on in their order.
+            for kind, value in batch:
+                self._dispatch(kind, value)
 
     def post(self, command: tuple) -> bool:
         try:
@@ -285,8 +375,14 @@ def _serve(
     handle: Callable[[tuple], None] = lambda command: None,
     *,
     switch_interval_s: float,
+    flush: Callable[[], None] = lambda: None,
 ) -> None:
-    """Child main loop shared by both directions."""
+    """Child main loop shared by both directions.
+
+    ``flush`` sends the batched events (``_EventSink.flush_events``): before
+    every reply, so the parent has what came before it, and after every pass,
+    which is at most the 50 ms control poll plus a tick apart.
+    """
 
     # The parent owns Ctrl-C and closes the window, which stops this process.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -314,12 +410,15 @@ def _serve(
                     endpoint = command[1]()
                     worker.attach(endpoint)
                 except BaseException as error:  # reported, never silent
+                    flush()
                     replies.put(("error", f"{type(error).__name__}: {error}"))
                 else:
                     realtime.refresh()
+                    flush()
                     replies.put(("ok", getattr(endpoint, "description", "")))
             elif kind == "detach":
                 worker.detach()
+                flush()
                 replies.put(("ok", ""))
             else:
                 handle(command)
@@ -327,6 +426,8 @@ def _serve(
         if now >= next_tick:
             next_tick = now + _STATS_INTERVAL_S
             tick()
+        flush()
+    flush()
     lag.stop()
 
 
@@ -380,10 +481,12 @@ def _rx_main(
         # The receive owner is CPU-bound; a short switch interval makes the
         # sink block, queue feeder and pool threads preempt it constantly
         # (OTA: 37,518 vs 111 queue back-pressure events at 240 burst/s).
-        _serve(worker, control, replies, tick, handle, switch_interval_s=0.005)
+        _serve(worker, control, replies, tick, handle, switch_interval_s=0.005,
+               flush=sink.flush_events)
     finally:
         worker.stop()
         egress.close()
+        sink.flush_events()
 
 
 class ProcessReceiveWorker:
@@ -553,10 +656,12 @@ def _tx_main(
     try:
         # The transmit source block must get the GIL promptly while a burst
         # is on air, and nothing here is CPU-bound for long.
-        _serve(worker, control, replies, tick, handle, switch_interval_s=0.0005)
+        _serve(worker, control, replies, tick, handle, switch_interval_s=0.0005,
+               flush=sink.flush_events)
     finally:
         ingress.stop()
         worker.stop()
+        sink.flush_events()
 
 
 class ProcessTransmitWorker:

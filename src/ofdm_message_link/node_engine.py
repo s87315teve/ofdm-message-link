@@ -475,6 +475,7 @@ class _TxBridge:
     def __init__(self, sink: _EventSink, counters: TxCounters, lock: threading.Lock) -> None:
         self.sent = _CountingSent(sink, counters, lock)
         self.failed = sink.failed
+        self.flush_events = sink.flush_events
 
 
 class NodeWorker:
@@ -656,9 +657,14 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
                 apply_gain(command[1], float(command[2]))
             elif kind == "gain_sync":
                 try:
-                    replies.put(("ok", apply_gain(command[1], float(command[2]))))
+                    readback = apply_gain(command[1], float(command[2]))
                 except Exception as error:
+                    sink.flush_events()
                     replies.put(("error", f"{type(error).__name__}: {error}"))
+                else:
+                    # The gain event goes before the reply that answers it.
+                    sink.flush_events()
+                    replies.put(("ok", readback))
             elif kind == "mcs":
                 controller.set_fixed(command[1])
             elif kind == "la":
@@ -723,11 +729,14 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
     try:
         # _serve applies an opt-in --realtime request (ofdm_link.runtime.realtime)
         # to every thread started above, and to the radio's after each attach.
-        _serve(worker, control, replies, tick, handle, switch_interval_s=SWITCH_INTERVAL_S)
+        _serve(worker, control, replies, tick, handle, switch_interval_s=SWITCH_INTERVAL_S,
+               flush=sink.flush_events)
     finally:
         worker.detach()
         ingress.stop()
         worker.stop()
+        # The last records (after_detach) and the threads' last events.
+        sink.flush_events()
         if la_log is not None:
             la_log.close()
 
