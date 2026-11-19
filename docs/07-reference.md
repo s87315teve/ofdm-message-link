@@ -40,7 +40,7 @@
 | `--aggregation {on,off}` | `on`：radio 可以接下一個 burst 時，把 queue 裡的 datagram 放進同一個 burst（在下面的上限內）。`off`：一個 burst 一個 datagram，供 A/B 量測。預設取 `mac.aggregation.enabled`（`on`） |
 | `--aggregation-max-subframes N` | 一個 burst 最多幾個 datagram，1–64，預設取設定檔（32） |
 | `--aggregation-max-wait-ms MS` | 還有空間的 burst 最多等 MS 毫秒（從最早的 message 到達算起），讓更多 datagram 一起走。0–1000，預設 0：不等，負載低時不增加延遲 |
-| `--min-burst-interval-ms MS` | 兩個 burst 開始交給 radio 的時間至少隔多久（start 到 start：比間隔長的 burst 後面不會多等），0–50，預設取設定檔（4 ms，最多每秒 250 個 burst）；等的時候繼續收 datagram，讓下一個 burst 帶比較多。閒置之後的第一個 burst 不多等，滿的 burst 不會被留。0 關閉。實際等待是它與 `--aggregation-max-wait-ms` 較大的那個 |
+| `--min-burst-interval-ms MS` | 兩個 burst 開始交給 radio 的時間至少隔多久（start 到 start：比間隔長的 burst 後面不會多等），0–50，預設取設定檔（4 ms，最多每秒 250 個 burst）；等的時候繼續收 datagram，讓下一個 burst 帶比較多。閒置之後的第一個 burst 不多等，滿的 burst 不會被留。0 關閉。實際等待是它與 `--aggregation-max-wait-ms` 較大的那個。PC 送往 Jetson 時用 25（[`tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml)，7.10 節） |
 | `--max-burst-airtime-ms MS` | 聚合後的 burst 最長多久（含 guard），大於 0、最大 100，預設取設定檔（8 ms）。不論設多少，聚合也會在 80 000 samples 停止；超過上限的單一 datagram 仍然單獨送出 |
 | `--enable-rf` / `--acknowledgement` | RF 發射授權，`--transport uhd` 與 `--transport pluto` 必要。Acknowledgement 的文字是 `I acknowledge that this process will transmit RF`，必須一字不差 |
 
@@ -91,6 +91,7 @@
 | [`legacy_rx.yaml`](../configs/profiles/legacy_rx.yaml) | **附加用**：把 `phy.rx.legacy_acquisition` 打開，也收 v1.0／`improve-rx` 的 TX 送的舊格式 burst（v2.0 起預設不收） |
 | [`b210_measurement.yaml`](../configs/profiles/b210_measurement.yaml) | **附加用**，接在上面任一個 profile 後面：把 `phy.rx.legacy_acquisition` 關掉。v2.0 起預設本來就是關，它只在底下的設定把它打開時才有作用（`run_duplex.sh --transport uhd` 仍會自動加） |
 | [`jetson_rx_feed.yaml`](../configs/profiles/jetson_rx_feed.yaml) | **附加用**，接在 profile 後面，只用在 Jetson 的接收端（`rx_app`／`node_app`）：`acceleration.rx_min_feed_samples` 65536、`rx_max_merge_wait_ms` 15。量測與適用範圍見 7.10 節 |
+| [`tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml) | **附加用**，接在 profile 後面，只用在送往 Jetson 的 PC 發送端（`tx_app`，或雙向時 PC 的 `node_app`）：`mac.aggregation.min_burst_interval_ms` 25。量測與適用範圍見 7.10 節 |
 
 這個專案實際讀取的區段：
 
@@ -175,7 +176,7 @@ acceleration:
 |---|---|---|
 | `enabled` | `true` | `false`：一個 burst 一個 datagram |
 | `max_wait_ms` | 0.0 | 還有空間的 burst 最多等多久 |
-| `min_burst_interval_ms` | 4.0 | 兩個 burst 的開始時間至少隔多久（start 到 start，0–50，0 關閉）。短 datagram 時避免每個 datagram 一個 burst：Pluto 推送一次要 0.413 ms + 0.194 µs/sample，RX 每個 burst 也有成本。`AggregationLimits` 本身的預設是 0，直接呼叫的程式碼行為不變 |
+| `min_burst_interval_ms` | 4.0 | 兩個 burst 的開始時間至少隔多久（start 到 start，0–50，0 關閉）。短 datagram 時避免每個 datagram 一個 burst：Pluto 推送一次要 0.413 ms + 0.194 µs/sample，RX 每個 burst 也有成本。`AggregationLimits` 本身的預設是 0，直接呼叫的程式碼行為不變。PC 送往 Jetson 時用 25（[`tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml)） |
 | `max_subframes` | 32（v2.0 起；之前 16） | 一個 burst 最多幾個 datagram |
 | `max_psdu_bytes` | 16384（v2.0 起；之前 8192） | 一個 burst 的 PSDU 最多幾個 byte；不能超過 `phy.rx.max_psdu_bytes`（16384），否則設定檔會被拒絕。B210 的最大吞吐測試（2026-11-11）在 10 MS/s MCS 17 用 16384／32 撐住 24.0 Mb/s，8192 時是 20.7 Mb/s |
 | `max_burst_airtime_ms` | 8.0 | 聚合後的 burst 最長多久。換算成 sample 不能超過 80 000（5 MS/s 是 16 ms、10 MS/s 是 8 ms、15.36 MS/s 是 5.21 ms、20 MS/s 是 4 ms），否則設定檔會被拒絕 |
@@ -644,6 +645,36 @@ PC→Jetson 延遲中位數變短（239 → 148 ms）。200/s 時 transport 收�
 稍微變長（108 → 113 ms）。改善前（`df098bd`，UHD 還沒在 GNU Radio 裡分組）同樣的 8192／2 ms 在 200/s 兩次都是 0 %、雙向
 50/25 是 3.7 %（一次）；也就是加了分組之後，預設值在 Jetson 上變差（200/s 0 → 0.25–0.29 %、雙向 50/25 3.7 → 9.2 %，次數少），這也是 Jetson 要另外加上面 overlay 的原因
 之一。PC 不用加。
+
+**PC 送往 Jetson 時的 burst 間隔（`--min-burst-interval-ms`，預設不變）。** Jetson 每收一個 burst 都有固定成本，所以送往
+Jetson 的那一端可以把 burst 變少、變滿：[`configs/profiles/jetson_rx_feed.yaml`](../configs/profiles/jetson_rx_feed.yaml)
+是 Jetson 接收端的設定，[`configs/profiles/tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml) 是對面 PC 發送端的設定，
+只把 `mac.aggregation.min_burst_interval_ms` 從 4 改成 25：一個 burst 開始之後 25 ms 內不送下一個，等的時候繼續裝
+datagram。`max_wait_ms` 維持預設的 0。只用在發送端（單向的 `tx_app`，或雙向時 PC 的 `node_app`），一樣接在 profile 後面
+（例如 `--overlay configs/profiles/duplex_fdd_2420_2460.yaml --overlay configs/profiles/tx_to_jetson.yaml`）；接收端不讀
+`mac.aggregation`，兩台 PC 之間不用加。實際的週期是 25 ms 加上一次編碼的時間（PC 上約 2–3 ms），所以 PC 每秒最多約 36
+個 burst（burst 一個接一個時）。
+
+量測（2026-11-19，`efd3a76`）：條件同上一段，Jetson 用 65536／15 ms、4 個 decode worker、`--realtime`，每點 60 秒、每組
+3 次（20/s 2 次），單向 PC→Jetson 2460 MHz，雙向 Jetson TX 2420／PC TX 2460 MHz。對照組是量測 harness 原本的 PC TX 設定，
+**不是**程式預設：單向 `max_wait_ms` 20、interval 4 ms（`max_burst_airtime_ms` 16）；雙向兩個 node 都是 interval 20 ms。
+量測時只有 PC 這一端換成 25 ms，Jetson 的 node 仍是 20 ms（只用 repo 的 `duplex_fdd_2420_2460.yaml` 時 Jetson 的 node
+是程式預設的 4 ms，這個組合沒有量過）。程式預設（wait 0、interval 4 ms）這次也沒有量。平均值：
+
+| 情境 | 對照組 | `tx_to_jetson.yaml` |
+|---|---|---|
+| 單向 20/s，遺失／延遲中位數 | 0 %／127 ms | 0 %／106 ms |
+| 單向 200/s，遺失／延遲中位數 | 0 %／188 ms | 0 %／196 ms |
+| 單向 300/s，遺失／延遲中位數 | 7.9 %／649 ms | 2.6 %／692 ms |
+| 雙向 50/25（Jetson→PC／PC→Jetson），PC→Jetson 遺失 | 0.13 % | 0 % |
+| 雙向 100/50，PC→Jetson 遺失／延遲中位數 | 15.5 %／290 ms | 5.2 %／236 ms |
+
+Jetson→PC 兩組都最多 0.03 %。300/s 時 Jetson 的 RX overflow 約 44 → 15 次、雙向 100/50 約 430 → 133 次。代價是有負載時的
+延遲：單向 200/s 中位數多 8 ms、300/s 多 43 ms（雙向 100/50 反而少）。20/s 少的 20 ms 來自 `max_wait_ms` 0（datagram 間隔
+50 ms 比 25 ms 長，interval 不起作用），程式預設本來就不等。飽和點沒有消失，300/s 仍會掉。同一天稍早在舊的 SDR 擺放
+（`035d400`）量到同樣的方向：單向 300/s 10.7 % → 6.2 %（各 5 次）、雙向 100/50 19.9 % → 9.9 %、20/s 中位數少 20 ms、
+300/s 中位數多 52 ms。只量了固定 MCS 12。Jetson 自己發送時也用 25 ms 是否有幫助還不確定（舊擺放，各 3 次，範圍重疊），
+所以這個檔不給 Jetson 用。原始資料在作者本機的 `runs/jetson_b210_20261118/newsetup_20261119/` 與 `item7/`。
 
 **UHD 接收端在 GNU Radio 裡先分組（ingest batching，跟著上面的 feed 設定，不需要另外的開關）。** 沒有分組時，UHD 每送來
 一批 samples，GNU Radio 就呼叫一次 Python 的 RX sink block：B210 在 5 MS/s 約每秒 843 次、每次約 5.9k samples，每次都要拿

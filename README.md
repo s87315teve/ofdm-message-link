@@ -243,6 +243,14 @@ Python sink 每秒被呼叫的次數從約 843 次降到約 76 次。分組時�
 時會比 feed 設定小）；sink 到 decoder 之間的 queue 最多放 100 ms 的 samples。所以
 `chunks_received` 與 `queue_full_backpressure_events` 的數字尺度和之前版本不同（7.10 節）。
 
+送往 Jetson 的 PC 發送端（`tx_app`，或雙向時 PC 的 `node_app`）可以再加
+`--overlay configs/profiles/tx_to_jetson.yaml`（一樣接在 profile 後面）：只把 `mac.aggregation.min_burst_interval_ms`
+從預設的 4 ms 改成 25 ms，burst 變少、每個裝比較多，Jetson 每個 burst 的固定成本付得比較少。程式預設不變，兩台 PC 之間
+不用加。Xavier NX + B210、5 MS/s、MCS 12，跟量測 harness 原本的 PC TX 設定（單向 wait 20 ms、雙向 interval 20 ms）比，
+各 3 次：PC→Jetson 遺失單向 300/s 7.9 % → 2.6 %、雙向 100/50 15.5 % → 5.2 %、雙向 50/25 0.13 % → 0 %，單向 200/s 兩者都是
+0 %；換掉 wait 20 讓 20/s 的延遲中位數少約 20 ms。代價是有負載時延遲變長：單向 300/s 中位數多 43 ms、200/s 多 8 ms。
+舊的 SDR 擺放上量到同樣的方向（[7.10 節](docs/07-reference.md#710-效能開關與-native-模組)）。
+
 **v2.0 的預設值：** aggregation 最多 32 個 subframe、PSDU 最多 16384 byte；RX 只找 wire v5（legacy acquisition 關）。
 要收 v1.0 的 TX，RX 加 `--overlay configs/profiles/ota_2p45ghz.yaml --overlay configs/profiles/legacy_rx.yaml`。細節見
 [7.10 節](docs/07-reference.md#710-效能開關與-native-模組)。

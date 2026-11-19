@@ -1,0 +1,33 @@
+# Add-on overlay for a PC transmitting to a Jetson receiver: fewer, fuller
+# bursts.  It holds each burst until 25 ms after the previous one started
+# (program default 4 ms) and fills it meanwhile, so the Jetson pays its
+# per-burst receive cost less often.  Use it on the transmitting PC only: its
+# tx_app, or its node_app in a duplex link.  mac.aggregation is read only by
+# the transmitter, so on the Jetson it does nothing (the Jetson takes
+# jetson_rx_feed.yaml).  Like that file it is not a profile on its own: list
+# the profile explicitly and pass this one AFTER it, e.g.
+#   tx_app   --transport uhd --overlay configs/profiles/ota_2p45ghz.yaml \
+#            --overlay configs/profiles/tx_to_jetson.yaml ...
+#   node_app --transport uhd --overlay configs/profiles/duplex_fdd_2420_2460.yaml \
+#            --overlay configs/profiles/tx_to_jetson.yaml ...
+# --min-burst-interval-ms still overrides it.  max_wait_ms stays at the program
+# default 0, as measured.  Between two PCs leave it out.
+#
+# Measured 2026-11-19 (code efd3a76), Jetson Xavier NX + B210 receiving with
+# jetson_rx_feed.yaml settings, 4 decode workers and --realtime, from PC + NI
+# USRP-2901 over the air, 5 MS/s, MCS 12, 60 s a point, 3 runs per variant
+# (2 at 20/s), against the harness's earlier PC TX settings, not the program
+# default: one-way max_wait_ms 20 with interval 4 ms (max_burst_airtime_ms
+# 16), duplex interval 20 ms on both nodes (the Jetson node kept 20 ms).
+# PC -> Jetson loss, earlier settings -> this file:
+#   one-way 300/s: 7.9 % -> 2.6 %;  200/s and 20/s: 0 % both;
+#   duplex 100/50 (Jetson -> PC / PC -> Jetson): 15.5 % -> 5.2 %;
+#   duplex 50/25: 0.13 % -> 0 %;  Jetson -> PC at most 0.03 % either way.
+# Latency (p50): one-way 20/s 127 -> 106 ms (that gain comes from max_wait 0,
+# not from the interval); cost at load: 200/s +8 ms, 300/s +43 ms.  An
+# earlier run with the SDRs placed differently (code 035d400) agreed: 300/s
+# 10.7 % -> 6.2 %, duplex 100/50 19.9 % -> 9.9 %, 300/s p50 +52 ms.
+# See docs/07-reference.md section 7.10.
+mac:
+  aggregation:
+    min_burst_interval_ms: 25.0
