@@ -23,6 +23,7 @@ the clause's ``G' / C`` rule using the payload modulation order and one layer.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -95,12 +96,23 @@ def subblock_interleaver_pattern(stream_length: int, stream: int) -> NDArray[np.
     5.1.4.1.1); stream 2 uses ``pi(k) = (P[k // R_sb] + 32 (k mod R_sb) + 1)
     mod K_Pi``, which offsets the second parity by one position so the two
     parity streams do not puncture the same trellis steps.
+
+    The result is cached and read-only: it depends only on the arguments.
     """
 
     if type(stream_length) is not int or stream_length <= 0:
         raise RateMatchError("stream_length must be a positive integer")
     if stream not in (0, 1, 2):
         raise RateMatchError("stream must be 0, 1, or 2")
+    return _subblock_interleaver_pattern(stream_length, stream)
+
+
+# Keyed on (D, stream).  One entry is at most 6176 int64 (~49 KB, K = 6144), so
+# 96 entries (32 block sizes x 3 streams) stay under ~5 MB; a plan uses at most
+# two block sizes.  The validating wrapper stays outside the cache so a float
+# equal to a cached integer key is still rejected.
+@lru_cache(maxsize=96)
+def _subblock_interleaver_pattern(stream_length: int, stream: int) -> NDArray[np.int64]:
     rows = -(-stream_length // SUBBLOCK_COLUMNS)
     k_pi = rows * SUBBLOCK_COLUMNS
     dummy = k_pi - stream_length
@@ -112,7 +124,9 @@ def subblock_interleaver_pattern(stream_length: int, stream: int) -> NDArray[np.
         y_index = row * SUBBLOCK_COLUMNS + permutation[column]
     else:
         y_index = (permutation[column] + SUBBLOCK_COLUMNS * row + 1) % k_pi
-    return np.where(y_index < dummy, _NULL, y_index - dummy)
+    pattern = np.where(y_index < dummy, _NULL, y_index - dummy)
+    pattern.setflags(write=False)
+    return pattern
 
 
 def rate_match_plan(
@@ -168,6 +182,15 @@ def _rate_match_plan(b: int, g: int, qm: int, rv: int) -> RateMatchPlan:
     return RateMatchPlan(segmentation, g, qm, tuple(blocks))
 
 
+# A plan holds at most three distinct (block_size, filler, e, rv) tuples however
+# many code blocks it has (filler on block 0 only, two block sizes, two E
+# values), so a 26-block PSDU builds two or three blocks instead of 26, and a
+# new burst shape mostly reuses blocks of earlier plans.  The result is a
+# frozen dataclass with a read-only index, safe to share across plans and
+# threads.  One entry holds E int32 (~75 KB for a K = 6144 block at rate 1/3),
+# so 128 entries, enough for the distinct blocks of the 64 cached plans, stay
+# under ~10 MB, and most of them are shared with those plans anyway.
+@lru_cache(maxsize=128)
 def _block_rate_match(block_size: int, filler: int, e: int, rv: int) -> BlockRateMatch:
     stream_length = block_size + 4
     rows = -(-stream_length // SUBBLOCK_COLUMNS)
@@ -178,7 +201,7 @@ def _block_rate_match(block_size: int, filler: int, e: int, rv: int) -> BlockRat
     # carries information.
     streams = []
     for stream in range(3):
-        source = subblock_interleaver_pattern(stream_length, stream)
+        source = _subblock_interleaver_pattern(stream_length, stream)
         native = np.where(source == _NULL, _NULL, 3 * source + stream)
         if stream < 2 and filler:
             native = np.where((source >= 0) & (source < filler), _NULL, native)
@@ -226,26 +249,37 @@ def rate_match(native_coded: ArrayLike, plan: RateMatchPlan) -> NDArray[np.uint8
 
 
 # Concatenated read index of each plan seen, kept with the plan so its id
-# cannot be reused while cached.  Plans come from an LRU cache of 64.
+# cannot be reused while cached.  Plans come from an LRU cache of 64.  The lock
+# guards lookup, eviction and insertion (two threads evicting the same oldest
+# key would raise KeyError); the index itself is built outside it.
 _GLOBAL_INDEX: dict[int, tuple[RateMatchPlan, NDArray[np.int32]]] = {}
 _GLOBAL_INDEX_LIMIT = 64
+_GLOBAL_INDEX_LOCK = threading.Lock()
 
 
 def _global_read_index(plan: RateMatchPlan) -> NDArray[np.int32]:
     """Every block's read index offset to its place in the whole native output."""
 
-    cached = _GLOBAL_INDEX.get(id(plan))
+    with _GLOBAL_INDEX_LOCK:
+        cached = _GLOBAL_INDEX.get(id(plan))
     if cached is not None and cached[0] is plan:
         return cached[1]
-    offsets = np.cumsum([0] + [block.native_bit_count for block in plan.blocks[:-1]])
-    index = np.concatenate(
-        [block.read_index.astype(np.int32) + np.int32(offset)
-         for block, offset in zip(plan.blocks, offsets, strict=True)]
-    )
+    # Each block's indices offset straight into the result: no temporaries.
+    index = np.empty(plan.available_bits, dtype=np.int32)
+    native_offset = 0
+    start = 0
+    for block in plan.blocks:
+        np.add(block.read_index, np.int32(native_offset), out=index[start : start + block.e])
+        native_offset += block.native_bit_count
+        start += block.e
     index.setflags(write=False)
-    if len(_GLOBAL_INDEX) >= _GLOBAL_INDEX_LIMIT:
-        _GLOBAL_INDEX.pop(next(iter(_GLOBAL_INDEX)))
-    _GLOBAL_INDEX[id(plan)] = (plan, index)
+    with _GLOBAL_INDEX_LOCK:
+        cached = _GLOBAL_INDEX.get(id(plan))
+        if cached is not None and cached[0] is plan:
+            return cached[1]
+        while len(_GLOBAL_INDEX) >= _GLOBAL_INDEX_LIMIT:
+            _GLOBAL_INDEX.pop(next(iter(_GLOBAL_INDEX)))
+        _GLOBAL_INDEX[id(plan)] = (plan, index)
     return index
 
 
