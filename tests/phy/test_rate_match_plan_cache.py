@@ -11,6 +11,8 @@ it bit for bit.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -175,7 +177,7 @@ def test_plans_of_different_shapes_share_their_common_blocks() -> None:
 def test_the_interleaver_pattern_is_cached_and_read_only() -> None:
     first = subblock_interleaver_pattern(6148, 2)
 
-    assert subblock_interleaver_pattern(6148, 2) is first
+    assert subblock_interleaver_pattern(6148, 2).base is first.base is not None
     assert first.dtype == np.int64
     assert not first.flags.writeable
     with pytest.raises(ValueError):
@@ -183,6 +185,39 @@ def test_the_interleaver_pattern_is_cached_and_read_only() -> None:
     np.testing.assert_array_equal(first, _reference_pattern(6148, 2))
     second = subblock_interleaver_pattern(6148, 1)
     np.testing.assert_array_equal(second, _reference_pattern(6148, 1))
+
+
+def test_the_public_pattern_cannot_reshape_the_cached_array() -> None:
+    """NumPy lets a read-only array's shape be set; that must not reach the cache."""
+
+    reference = _reference_pattern(44, 0)
+    pattern = subblock_interleaver_pattern(44, 0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)  # NumPy >= 2.5
+        pattern.shape = (2, 32)
+
+    again = subblock_interleaver_pattern(44, 0)
+    assert again.shape == (64,)
+    assert not again.flags.writeable
+    np.testing.assert_array_equal(again, reference)
+    plan = rate_match_plan(40, 132, 2)
+    np.testing.assert_array_equal(plan.blocks[0].read_index, _reference_block(40, 0, 132, 0)[4])
+
+
+def test_an_array_scalar_stream_is_still_accepted() -> None:
+    """``stream not in (0, 1, 2)`` lets a 0-d array through, as it did before the cache."""
+
+    pattern = subblock_interleaver_pattern(44, np.array(2))
+    np.testing.assert_array_equal(pattern, _reference_pattern(44, 2))
+    np.testing.assert_array_equal(
+        subblock_interleaver_pattern(44, np.int64(1)), _reference_pattern(44, 1)
+    )
+
+
+def test_out_of_range_lengths_are_computed_but_not_cached() -> None:
+    large = subblock_interleaver_pattern(250_000, 0)
+    np.testing.assert_array_equal(large, _reference_pattern(250_000, 0))
+    assert rm._subblock_interleaver_pattern.cache_info().currsize == 0
 
 
 def test_validation_is_not_bypassed_by_a_cached_equal_key() -> None:

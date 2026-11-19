@@ -97,22 +97,34 @@ def subblock_interleaver_pattern(stream_length: int, stream: int) -> NDArray[np.
     mod K_Pi``, which offsets the second parity by one position so the two
     parity streams do not puncture the same trellis steps.
 
-    The result is cached and read-only: it depends only on the arguments.
+    The result is read-only.  It is a view of a cached array, so setting its
+    shape cannot reach the cache.
     """
 
     if type(stream_length) is not int or stream_length <= 0:
         raise RateMatchError("stream_length must be a positive integer")
     if stream not in (0, 1, 2):
         raise RateMatchError("stream must be 0, 1, or 2")
-    return _subblock_interleaver_pattern(stream_length, stream)
+    stream = int(stream)  # a 0-d array passes the check above but is unhashable
+    if stream_length > _MAX_STREAM_LENGTH:
+        return _build_subblock_interleaver_pattern(stream_length, stream)
+    return _subblock_interleaver_pattern(stream_length, stream).view()
 
 
-# Keyed on (D, stream).  One entry is at most 6176 int64 (~49 KB, K = 6144), so
-# 96 entries (32 block sizes x 3 streams) stay under ~5 MB; a plan uses at most
-# two block sizes.  The validating wrapper stays outside the cache so a float
-# equal to a cached integer key is still rejected.
+# D = K + 4 for the largest Turbo block, K = 6144.  Only D up to this is
+# cached, so one entry is at most 6176 int64 (~49 KB) and the 96 entries
+# (32 block sizes x 3 streams) stay under 5 MB; a plan uses at most two block
+# sizes.  The validating wrapper stays outside the cache so a float equal to a
+# cached integer key is still rejected.
+_MAX_STREAM_LENGTH = 6144 + 4
+
+
 @lru_cache(maxsize=96)
 def _subblock_interleaver_pattern(stream_length: int, stream: int) -> NDArray[np.int64]:
+    return _build_subblock_interleaver_pattern(stream_length, stream)
+
+
+def _build_subblock_interleaver_pattern(stream_length: int, stream: int) -> NDArray[np.int64]:
     rows = -(-stream_length // SUBBLOCK_COLUMNS)
     k_pi = rows * SUBBLOCK_COLUMNS
     dummy = k_pi - stream_length
@@ -187,9 +199,11 @@ def _rate_match_plan(b: int, g: int, qm: int, rv: int) -> RateMatchPlan:
 # values), so a 26-block PSDU builds two or three blocks instead of 26, and a
 # new burst shape mostly reuses blocks of earlier plans.  The result is a
 # frozen dataclass with a read-only index, safe to share across plans and
-# threads.  One entry holds E int32 (~75 KB for a K = 6144 block at rate 1/3),
-# so 128 entries, enough for the distinct blocks of the 64 cached plans, stay
-# under ~10 MB, and most of them are shared with those plans anyway.
+# threads.  One entry holds E int32.  On the link E is at most 18432 (MCS 8,
+# a 765-byte PSDU in one block: 72 KB), so the 128 entries, enough for the
+# distinct blocks of the 64 cached plans, stay under 9.5 MB, and most of them
+# are shared with those plans anyway.  A direct rate_match_plan call with a
+# larger G makes entries of 4 E bytes, as the plan cache already does.
 @lru_cache(maxsize=128)
 def _block_rate_match(block_size: int, filler: int, e: int, rv: int) -> BlockRateMatch:
     stream_length = block_size + 4
