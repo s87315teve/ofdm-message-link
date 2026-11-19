@@ -567,6 +567,9 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
         control_entry=mcs_entry(spec.control_mcs_index),
         mode="auto",
         la_log=la_log,
+        # The LA log is written by a thread of its own: a write that blocks on
+        # a slow disk (SD card: 80-190 ms every ~5 s) must not stop TX or RX.
+        la_log_background=True,
         sample_rate=float(profile.sample_rate),
         on_event=lambda kind, record: sink.put(kind, dict(record)),
         # The node's own leakage is recognised by its scrambler seeds (node_app only:
@@ -747,7 +750,9 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
                 # events, even when detaching or stopping raised.
                 sink.flush_events()
             finally:
-                if la_log is not None:
+                # The LA log's queued lines; its file is closed only once the
+                # writer thread is done with it (else at process exit).
+                if controller.close() and la_log is not None:
                     la_log.close()
 
 

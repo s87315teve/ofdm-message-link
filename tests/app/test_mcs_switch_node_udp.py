@@ -195,6 +195,9 @@ def test_node_engines_over_udp_keep_every_datagram_across_set_mcs(tmp_path, deco
             assert _wait_for(lambda: len(egress[2].payloads) >= len(sent), 10.0), (
                 f"datagram #{number} at MCS {index} never left node 2"
             )
+        # The child's LA log is written by a thread of its own: the last
+        # switch's line may still be on its way to the file.
+        _wait_for(lambda: len(_log_events(la_log, "la")) >= len(schedule), 5.0)
         sparse_changes = [event["mcs_index"] for event in _log_events(la_log, "la")]
         # Bursts: back-to-back datagrams, the MCS changed halfway through each round.
         number = len(sent)

@@ -67,6 +67,7 @@ from typing import Any
 
 from . import log_limits, node_options, options
 from .dashboard import RxDashboard, TxDashboard
+from .line_writer import BackgroundLineWriter
 from .node_engine import (
     DEFAULT_UHD_RX_CHANNEL,
     DEFAULT_UHD_TX_LO_OFFSET_HZ,
@@ -596,6 +597,19 @@ def main(argv: list[str] | None = None) -> int:
     return run_gui(args, setup, spec)
 
 
+def open_stats_log(args) -> BackgroundLineWriter | None:
+    """The ``--stats-log`` file (:func:`.log_limits.open_stats_log`), written by a thread.
+
+    The parent's loop serves the control port; a write that blocks on a slow
+    disk (SD card: 80-190 ms every ~5 s) must not hold up a command.
+    """
+
+    log = log_limits.open_stats_log(args)
+    if log is None:
+        return None
+    return BackgroundLineWriter(log, name="stats-log-writer", close_file=True)
+
+
 def open_events(args, setup: node_options.NodeSetup, spec: NodeSpec, factory):
     """The ``--events`` writer with its ``start`` line, or None when the option is off."""
 
@@ -679,7 +693,7 @@ def run_headless(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:
         worker,
         monitor,
         factory,
-        stats_log=log_limits.open_stats_log(args),
+        stats_log=open_stats_log(args),
         ready_file=args.ready_file,
         control_port=setup.control_port,
         duration_s=args.duration,

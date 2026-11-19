@@ -16,7 +16,10 @@ be thread-safe.  An exception from the algorithm, the reporter, the LA log
 or ``on_event`` never escapes into the transmit or receive thread: it is
 counted (``la_errors``, ``reporter_errors``, ``log_errors``,
 ``event_errors``; the last one in ``last_error``) and a safe default is used
-(the current MCS, no report).  The wire codec is ``ofdm_message_link.control``; it is
+(the current MCS, no report).  With ``la_log_background`` the LA log is
+written by a thread of its own (:class:`~ofdm_message_link.line_writer.BackgroundLineWriter`),
+so a slow disk cannot stop the transmit or receive thread; :meth:`close` then
+writes what is still queued.  The wire codec is ``ofdm_message_link.control``; it is
 reached through :class:`ControlCodec` so tests can replace it.
 """
 
@@ -33,6 +36,7 @@ from typing import Any, Protocol, TextIO
 
 from ofdm_link.phy.mcs_table import McsTableEntry, McsTableError, mcs_entry
 
+from ..line_writer import CLOSE_TIMEOUT_S, BackgroundLineWriter
 from .api import (
     BurstReport,
     Decision,
@@ -160,6 +164,12 @@ class _ControlModuleCodec:
         return DecodedControl(header.src_node, header.dst_node, header.flags, feedback)
 
 
+def _log_line(line: Mapping[str, Any]) -> str:
+    """One LA-log line: the record's JSON and a newline."""
+
+    return json.dumps(line, default=str) + "\n"
+
+
 def _allowed_entry(index: int) -> McsTableEntry | None:
     try:
         entry = mcs_entry(index)
@@ -188,6 +198,7 @@ class LinkController:
         on_event: Callable[[str, Mapping[str, Any]], None] | None = None,
         own_seed_range: tuple[int, int] | None = None,
         next_sequence: Callable[[], int] | None = None,
+        la_log_background: bool = False,
     ) -> None:
         if mode not in {"auto", "fixed"}:
             raise ValueError("mode must be 'auto' or 'fixed'")
@@ -213,6 +224,17 @@ class LinkController:
         self._next_sequence = next_sequence
         self._lock = threading.RLock()
         self._log_lock = threading.Lock()
+        # la_log_background: _emit formats the line (~10 us, as before) and
+        # only queues it; the writer thread writes and flushes the lines in
+        # the order of the _emit calls across the TX and RX threads.
+        self._log_writer = (
+            BackgroundLineWriter(
+                la_log, name="la-log-writer",
+                on_error=lambda error: self._failed("log_errors", "la_log", error),
+            )
+            if la_log is not None and la_log_background
+            else None
+        )
 
         self._fixed_entry: McsTableEntry = control_entry
         self._entry: McsTableEntry | None = None
@@ -274,10 +296,14 @@ class LinkController:
         for kind, record in events:
             if self._la_log is not None:
                 try:
-                    line = json.dumps({"event": kind, **record}, default=str) + "\n"
-                    with self._log_lock:  # TX and RX threads both log; keep lines whole
-                        self._la_log.write(line)
-                        self._la_log.flush()
+                    # Formatted here: the line is the record as of this call.
+                    line = _log_line({"event": kind, **record})
+                    if self._log_writer is not None:
+                        self._log_writer.put(line)  # never blocks on the disk
+                    else:
+                        with self._log_lock:  # TX and RX threads both log; keep lines whole
+                            self._la_log.write(line)
+                            self._la_log.flush()
                 except Exception as error:  # a full disk must not stop the link
                     self._failed("log_errors", "la_log", error)
             if self._on_event is not None and (
@@ -287,6 +313,23 @@ class LinkController:
                     self._on_event(kind, record)
                 except Exception as error:
                     self._failed("event_errors", "on_event", error)
+
+    def drain_log(self, timeout: float | None = CLOSE_TIMEOUT_S) -> bool:
+        """Wait until every LA-log line emitted so far is written and flushed."""
+
+        return True if self._log_writer is None else self._log_writer.drain(timeout)
+
+    def close(self, timeout: float = CLOSE_TIMEOUT_S) -> bool:
+        """Write the queued LA-log lines and stop the writer thread (the file stays open).
+
+        True when the writer finished within ``timeout`` (always without
+        ``la_log_background``).  Lines emitted afterwards are written on the
+        caller's thread once the writer thread has finished; while it is
+        still alive (a close that timed out) they are dropped and counted in
+        ``log_errors``.
+        """
+
+        return True if self._log_writer is None else self._log_writer.close(timeout)
 
     def _check_stale(self, now: float) -> None:
         stale = (

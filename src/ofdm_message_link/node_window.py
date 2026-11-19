@@ -19,7 +19,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from ofdm_link.phy.mcs_table import describe_mcs_entry, mcs_entry
 
 from . import dashboard_widgets as widgets
-from . import log_limits, node_engine, node_options, options, qt_runtime
+from . import node_engine, node_options, options, qt_runtime
 from .dashboard import SNR_THRESHOLD_DB
 from .node_app import (
     BANNER,
@@ -27,6 +27,7 @@ from .node_app import (
     ControlServer,
     NodeMonitor,
     control_handler,
+    open_stats_log,
     pluto_factory,
     udp_factory,
     uhd_factory,
@@ -554,7 +555,7 @@ def run_gui(args, setup: node_options.NodeSetup, spec: NodeSpec) -> int:
         setup,
         spec,
         radio_panel=panel,
-        stats_log=log_limits.open_stats_log(args),
+        stats_log=open_stats_log(args),
         ready_file=args.ready_file,
         control_port=setup.control_port,
     )

@@ -1,5 +1,8 @@
 import io
+import itertools
 import json
+import threading
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -547,3 +550,203 @@ def test_an_lcp_of_another_version_counts_as_unsupported():
     assert ctl.on_control(link_header(2, 1), CONTEXT) is ControlVerdict.ACCEPT
     snap = ctl.snapshot()
     assert (snap["control_unsupported"], snap["control_undecodable"]) == (1, 1)
+
+
+# -- the LA log on a writer thread (la_log_background) ---------------------------------
+
+
+class _SlowLog:
+    """A text file whose every write takes ``delay_s`` (an SD card's journal stall)."""
+
+    def __init__(self, delay_s):
+        self.delay_s = delay_s
+        self.lines = []
+        self.ops = []
+        self.in_write = threading.Event()
+
+    def write(self, text):
+        self.in_write.set()
+        time.sleep(self.delay_s)
+        self.lines.append(text)
+        self.ops.append("write")
+
+    def flush(self):
+        self.ops.append("flush")
+
+    def getvalue(self):
+        return "".join(self.lines)
+
+
+def _every_kind_of_line(ctl, clock, la, reporter, codec):
+    """Each path that logs: RX feedback, TX la/invalid/report, operator mode/mark."""
+
+    out = []
+    clock.t = 0.5
+    out.append(ctl.on_control(_peer_feedback(codec, 1, ok=10), CONTEXT))
+    out.append(ctl.entry_for_next_burst(0.5))
+    la.mcs = 11  # hidden entry: an "invalid" line, then the "la" line
+    out.append(ctl.entry_for_next_burst(0.6))
+    la.mcs, la.reason = 15, "up"
+    out.append(ctl.entry_for_next_burst(0.7))
+    reporter.is_due = True
+    out.append(ctl.control_plan(0.7, idle=False))
+    out.append(ctl.control_plan(0.75, idle=True))
+    clock.t = 0.8
+    ctl.set_fixed(mcs_entry(14))
+    out.append(ctl.entry_for_next_burst(0.8))
+    ctl.set_la_mode("auto")
+    ctl.mark("gain step")
+    for seq in range(2, 8):
+        clock.t += 0.02
+        out.append(ctl.on_control(_peer_feedback(codec, seq, ok=10 * seq, lost=seq), CONTEXT))
+        out.append(ctl.entry_for_next_burst(clock.t))
+    return out, ctl.snapshot()
+
+
+def test_la_log_on_the_writer_thread_is_the_inline_log_and_decisions_do_not_change():
+    inline = _controller()
+    background = _controller(la_log_background=True)
+    results = []
+    for ctl, clock, la, reporter, codec, _log, _events in (inline, background):
+        results.append(_every_kind_of_line(ctl, clock, la, reporter, codec))
+    assert background[0].close()
+    assert results[0] == results[1]  # same entries, plans, verdicts and snapshot
+    assert inline[6] == background[6]  # same on_event calls
+    assert background[5].getvalue() == inline[5].getvalue()  # byte for byte
+    kinds = [row["event"] for row in _log_lines(background[5])]
+    assert {"feedback", "la", "invalid", "report", "mode", "mark"} <= set(kinds)
+
+
+def test_a_blocked_la_log_write_does_not_block_the_tx_or_rx_thread():
+    log = _SlowLog(0.2)
+    ctl, clock, la, reporter, codec, _, _ = _controller(la_log=log, la_log_background=True)
+    clock.t = 1.0
+    ctl.mark("first")  # the writer thread takes it and blocks for 200 ms
+    assert log.in_write.wait(1.0)
+    durations = []
+
+    def timed(call, *args, **kwargs):
+        start = time.perf_counter()
+        result = call(*args, **kwargs)
+        durations.append(time.perf_counter() - start)
+        return result
+
+    timed(ctl.on_control, _peer_feedback(codec, 1), CONTEXT)  # RX thread: "feedback"
+    la.mcs = 15
+    assert timed(ctl.entry_for_next_burst, 1.0) == mcs_entry(15)  # TX worker: "la"
+    reporter.is_due = True
+    timed(ctl.control_plan, 1.0, idle=False)  # TX worker: "report"
+    timed(ctl.mark, "second")
+    # Microseconds in fact; 50 ms still tells them from the 200 ms write (loaded Jetson).
+    assert max(durations) < 0.05, durations
+    assert ctl.close(5.0)
+    assert [json.loads(line)["event"] for line in log.lines] == [
+        "mark", "feedback", "la", "report", "mark"]
+
+
+def test_la_log_lines_keep_the_global_order_of_the_emit_calls_across_threads():
+    log = _SlowLog(0.0002)  # slower than the callers: the queue backs up
+    ticks = itertools.count()
+    ctl, *_ = _controller(la_log=log, la_log_background=True, clock=lambda: next(ticks))
+    order = threading.Lock()  # fixes the order of the calls; "t" numbers them
+
+    def run(name):
+        for number in range(150):
+            with order:
+                ctl.mark(f"{name}:{number}")
+
+    threads = [threading.Thread(target=run, args=(f"thread{k}",)) for k in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert ctl.close(10.0)
+    assert [row["t"] for row in _log_lines(log)] == list(range(600))
+    assert ctl.snapshot()["log_errors"] == 0
+
+
+def test_concurrent_la_log_lines_stay_whole_and_in_each_threads_order():
+    log = io.StringIO()
+    ctl, *_ = _controller(la_log=log, la_log_background=True)
+
+    def run(name):
+        for number in range(300):
+            ctl.mark(f"{name}:{number}")
+
+    threads = [threading.Thread(target=run, args=(f"thread{k}",)) for k in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert ctl.close(10.0)
+    rows = _log_lines(log)  # every line parses
+    assert len(rows) == 1200
+    for k in range(4):
+        mine = [row["text"] for row in rows if row["text"].startswith(f"thread{k}:")]
+        assert mine == [f"thread{k}:{number}" for number in range(300)]
+
+
+def test_close_writes_every_queued_la_log_line_and_later_lines_inline():
+    log = _SlowLog(0.002)
+    ctl, clock, *_ = _controller(la_log=log, la_log_background=True)
+    for number in range(50):
+        clock.t = float(number)
+        ctl.mark(str(number))
+    assert ctl.close(5.0)
+    assert [json.loads(line)["text"] for line in log.lines] == [str(n) for n in range(50)]
+    assert log.ops[-1] == "flush" and log.ops.count("flush") < 50
+    assert ctl.drain_log()
+    ctl.mark("late")  # after close: written on the caller's thread
+    assert json.loads(log.lines[-1])["text"] == "late" and log.ops[-1] == "flush"
+    assert ctl.close()  # idempotent
+
+
+def test_la_log_write_errors_on_the_writer_thread_never_reach_the_callers(capsys):
+    ctl, clock, _, reporter, codec, _, _ = _controller(
+        la_log=_BrokenLog(), la_log_background=True)
+    clock.t = 1.0
+    assert ctl.on_control(_peer_feedback(codec, 1), CONTEXT) is ControlVerdict.ACCEPT
+    assert ctl.entry_for_next_burst(1.0) == mcs_entry(12)
+    reporter.is_due = True
+    assert len(ctl.control_plan(1.0, idle=False).payloads) == 1
+    ctl.mark("x")
+    assert ctl.drain_log()
+    snap = ctl.snapshot()
+    assert snap["log_errors"] == 4 and "disk full" in snap["last_error"]
+    err = capsys.readouterr().err
+    assert err.count("la-log-writer: write failed") == 1 and "disk full" in err
+    assert ctl.close()
+
+
+def test_a_record_changed_after_emit_does_not_change_its_la_log_line():
+    def meddle(kind, record):
+        record["mcs_index"] = 99  # an on_event consumer that mutates what it gets
+
+    for background in (False, True):
+        log = _SlowLog(0.05)
+        ctl, *_ = _controller(la_log=log, la_log_background=background, on_event=meddle)
+        assert ctl.entry_for_next_burst(0.0) == mcs_entry(12)
+        assert ctl.close(5.0)
+        assert [json.loads(line)["mcs_index"] for line in log.lines] == [12]
+
+
+def test_an_la_log_record_that_cannot_be_formatted_is_counted_at_once():
+    class Unprintable:
+        def __str__(self):
+            raise ValueError("no text")
+
+    log = io.StringIO()
+    ctl, *_ = _controller(la_log=log, la_log_background=True)
+    ctl._emit([("mark", {"t": 1.0, "text": Unprintable()})])
+    assert ctl.snapshot()["log_errors"] == 1  # counted on the caller's thread, no drain
+    ctl.mark("fine")
+    assert ctl.close()
+    assert [row["text"] for row in _log_lines(log)] == ["fine"]
+
+
+def test_without_an_la_log_there_is_no_writer_thread():
+    ctl, _, _, _, _, _, events = _controller(la_log=None, la_log_background=True)
+    assert ctl._log_writer is None
+    assert ctl.entry_for_next_burst(0.0) == mcs_entry(12)
+    assert [kind for kind, _ in events] == ["la"]
+    assert ctl.drain_log() and ctl.close()

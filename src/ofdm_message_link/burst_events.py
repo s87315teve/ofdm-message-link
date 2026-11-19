@@ -46,6 +46,8 @@ from collections import OrderedDict, deque
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NamedTuple
 
+from .line_writer import BackgroundLineWriter
+
 #: Version of the JSON-lines format; a consumer checks it in the ``start`` line.
 EVENTS_SCHEMA_VERSION = 1
 EVENTS_SCHEMA = "ofdm-message-link/events"
@@ -429,7 +431,13 @@ class EventLogWriter:
     :meth:`status` with each stats line.  Besides the receive events it writes
     one ``sent`` line per burst the node's transmitter had accepted and one
     ``tx_dropped`` line per burst it dropped; both carry the child's clocks.
-    Thread-safe; every write is flushed.
+    Thread-safe.  The lines are written, in order, by a thread of its own
+    (:class:`~.line_writer.BackgroundLineWriter`, flushed whenever it has
+    nothing more to write), so a write that blocks on a slow disk holds up
+    neither the event pump nor the parent's control loop; :meth:`stop` writes
+    what is still queued and closes the file.  ``counts`` counts the lines
+    queued; ``write_errors`` includes the writer thread's failures (and any
+    line it had to drop).
     A failing write is counted (``write_errors``) and never raised into the
     caller, so a full disk cannot stop the radio.
     """
@@ -443,7 +451,10 @@ class EventLogWriter:
         self._clock = clock
         self._wall = wall_clock
         self._lock = threading.Lock()
-        self._file = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
+        self._file = BackgroundLineWriter(
+            open(self.path, "a", encoding="utf-8"),  # noqa: SIM115 - closed by stop()
+            name="events-writer", close_file=True, on_error=self._writer_failed,
+        )
         self._next_batch: int | None = None
         self._radio_written = False
         self._readback_written = False
@@ -454,6 +465,9 @@ class EventLogWriter:
         self.lost_batches = 0
 
     # ------------------------------------------------------------ writing
+
+    def _writer_failed(self, _error: BaseException) -> None:
+        self.write_errors += 1
 
     def _write(self, kind: str, fields: dict[str, Any], *, mono: float | None = None,
                wall: float | None = None) -> None:
@@ -467,7 +481,6 @@ class EventLogWriter:
                 if self._file.closed:
                     return
                 self._file.write(text + "\n")
-                self._file.flush()
             self.counts[kind] = self.counts.get(kind, 0) + 1
         except Exception:
             self.write_errors += 1
@@ -478,6 +491,9 @@ class EventLogWriter:
                               **meta})
 
     def stop(self, extra: dict[str, Any] | None = None) -> None:
+        # Every line so far written (bounded), so write_errors is complete;
+        # ``counts`` counts the lines queued.
+        self._file.drain()
         self._write("stop", {"counts": dict(self.counts), "lost_batches": self.lost_batches,
                              "write_errors": self.write_errors, **(extra or {})})
         with self._lock:

@@ -6,7 +6,9 @@ owner, the transmit worker, UDP ingress, GNU Radio and UHD threads) in
 process or thread started afterwards begins in ``SCHED_OTHER``, so the
 decode workers and the forkserver never run real-time.  Threads the engine
 starts later (GNU Radio's, when a radio attaches) are brought up by
-:func:`refresh`, which the engine calls after every attach.
+:func:`refresh`, which the engine calls after every attach.  A thread that
+only waits for I/O (a log writer) calls :func:`keep_normal` and stays
+``SCHED_OTHER``.
 
 Why only this far, from the offline phase-2 tests on two E-cores (n=2):
 the whole process tree under ``chrt -f 50`` lost more bursts (0.52-0.69% at
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -46,6 +49,7 @@ _TASKS = Path("/proc/self/task")
 _PREFIX = "[realtime]"
 
 _state: dict[str, object] = {"priority": None}
+_normal_threads: set[int] = set()  # native thread ids left in SCHED_OTHER
 
 
 class RealtimeError(ValueError):
@@ -137,6 +141,31 @@ def refresh() -> int:
         return 0
 
 
+def keep_normal() -> None:
+    """Leave the calling thread in ``SCHED_OTHER``, now and on every :func:`refresh`.
+
+    For helper threads that only wait for I/O (``ofdm_message_link.line_writer``):
+    real time would only let them compete with the radio threads.
+    """
+
+    tid = threading.get_native_id()
+    _normal_threads.add(tid)
+    # Also when a request is being applied right now (or was, before this
+    # thread got here): back to SCHED_OTHER, a no-op if it already is.
+    if requested() is None and _state.get("priority") is None:
+        return
+    try:
+        os.sched_setscheduler(tid, os.SCHED_OTHER, os.sched_param(0))
+    except (AttributeError, OSError):
+        pass
+
+
+def release_normal() -> None:
+    """Undo :func:`keep_normal` for the calling thread (as it ends: ids are reused)."""
+
+    _normal_threads.discard(threading.get_native_id())
+
+
 def _apply_to_threads(priority: int, *, only_new: bool = False) -> int:
     reset = getattr(os, "SCHED_RESET_ON_FORK", 0)
     policy = os.SCHED_RR | reset
@@ -145,9 +174,14 @@ def _apply_to_threads(priority: int, *, only_new: bool = False) -> int:
     for entry in _TASKS.iterdir():
         try:
             tid = int(entry.name)
+            if tid in _normal_threads:
+                continue
             if only_new and os.sched_getscheduler(tid) & ~reset == os.SCHED_RR:
                 continue
             os.sched_setscheduler(tid, policy, parameter)
+            if tid in _normal_threads:  # keep_normal ran meanwhile: undo
+                os.sched_setscheduler(tid, os.SCHED_OTHER, os.sched_param(0))
+                continue
             count += 1
         except (ProcessLookupError, FileNotFoundError, ValueError):
             continue  # a thread that ended meanwhile
