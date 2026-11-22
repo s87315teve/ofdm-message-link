@@ -488,6 +488,17 @@ def test_a_batch_whose_send_raises_is_counted_as_dropped():
     assert sink.dropped == 2
 
 
+def test_a_put_that_fills_the_batch_never_raises_into_its_producer():
+    channel = _FailsOnce()
+    sink = _sink(channel, max_batch=2)
+    sink.put("message", 1)
+    sink.put("message", 2)  # sends the batch, and the send raises
+    assert sink.dropped == 2
+    sink.put("message", 3)
+    sink.flush_events()
+    assert channel.events() == [("message", 3)]
+
+
 def test_a_failing_event_flush_does_not_end_the_transmit_thread(capsys):
     from stream_fixtures import MEASUREMENT, profile
 

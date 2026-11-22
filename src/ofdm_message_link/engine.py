@@ -249,7 +249,12 @@ class _EventSink:
         with self._lock:
             self._buffer.append((kind, value))
             if len(self._buffer) >= self._max_batch:
-                self._send_locked()
+                try:
+                    self._send_locked()
+                except Exception:
+                    # Counted as dropped.  A producer's put must not end its
+                    # thread; the worker's next flush reports a broken channel.
+                    pass
 
     def flush_events(self) -> None:
         """Send what is buffered now, as one batch (nothing if empty)."""
