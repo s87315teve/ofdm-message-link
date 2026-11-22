@@ -177,6 +177,21 @@ def test_stats_line_keeps_run_averages_after_traffic_stops():
     assert stopped["tx"]["airtime_avg_frac"] == round(2e6 / 5e6 / 20, 4)
 
 
+def test_the_status_line_reports_the_engine_events_it_lost(tmp_path):
+    """The child's drop count reaches ``dropped_events`` in the --events file."""
+
+    from ofdm_message_link.burst_events import EventLogWriter, read_events
+
+    monitor = node_app.NodeMonitor(1, "fdd", 5e6)
+    writer = EventLogWriter(str(tmp_path / "events.jsonl"), node_id=1, sample_rate=5e6)
+    for dropped in (0, 7):
+        monitor.on_event("stats", {**_child_stats(), "dropped_display_events": dropped})
+        writer.status(monitor.line())
+    writer.stop()
+    rows = read_events(str(tmp_path / "events.jsonl"), kinds=("status",))
+    assert [row["dropped_events"] for row in rows] == [0, 7]
+
+
 def _wait_for(path, timeout=3.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

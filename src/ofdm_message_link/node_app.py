@@ -262,6 +262,7 @@ class NodeMonitor:
                 },
                 "cpu": stats.get("cpu"),
                 "device": stats.get("device"),
+                "dropped_events": stats.get("dropped_display_events"),
             }
             if self.marks:
                 line["marks"], self.marks = self.marks, []
