@@ -65,6 +65,8 @@ from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
+from ofdm_link.runtime.segment_decode_pool import DECODING_STOPPED
+
 from . import log_limits, node_options, options
 from .dashboard import RxDashboard, TxDashboard
 from .line_writer import BackgroundLineWriter
@@ -137,6 +139,8 @@ class NodeMonitor:
         self.la_events: deque[dict] = deque(maxlen=200)
         self.la_history: deque[tuple[float, int | None, float | None, bool]] = deque()
         self.failures: deque[str] = deque(maxlen=50)
+        # Latched: the last stats line before a stop may predate the failure.
+        self._decode_failure: str | None = None
         self.marks: list[dict] = []
         self.gains: list[dict] = []
         self.last_line: dict[str, Any] | None = None
@@ -148,8 +152,7 @@ class NodeMonitor:
         """Why the child stopped decoding for good; None while it decodes."""
 
         with self._lock:
-            stats = self.stats
-        return None if stats is None else (stats.get("rx") or {}).get("decode_failure")
+            return self._decode_failure
 
     def la_snapshot(self) -> tuple[tuple[float, int | None, float | None, bool], ...]:
         with self._lock:
@@ -160,6 +163,8 @@ class NodeMonitor:
         with self._lock:
             if kind == "stats":
                 self.stats = value
+                if self._decode_failure is None:
+                    self._decode_failure = (value.get("rx") or {}).get("decode_failure")
                 la = value.get("la") or {}
                 self.la_history.append(
                     (now, la.get("mcs_index"), la.get("snr_f_db"), bool(la.get("stale")))
@@ -172,7 +177,10 @@ class NodeMonitor:
             elif kind == "la":
                 self.la_events.append(dict(value))
             elif kind == "failed":
-                self.failures.append(str(value))
+                text = str(value)
+                self.failures.append(text)
+                if self._decode_failure is None and text.startswith(DECODING_STOPPED):
+                    self._decode_failure = text[len(DECODING_STOPPED):]
             elif kind == "mark":
                 self.marks.append(dict(value))
             elif kind == "gain":
@@ -251,7 +259,7 @@ class NodeMonitor:
                     "own_seed_drops": receiver.get("own_seed_drops", 0),
                     "sequence_resyncs": receiver.get("sequence_resyncs", 0),
                     "control_handler_errors": receiver.get("control_handler_errors", 0),
-                    "decode_failure": rx.get("decode_failure"),
+                    "decode_failure": self._decode_failure,
                     "transport": transport,
                 },
                 "la": {
@@ -424,6 +432,16 @@ class HeadlessNode:
                 print(f"node_app: gain step at {when:g} s failed: {error}", file=self.out)
 
     def run(self) -> int:
+        code = self._run()
+        # worker.stop() has joined the pump, so a worker that died just before
+        # or during the stop is known by now.
+        failure = self.monitor.decode_failure
+        if code == 0 and failure is not None:
+            print(f"node_app: {DECODING_STOPPED}{failure}", file=self.out)
+            return EXIT_DECODE_FAILED
+        return code
+
+    def _run(self) -> int:
         self.worker.start()
         try:
             try:
@@ -453,8 +471,7 @@ class HeadlessNode:
                     return EXIT_ENGINE_DIED
                 failure = self.monitor.decode_failure
                 if failure is not None:
-                    print(f"node_app: decoding stopped: {failure}", file=self.out)
-                    self._log_line(self.clock())
+                    print(f"node_app: {DECODING_STOPPED}{failure}", file=self.out)
                     return EXIT_DECODE_FAILED
                 now = self.clock()
                 elapsed = now - ready
@@ -477,6 +494,11 @@ class HeadlessNode:
             except Exception as error:
                 print(f"node_app: detach: {error}", file=self.out)
             self.worker.stop()
+            if self.monitor.decode_failure is not None:
+                try:
+                    self._log_line(self.clock())  # the logs say why it stopped
+                except Exception as error:
+                    print(f"node_app: last stats line: {error}", file=self.out)
             if self.control is not None:
                 self.control.close()
             if self.stats_log is not None:

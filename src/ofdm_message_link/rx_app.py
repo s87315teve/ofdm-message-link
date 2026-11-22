@@ -35,7 +35,11 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ofdm_link.phy.mcs_table import McsTableEntry, McsTableError, describe_mcs_entry, mcs_entry
 from ofdm_link.phy.streaming import peak_amplitude
-from ofdm_link.runtime.segment_decode_pool import DecodePoolClosed, DecodePoolError
+from ofdm_link.runtime.segment_decode_pool import (
+    DECODING_STOPPED,
+    DecodePoolClosed,
+    DecodePoolError,
+)
 
 from . import dashboard_widgets as widgets
 from . import log_limits, options, qt_runtime
@@ -348,7 +352,7 @@ class ReceiveWorker:
         try:
             self._deliver(error.delivered)
             if first:
-                self._bridge.failed.emit(f"decoding stopped: {error}")
+                self._bridge.failed.emit(f"{DECODING_STOPPED}{error}")
         except Exception as failure:
             self._event_flush_failed(failure)
 

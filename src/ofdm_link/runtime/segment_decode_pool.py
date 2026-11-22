@@ -65,6 +65,9 @@ from .overload import OverloadProtection
 # the imports once instead of once per worker.
 _START_METHODS = ("forkserver", "spawn")
 
+#: How the receive worker's one report of a dead pool starts; node_app reads it.
+DECODING_STOPPED = "decoding stopped: "
+
 
 class DecodePoolError(RuntimeError):
     """Raised when the decode pool cannot produce trustworthy results."""

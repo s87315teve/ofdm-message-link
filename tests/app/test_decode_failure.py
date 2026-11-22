@@ -439,6 +439,40 @@ def test_a_headless_node_exits_non_zero_when_decoding_stops(tmp_path):
     assert lines[-1]["rx"]["decode_failure"] == "a segment decode worker died"
 
 
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [("decoding stopped: a segment decode worker died", "EXIT_DECODE_FAILED"),
+     ("radio engine process exited", None)],
+    ids=["decode-failure", "other-failure"],
+)
+def test_a_decode_failure_seen_during_stop_makes_the_exit_non_zero(tmp_path, event, expected):
+    import io
+
+    from test_node_headless import FakeWorker, _lines
+
+    from ofdm_message_link import log_limits, node_app
+
+    class FailsWhileStopping(FakeWorker):
+        def stop(self):
+            self.listener("failed", event)  # the pump's last events, before it is joined
+            super().stop()
+
+    out = io.StringIO()
+    monitor = node_app.NodeMonitor(1, "fdd", 5e6)
+    worker = FailsWhileStopping(monitor.on_event)
+    stats_log = log_limits.RotatingLog(tmp_path / "stats.jsonl", max_bytes=None)
+    node = node_app.HeadlessNode(worker, monitor, lambda: "endpoint", stats_log=stats_log,
+                                 ready_file=str(tmp_path / "ready"), duration_s=0.6, out=out)
+    code = node.run()
+    if expected is None:
+        assert code == 0 and monitor.decode_failure is None
+        return
+    assert code == getattr(node_app, expected)
+    assert out.getvalue().count("decoding stopped: a segment decode worker died") == 1
+    last = [line for line in _lines(tmp_path) if "tx" in line][-1]
+    assert last["rx"]["decode_failure"] == "a segment decode worker died"
+
+
 @pytest.fixture(scope="module")
 def application():
     """Held for the whole module: collecting it under a live widget aborts the process."""
