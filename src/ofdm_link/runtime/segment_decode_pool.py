@@ -30,6 +30,9 @@ segment of a task whose result cannot come back at all (for example one that
 cannot be pickled), so each segment still gets exactly one result, in order,
 and later segments keep flowing.  Only a dead worker (``BrokenExecutor``) or
 an executor that refuses new work closes the pool with :class:`DecodePoolError`.
+What had finished by then is kept, in order, with a failure in place of each
+segment that had not, and the next :meth:`~SegmentDecodePool.collect` or
+:meth:`~SegmentDecodePool.drain` returns it.
 """
 
 from __future__ import annotations
@@ -66,6 +69,9 @@ _START_METHODS = ("forkserver", "spawn")
 class DecodePoolError(RuntimeError):
     """Raised when the decode pool cannot produce trustworthy results."""
 
+    # The messages decoded before the failure (set by MessageReceiver).
+    delivered: tuple = ()
+
 
 def _safe_context() -> multiprocessing.context.BaseContext:
     """Return a start method that never forks this multi-threaded process."""
@@ -87,6 +93,9 @@ DEFAULT_MAX_BATCH = 4
 _READY_TIMEOUT_S = 120.0
 # How long the executor gets to notice a worker's exit before it counts as stuck.
 _STUCK_MANAGER_GRACE_S = 1.0
+# How long close() waits for the workers before killing them, and again after.
+# Longer than the grace above, which is what frees a manager stuck on a result.
+_CLOSE_WAIT_S = 1.5
 
 Annotate = Callable[[AnyDecodedBurst], Any]
 
@@ -342,10 +351,17 @@ class SegmentDecodePool:
     def _start_workers(self) -> None:
         try:
             futures = [self._executor.submit(_worker_is_ready) for _ in range(self._workers)]
+            # Before waiting: a worker can die in a write during startup too.
+            threading.Thread(
+                target=_break_pool_if_stuck,
+                args=(self._executor._executor_manager_thread,),
+                name="decode-pool-watch",
+                daemon=True,
+            ).start()
             ready = [future.result(timeout=_READY_TIMEOUT_S) for future in futures]
         except Exception as error:
-            self._executor.shutdown(wait=False, cancel_futures=True)
             self._closed = True
+            self._shut_down()
             raise DecodePoolError(
                 "segment decode workers could not start; the caller's __main__ "
                 'must be import-safe (if __name__ == "__main__"), or use 1 worker'
@@ -353,12 +369,6 @@ class SegmentDecodePool:
         if not all(ready):
             self.close()
             raise DecodePoolError("a segment decode worker did not finish initializing")
-        threading.Thread(
-            target=_break_pool_if_stuck,
-            args=(self._executor._executor_manager_thread,),
-            name="decode-pool-watch",
-            daemon=True,
-        ).start()
 
     @property
     def workers(self) -> int:
@@ -405,12 +415,12 @@ class SegmentDecodePool:
             try:
                 future = self._executor.submit(_run_in_worker, batch[cursor : cursor + take])
             except BrokenExecutor as error:
-                self.close()
+                self._close_keeping_results()
                 raise DecodePoolError("a segment decode worker died") from error
             except Exception as error:
                 # The executor refuses work (it is shutting down): these
                 # segments would silently get no result, so stop here.
-                self.close()
+                self._close_keeping_results()
                 raise DecodePoolError("the segment decode pool refused work") from error
             self._pending.append((future, take))
             self._in_flight += take
@@ -428,13 +438,15 @@ class SegmentDecodePool:
     def drain(self, timeout: float | None = None) -> tuple[SegmentDecodeResult, ...]:
         """Wait for every in-flight segment and return all results in order.
 
-        ``timeout`` bounds the wait for each task.  When it expires this
-        raises ``TimeoutError``; nothing is lost, and the next call returns
-        the results taken so far, then the rest, in order.
+        ``timeout`` bounds the whole wait.  When it expires this raises
+        ``TimeoutError``; nothing is lost, and the next call returns the
+        results taken so far, then the rest, in order.
         """
 
+        deadline = None if timeout is None else time.monotonic() + timeout
         while self._pending:
-            self._taken.extend(self._take_oldest(timeout=timeout))
+            left = None if deadline is None else max(0.0, deadline - time.monotonic())
+            self._taken.extend(self._take_oldest(timeout=left))
         return self._hand_over()
 
     def _take_done(self) -> None:
@@ -450,7 +462,7 @@ class SegmentDecodePool:
         try:
             results = future.result(timeout=timeout)
         except BrokenExecutor as error:
-            self.close()
+            self._close_keeping_results()
             raise DecodePoolError("a segment decode worker died") from error
         except BaseException as error:
             if not _raised_by_task(future, error):
@@ -502,14 +514,52 @@ class SegmentDecodePool:
         )
 
     def close(self) -> None:
-        """Stop the workers and wait for them to exit; safe to repeat."""
+        """Stop the workers, killing any that do not stop in time; safe to repeat."""
 
         if self._closed:
             return
         self._closed = True
         self._pending.clear()
         self._in_flight = 0
-        self._executor.shutdown(wait=True, cancel_futures=True)
+        self._shut_down()
+
+    def _close_keeping_results(self) -> None:
+        """Close after a fatal error, with one result for each in-flight segment.
+
+        A task that finished keeps its results, even behind one that died; any
+        other gets a failure, so the stream's accounting stays one to one.
+        """
+
+        if self._closed:
+            return
+        self._closed = True
+        self._shut_down()
+        while self._pending:
+            future, count = self._pending.popleft()
+            try:
+                results = future.result(timeout=0.0)
+            except Exception as error:  # broken, cancelled, or never finished
+                results = (failed_result(error),) * count
+            self._taken.extend(results)
+            self._in_flight -= count
+            self._completed += count
+            self._worker_errors += sum(1 for result in results if result.error is not None)
+
+    def _shut_down(self) -> None:
+        """Bounded even with a hung worker, which a plain shutdown would wait for."""
+
+        manager = getattr(self._executor, "_executor_manager_thread", None)
+        workers = dict(getattr(self._executor, "_processes", None) or {})
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        if manager is None:
+            return
+        manager.join(_CLOSE_WAIT_S)
+        if manager.is_alive():
+            for process in workers.values():
+                # Not one already gone: its PID may have been reused.
+                if not multiprocessing.connection.wait([process.sentinel], 0):
+                    process.kill()
+            manager.join(_CLOSE_WAIT_S)
 
     def __enter__(self) -> SegmentDecodePool:
         return self

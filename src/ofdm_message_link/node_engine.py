@@ -719,6 +719,7 @@ def _node_main(profile, spec: NodeSpec, ui_fps, decode_workers, aggregation, cpu
                     "egress_datagrams": egress.datagrams,
                     "transport": None if rx_source is None else rx_source.snapshot(),
                     "decode_pool": receiver.decode_pool_snapshot(),
+                    "decode_failure": rx_worker.decode_failure,
                 },
                 "la": controller.snapshot(),
                 "device": None if endpoint is None else endpoint.snapshot(),

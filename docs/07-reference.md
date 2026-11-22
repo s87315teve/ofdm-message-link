@@ -562,7 +562,7 @@ process 默默分流。
 | `{"cmd":"stats"}` / `{"cmd":"stop"}` | 最近一行 stats／停止 |
 
 Headless 收到 SIGTERM／SIGINT、`stop` 或 `--duration` 到時：先停 TX（attenuator 回到最小輸出），再停 RX，
-刪除 ready file，exit 0；radio 啟動失敗或 control port 已被佔用時 exit 2，engine 子 process 中途結束時 exit 3。
+刪除 ready file，exit 0；radio 啟動失敗或 control port 已被佔用時 exit 2，engine 子 process 中途結束時 exit 3，decode worker 死掉、解碼已停止時 exit 4。
 
 LA 演算法（預設演算法 `olla` 的參數、ladder）與怎麼寫自己的模組見
 [3.4 節](03-your-own-app.md#34-寫你自己的-link-adaptation-模組)；設計、自干擾與實機量測見
@@ -723,6 +723,9 @@ payload 失敗（`unclassified_decode_failures`，和 inline decoder 解不出�
 錯誤訊息每次 feed 合成一行 `failed`（`decode worker raised on N burst(s): ...`），pool 快照的 `worker_errors` 計數。整個 task 的結果
 送不回來（例如不能 pickle）時，那個 task 的每個 segment 都這樣算。worker 死掉（`BrokenExecutor`）或 pool 不再接受工作時，pool 關閉並丟出
 `DecodePoolError`。以前一個這樣的例外會一直卡在 pool 的最前面，之後每次 feed 都重丟一次，後面的 burst 全部遺失。
+worker 死掉時，已經解完的 burst 仍照順序交出；接收端只回報一次（`failed` 事件、stats 的 `rx.decode_failure`），之後不再解碼，
+無視窗的 `node_app` 以 exit 4 結束，視窗持續顯示錯誤，要重新啟動才會再收。detach 與 stop 時最多等 1.5 s 把解碼中的 burst
+交出去；worker 卡住時 pool 會在限定時間內把它砍掉，所以停止一定會結束。
 等待結果逾時（`flush(timeout)`）不算失敗：那個 task 留在最前面，晚一點照常交出結果，即使它剛好在逾時之後才解完。
 Decode worker 忽略 SIGINT：終端機的 Ctrl-C 會送到整個 process group，worker 何時停由擁有它的 receiver（`close()`）決定，
 不會在串流中途變成某個 task 的 `KeyboardInterrupt` 或讓 pool 壞掉。
@@ -815,7 +818,7 @@ listener callback（見 `node_engine.ProcessNodeWorker`），或在自己的程�
 | `overflow` | 接收串流有缺口 | `source = "rx_time"`：`off`、`dev_t`、`lost`（遺失的 samples，由 `rx_time` 算出）；`source = "counter"`：`counter`（`uhd_rx_overflow`、`chunks_dropped_overflow`、`rx_overflow_events`）、`delta`、`total` |
 | `gain` | 每次 gain 變更（control socket、`--gain-profile`） | `dir`、`db`（要求值）、`readback`（裝置讀回）；`mono` 是子 process 套用的時間 |
 | `radio` / `readback` / `freq` | 第一行 stats 時記下 TX／RX 頻率、gain、類比濾波器；`readback` 是 UHD 讀回的設定；之後頻率改變時寫 `freq` | |
-| `status` | 每 0.5 s（跟 stats log 同一行的時間） | `tx`（`bursts`、`control_bursts`、`subframes`、`payload_bytes`、`active_mcs`）、`rx.decoder`、`rx.receiver`、`rx_samples_lost`、`rx_time_discontinuities`、`uhd_faults`、`dropped_events`、`lost_batches` |
+| `status` | 每 0.5 s（跟 stats log 同一行的時間） | `tx`（`bursts`、`control_bursts`、`subframes`、`payload_bytes`、`active_mcs`）、`rx.decoder`、`rx.receiver`、`rx_samples_lost`、`rx_time_discontinuities`、`uhd_faults`、`decode_failure`（解碼停止的原因，正常時 `null`）、`dropped_events`、`lost_batches` |
 | `sent` | 發送端每個被 transport 接受的 burst（data 與 control-only 都寫；v2.1.2 之後） | 見下面〈發送端〉 |
 | `tx_dropped` | 發送端丟掉的 burst：encode 失敗，或 send 失敗而不再重送（v2.1.2 之後） | 見下面〈發送端〉 |
 | `mark` / `failed` | control socket 的 `mark`、引擎回報的錯誤 | `text` |

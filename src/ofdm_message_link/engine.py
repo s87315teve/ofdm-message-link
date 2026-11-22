@@ -615,6 +615,7 @@ def _rx_main(
                 "max_lag_s": worker.lag_monitor.max_lag_s,
                 "lag_spikes": worker.lag_monitor.spikes,
                 "decode_pool": receiver.decode_pool_snapshot(),
+                "decode_failure": worker.decode_failure,
             },
         )
 
@@ -660,6 +661,7 @@ class ProcessReceiveWorker:
         self._decoder = None
         self._egress_datagrams = 0
         self._dropped = 0
+        self._decode_failure: str | None = None
         self._source: _TransportView | None = None
         self._engine = _EngineProcess(
             _rx_main,
@@ -693,6 +695,7 @@ class ProcessReceiveWorker:
             self._decoder = value["decoder"]
             self._egress_datagrams = value["egress_datagrams"]
             self._dropped = value["dropped_display_events"]
+            self._decode_failure = value.get("decode_failure")
             source = self._source
             if source is not None and value["transport"] is not None:
                 source._snapshot = {
@@ -715,6 +718,12 @@ class ProcessReceiveWorker:
     @property
     def egress_datagrams(self) -> int:
         return self._egress_datagrams
+
+    @property
+    def decode_failure(self) -> str | None:
+        """Why decoding stopped for good; None while it runs."""
+
+        return self._decode_failure
 
     def decoder_snapshot(self):
         return self._decoder

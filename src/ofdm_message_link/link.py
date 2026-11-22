@@ -69,6 +69,7 @@ from ofdm_link.runtime.airtime import v5_burst_samples_with_guards
 from ofdm_link.runtime.factory import build_burst_config, select_frame_decoder
 from ofdm_link.runtime.overload import OverloadProtection
 from ofdm_link.runtime.overload import from_environment as overload_from_environment
+from ofdm_link.runtime.segment_decode_pool import DecodePoolError
 
 from . import datagram
 from .aggregation import AggregationLimits, plan_aggregate
@@ -998,14 +999,20 @@ class MessageReceiver:
         # remainder goes at the end of the chunk.
         results: list = []
         waiting: list = []
-        for piece in pieces:
-            waiting.extend(self._decoder.feed_segments(piece, assume_finite=assume_finite))
-            if len(waiting) >= self._pool.max_batch:
+        try:
+            for piece in pieces:
+                waiting.extend(self._decoder.feed_segments(piece, assume_finite=assume_finite))
+                if len(waiting) >= self._pool.max_batch:
+                    results.extend(self._submit(waiting))
+                    waiting.clear()
+            if waiting:
                 results.extend(self._submit(waiting))
-                waiting.clear()
-        if waiting:
-            results.extend(self._submit(waiting))
-        results.extend(self._pool.collect())
+            results.extend(self._pool.collect())
+        except DecodePoolError as error:
+            # What was decoded before the pool failed still goes out, in order.
+            results.extend(self._pool.collect())
+            error.delivered = self._accept_results(results)
+            raise
         return self._accept_results(results)
 
     def _submit(self, segments: list) -> tuple:
@@ -1021,11 +1028,31 @@ class MessageReceiver:
         return ready
 
     def flush(self, timeout: float | None = None) -> tuple[ReceivedMessage, ...]:
-        """Wait for payloads still being decoded and return their messages."""
+        """Wait for payloads still being decoded and return their messages.
+
+        ``TimeoutError`` loses nothing: a later :meth:`flush` or :meth:`collect`
+        returns those messages.  A :class:`DecodePoolError` carries the
+        messages decoded before it in ``delivered``.
+        """
 
         if self._pool is None:
             return ()
-        return self._accept_results(self._pool.drain(timeout))
+        return self._take_from_pool(lambda: self._pool.drain(timeout))
+
+    def collect(self) -> tuple[ReceivedMessage, ...]:
+        """The messages of payloads already decoded; never waits."""
+
+        if self._pool is None:
+            return ()
+        return self._take_from_pool(self._pool.collect)
+
+    def _take_from_pool(self, take) -> tuple[ReceivedMessage, ...]:
+        try:
+            results = take()
+        except DecodePoolError as error:
+            error.delivered = self._accept_results(self._pool.collect())
+            raise
+        return self._accept_results(results)
 
     def decode_pool_snapshot(self):
         """Pool counters, or None when decoding inline."""

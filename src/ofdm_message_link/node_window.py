@@ -469,6 +469,11 @@ class NodeWindow(QtWidgets.QWidget):
             self._stats_log.write(json.dumps(line, default=str) + "\n")
             self._stats_log.flush()
         tx, rx, la = line["tx"], line["rx"], line["la"]
+        if rx.get("decode_failure") is not None:
+            # Stays up: receiving has stopped until the program is restarted.
+            self._status.setText(
+                f"decoding stopped: {rx['decode_failure']}; restart to receive again"
+            )
         self._queue_card.set_value(f"{tx['pending']}", "messages queued")
         self._airtime_card.set_value(f"{tx['airtime_frac'] * 100:.1f} %", "transmit duty")
         self._sent_card.set_value(f"{tx['goodput_bps'] / 1e6:.3f}", "Mbit/s")

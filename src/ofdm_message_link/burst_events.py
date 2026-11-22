@@ -644,6 +644,7 @@ class EventLogWriter:
                 "chunks_dropped_overflow": rx_transport.get("chunks_dropped_overflow"),
                 "queue_full_backpressure_events": rx_transport.get(
                     "queue_full_backpressure_events"),
+                "decode_failure": rx.get("decode_failure"),
             },
             "la": {key: (line.get("la") or {}).get(key) for key in ("mode", "mcs_index")},
             "dropped_events": line.get("dropped_events"),

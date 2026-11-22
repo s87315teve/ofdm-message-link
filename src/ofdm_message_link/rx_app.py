@@ -35,6 +35,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ofdm_link.phy.mcs_table import McsTableEntry, McsTableError, describe_mcs_entry, mcs_entry
 from ofdm_link.phy.streaming import peak_amplitude
+from ofdm_link.runtime.segment_decode_pool import DecodePoolError
 
 from . import dashboard_widgets as widgets
 from . import log_limits, options, qt_runtime
@@ -89,6 +90,11 @@ class _Bridge(QtCore.QObject):
 # acceleration.rx_min_feed_samples / rx_max_merge_wait_ms change them.
 MIN_FEED_SAMPLES = ReceiveFeed().min_samples
 MAX_MERGE_WAIT_S = ReceiveFeed().max_wait_s
+# How long a detach or stop waits for the bursts still being decoded, and how
+# long it waits for the receive thread to have done that.  With the pool's
+# own close, a stop stays inside the engine's stop timeout even if a worker hangs.
+_FINISH_DECODING_S = 1.5
+_FINISH_WAIT_S = _FINISH_DECODING_S + 1.0
 
 
 class ReceiveWorker:
@@ -127,6 +133,10 @@ class ReceiveWorker:
         self._thread: threading.Thread | None = None
         self._last_level = 0.0
         self._event_flush_reported = False
+        # Set once, when the decode pool has failed: nothing is decoded after.
+        self._decode_failure: str | None = None
+        self._finish_wanted = threading.Event()
+        self._finished = threading.Event()
 
     @property
     def stats(self):
@@ -140,6 +150,12 @@ class ReceiveWorker:
     @property
     def egress_datagrams(self) -> int:
         return 0 if self._egress is None else self._egress.datagrams
+
+    @property
+    def decode_failure(self) -> str | None:
+        """Why decoding stopped for good; None while it runs."""
+
+        return self._decode_failure
 
     def decoder_snapshot(self):
         return self._receiver.decoder_snapshot()
@@ -178,6 +194,18 @@ class ReceiveWorker:
             source, self._source = self._source, None
         if source is not None:
             source.stop()
+            self._wait_for_decoding()
+
+    def _wait_for_decoding(self) -> None:
+        """Let the receive thread deliver what is still being decoded (bounded)."""
+
+        thread = self._thread
+        if thread is None or not thread.is_alive() or self._decode_failure is not None:
+            return
+        self._finished.clear()
+        self._finish_wanted.set()
+        self._attached.set()
+        self._finished.wait(_FINISH_WAIT_S)
 
     def _run(self) -> None:
         # An engine child's bridge batches its events (engine._EventSink):
@@ -191,6 +219,8 @@ class ReceiveWorker:
                 self._event_flush_failed(error)
             source = self.source
             if source is None:
+                if self._finish_wanted.is_set():
+                    self._finish_decoding()
                 self._attached.wait(0.1)
                 self._attached.clear()
                 continue
@@ -211,6 +241,10 @@ class ReceiveWorker:
                     delivered = self._receiver.feed(chunk, assume_finite=True)
                 else:
                     delivered = self._receiver.feed(chunk)
+            except DecodePoolError as error:
+                self._decoding_failed(error)
+                self._discard_samples(flush)
+                break
             except Exception as error:  # surfaced in the window, never silent
                 self._bridge.failed.emit(f"{type(error).__name__}: {error}")
                 continue
@@ -242,10 +276,68 @@ class ReceiveWorker:
                     self._notify_observer(source, chunk, snrs)
                 except Exception as error:  # surfaced in the window, never silent
                     self._bridge.failed.emit(f"observer {type(error).__name__}: {error}")
+        self._finish_decoding()
         try:
             flush()
         except Exception as error:
             self._event_flush_failed(error)
+
+    def _deliver(self, delivered) -> None:
+        for message in delivered:
+            if self._egress is not None:
+                self._egress.forward(message.message.payload)
+            self._bridge.message.emit(message)
+
+    def _finish_decoding(self) -> None:
+        """On the receive thread: deliver the bursts still being decoded, bounded."""
+
+        self._finish_wanted.clear()
+        flush = getattr(self._receiver, "flush", None)
+        try:
+            if flush is not None and self._decode_failure is None:
+                try:
+                    delivered = flush(_FINISH_DECODING_S)
+                except TimeoutError:
+                    delivered = self._receiver.collect()
+                    self._bridge.failed.emit(
+                        f"decode workers did not finish within {_FINISH_DECODING_S:g} s; "
+                        "bursts still in flight may be lost"
+                    )
+                self._deliver(delivered)
+        except DecodePoolError as error:
+            self._decoding_failed(error)
+        except Exception as error:  # surfaced in the window, never silent
+            self._bridge.failed.emit(f"{type(error).__name__}: {error}")
+        finally:
+            self._finished.set()
+
+    def _decoding_failed(self, error: DecodePoolError) -> None:
+        """The pool is gone: deliver what it had decoded and say so, once."""
+
+        first = self._decode_failure is None
+        if first:
+            self._decode_failure = str(error)
+        try:
+            self._deliver(error.delivered)
+            if first:
+                self._bridge.failed.emit(f"decoding stopped: {error}")
+        except Exception as failure:
+            self._event_flush_failed(failure)
+
+    def _discard_samples(self, flush) -> None:
+        """After a decode failure: keep the transport's queue moving, decode nothing."""
+
+        while not self._stop.is_set():
+            try:
+                flush()
+            except Exception as error:
+                self._event_flush_failed(error)
+            source = self.source
+            if source is None:
+                self._attached.wait(0.1)
+                self._attached.clear()
+                continue
+            source.recv(0.2)
 
     def _event_flush_failed(self, error: Exception) -> None:
         """Events that cannot be sent must not end the receive thread.
@@ -361,7 +453,7 @@ class ReceiveWorker:
         self._stop.set()
         self._attached.set()
         if self._thread is not None:
-            self._thread.join(timeout=1.5)
+            self._thread.join(timeout=_FINISH_WAIT_S)
             self._thread = None
         self.detach()
         if self._egress is not None:
@@ -701,6 +793,9 @@ class ReceiveWindow(QtWidgets.QWidget):
     def _on_failed(self, message: str) -> None:
         self._status.setText(f"receive error: {message}")
 
+    def _decode_failure_text(self) -> str | None:
+        return getattr(self._worker, "decode_failure", None)
+
     def _counters(self, stats) -> dict[str, int]:
         """Every cumulative counter the dashboard windows over."""
 
@@ -736,6 +831,10 @@ class ReceiveWindow(QtWidgets.QWidget):
                 follow_tail=False,
                 text=self._hardware_rows(source, snapshot),
             )
+        failure = self._decode_failure_text()
+        if failure is not None:
+            # Stays up: receiving has stopped until the program is restarted.
+            self._status.setText(f"decoding stopped: {failure}; restart to receive again")
         if self._stats_log is not None:
             self._write_stats_log(stats, snapshot, view)
 
@@ -898,6 +997,7 @@ class ReceiveWindow(QtWidgets.QWidget):
             "snr_method": "preamble",
             "mean_effective_snr_db": _mean_or_none(self._snrs),
             "egress_datagrams": self._worker.egress_datagrams,
+            "decode_failure": self._decode_failure_text(),
             "transport": transport,
             # Dashboard view, added for the GUI; the fields above keep their
             # cumulative meaning even after Reset stats.

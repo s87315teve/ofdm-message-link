@@ -367,7 +367,8 @@ def test_a_worker_death_during_a_drain_keeps_the_results_before_it():
     pool = _queued(_Finished(0), _Finished(1), _WorkerDied(2))
     with pytest.raises(DecodePoolError, match="died"):
         pool.drain(timeout=0.01)
-    assert _numbers(pool.drain(timeout=0.01)) == [0, 1]
+    # The task that died comes back as a failure, so every segment has its result.
+    assert _numbers(pool.drain(timeout=0.01)) == [0, 1, None]
 
 
 def test_a_worker_death_under_backpressure_keeps_the_results_before_it():
@@ -376,7 +377,7 @@ def test_a_worker_death_under_backpressure_keeps_the_results_before_it():
     segment = object.__new__(BurstSegment)
     with pytest.raises(DecodePoolError, match="died"):
         pool.submit_many((segment,))
-    assert _numbers(pool.collect()) == [0]
+    assert _numbers(pool.collect()) == [0, None]
 
 
 def _annotate_slowly(slow_mcs: int, burst):

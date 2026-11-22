@@ -83,6 +83,7 @@ STATS_INTERVAL_S = 0.5
 LA_HISTORY_S = 60.0
 EXIT_ATTACH_FAILED = 2
 EXIT_ENGINE_DIED = 3
+EXIT_DECODE_FAILED = 4
 BANNER = (
     "DEMO ONLY - bidirectional FDD link, UDP semantics: no ACK, no ARQ, lost bursts stay "
     "lost. Not throughput, reliability or RF acceptance evidence."
@@ -141,6 +142,14 @@ class NodeMonitor:
         self.last_line: dict[str, Any] | None = None
         self.last_views: tuple[Any, Any] = (None, None)
         self.messages = 0
+
+    @property
+    def decode_failure(self) -> str | None:
+        """Why the child stopped decoding for good; None while it decodes."""
+
+        with self._lock:
+            stats = self.stats
+        return None if stats is None else (stats.get("rx") or {}).get("decode_failure")
 
     def la_snapshot(self) -> tuple[tuple[float, int | None, float | None, bool], ...]:
         with self._lock:
@@ -242,6 +251,7 @@ class NodeMonitor:
                     "own_seed_drops": receiver.get("own_seed_drops", 0),
                     "sequence_resyncs": receiver.get("sequence_resyncs", 0),
                     "control_handler_errors": receiver.get("control_handler_errors", 0),
+                    "decode_failure": rx.get("decode_failure"),
                     "transport": transport,
                 },
                 "la": {
@@ -390,6 +400,13 @@ class HeadlessNode:
             self.stats_log.write(json.dumps(record, default=str) + "\n")
             self.stats_log.flush()
 
+    def _log_line(self, now: float) -> None:
+        line = self.monitor.line(now)
+        if line is not None:
+            self._write(line)
+            if self.events is not None:
+                self.events.status(line)
+
     def _log_mark(self, text: str) -> None:
         self._write({"monotonic_s": self.clock(), "node_id": self.monitor.node_id,
                      "mark": text})
@@ -434,6 +451,11 @@ class HeadlessNode:
                 if not getattr(self.worker, "alive", True):
                     print("node_app: the radio engine process exited", file=self.out)
                     return EXIT_ENGINE_DIED
+                failure = self.monitor.decode_failure
+                if failure is not None:
+                    print(f"node_app: decoding stopped: {failure}", file=self.out)
+                    self._log_line(self.clock())
+                    return EXIT_DECODE_FAILED
                 now = self.clock()
                 elapsed = now - ready
                 self._apply_gain_steps(elapsed)
@@ -441,11 +463,7 @@ class HeadlessNode:
                     break
                 if now >= next_line:
                     next_line += STATS_INTERVAL_S
-                    line = self.monitor.line(now)
-                    if line is not None:
-                        self._write(line)
-                        if self.events is not None:
-                            self.events.status(line)
+                    self._log_line(now)
                 wait = max(0.0, min(next_line - self.clock(), 0.05))
                 if self.control is not None:
                     self.control.poll(wait)

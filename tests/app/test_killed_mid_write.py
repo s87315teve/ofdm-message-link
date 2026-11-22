@@ -201,7 +201,66 @@ def scenario_owner_of_a_pool(pid_path):
 
 
 
+def _hang_in_annotate(_burst):
+    time.sleep(3600)
+
+
+def scenario_stop_with_a_hung_worker():
+    from test_rx_chunk_merge import _Bridge, _QueueSource
+
+    from ofdm_message_link.rx_app import ReceiveWorker
+
+    receiver, stream = _receiver_with(_hang_in_annotate)
+    workers = list(receiver._pool._executor._processes)
+    worker = ReceiveWorker(receiver, _Bridge())
+    worker.start()
+    worker.attach(_QueueSource([stream]))
+    deadline = time.monotonic() + 15.0
+    while receiver.stats.samples_consumed == 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.2)
+    started = time.monotonic()
+    worker.stop()
+    assert time.monotonic() - started < 9.0  # inside the engine's own stop timeout
+    assert _all_gone(workers, 3.0)
+
+
+def _die_writing_a_result_at_startup():
+    """Runs as the worker unpickles its arguments, before its initializer."""
+
+    results = [item for item in gc.get_objects()
+               if isinstance(item, multiprocessing.queues.SimpleQueue)]
+    _write_part_of_a_message(results[0]._writer)
+    _die()
+
+
+class _KillsTheWorkerAtStartup:
+    def __call__(self, _burst):
+        return None
+
+    def __reduce__(self):
+        return (_die_writing_a_result_at_startup, ())
+
+
+def scenario_worker_cut_off_during_startup():
+    from stream_fixtures import MEASUREMENT, profile
+
+    from ofdm_link.runtime.segment_decode_pool import DecodePoolError, SegmentDecodePool
+
+    started = time.monotonic()
+    try:
+        SegmentDecodePool(profile(MEASUREMENT).config, workers=2,
+                          annotate=_KillsTheWorkerAtStartup())
+    except DecodePoolError:
+        pass
+    else:
+        raise AssertionError("a pool whose workers died was built")
+    assert time.monotonic() - started < 15.0
+
+
 SCENARIOS = {
+    "stop_with_a_hung_worker": scenario_stop_with_a_hung_worker,
+    "worker_cut_off_during_startup": scenario_worker_cut_off_during_startup,
     "event_cut_off": scenario_event_cut_off,
     "reply_cut_off": scenario_reply_cut_off,
     "stop_with_a_full_control_pipe": scenario_stop_with_a_full_control_pipe,
@@ -284,6 +343,14 @@ def test_an_engine_leaves_its_loop_when_its_parent_is_killed(run, tmp_path, cut_
 @pytest.mark.parametrize("when", ["drain", "close"])
 def test_a_decode_worker_killed_in_a_result_write_breaks_the_pool(run, when):
     run("decode_worker_cut_off", when)
+
+
+def test_stop_is_bounded_with_a_hung_decode_worker(run):
+    run("stop_with_a_hung_worker")
+
+
+def test_a_worker_killed_in_a_write_during_startup_fails_the_pool(run):
+    run("worker_cut_off_during_startup")
 
 
 def test_decode_workers_exit_when_the_pool_owner_is_killed(run, tmp_path):
