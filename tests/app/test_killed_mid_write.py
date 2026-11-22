@@ -275,6 +275,7 @@ def scenario_a_worker_the_executor_would_start_late():
     """Only one worker started with the pool; the other would come with a later submit."""
 
     from concurrent.futures.process import ProcessPoolExecutor
+
     from stream_fixtures import MEASUREMENT, profile
 
     from ofdm_link.runtime.segment_decode_pool import SegmentDecodePool
