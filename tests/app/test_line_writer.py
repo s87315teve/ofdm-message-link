@@ -232,3 +232,48 @@ def test_events_writer_counts_a_failure_on_its_writer_thread(tmp_path):
     rows = read_events(str(path))
     assert [row["k"] for row in rows] == ["start", "mark", "stop"]
     assert rows[-1]["write_errors"] == 1
+
+
+def test_a_close_that_times_out_counts_the_lines_not_written_and_says_so_once():
+    gate = threading.Event()
+    target = _File(gate=gate)
+    stderr = io.StringIO()
+    writer = BackgroundLineWriter(target, stderr=stderr)
+    for number in range(50):
+        writer.put(f"{number}\n")
+    assert target.in_write.wait(5.0)  # the thread is stuck in the first write
+    assert writer.close(timeout=0.05) is False
+    assert writer.close(timeout=0.05) is False  # not counted or reported twice
+    # What a process that exits now has lost, the stuck line included.
+    assert writer.dropped == 50 and writer.errors == 50
+    assert "50 line(s)" in writer.last_error
+    lines = stderr.getvalue().splitlines()
+    assert len(lines) == 1 and "50 line(s) not written" in lines[0]
+
+
+def test_lines_written_after_a_timed_out_close_come_off_the_count():
+    gate = threading.Event()
+    target = _File(gate=gate)
+    stderr = io.StringIO()
+    writer = BackgroundLineWriter(target, stderr=stderr)
+    for number in range(50):
+        writer.put(f"{number}\n")
+    assert target.in_write.wait(5.0)
+    assert writer.close(timeout=0.05) is False
+    gate.set()
+    assert writer.close(5.0) is True
+    assert target.text == [f"{number}\n" for number in range(50)]
+    assert writer.dropped == 0 and writer.errors == 0 and writer.last_error is None
+    assert len(stderr.getvalue().splitlines()) == 1
+
+
+def test_a_close_that_times_out_with_nothing_queued_reports_nothing():
+    target = _File()
+    stderr = io.StringIO()
+    writer = BackgroundLineWriter(target, stderr=stderr)
+    writer.put("a\n")
+    assert writer.drain()
+    writer._count_unwritten(0.0)  # what a close that ran out of time calls
+    assert writer.close(5.0) is True
+    assert writer.dropped == 0 and writer.errors == 0
+    assert stderr.getvalue() == ""

@@ -15,7 +15,10 @@ it has finished, from the caller's thread that writes inline).  A line that cann
 queued is dropped and counted the same way (``dropped`` as well): beyond
 ``max_queue`` waiting lines (a disk that stopped), or while :meth:`close` is
 still writing the queue out.  After the thread has finished, a line is
-written on the caller's thread.
+written on the caller's thread.  A :meth:`close` that times out counts every
+line not yet written as dropped and says so once on stderr, because the
+process usually exits next and they are lost.  The thread keeps writing
+meanwhile, and each line it still gets out comes off the count.
 
 It stands in for a text file that only gets ``write``/``flush``/``close``:
 ``write`` queues and ``flush`` returns at once (the thread flushes).  Under
@@ -84,6 +87,13 @@ class BackgroundLineWriter:
         self._io_lock = threading.Lock()
         self._closed = False
         self._reported = False
+        # Lines queued, and lines the thread is done with (written or failed).
+        self._queued = 0
+        self._finished = 0
+        self._close_timed_out = False
+        # Counted as dropped by a close that timed out, and not written yet.
+        self._forfeited = 0
+        self._error_before_timeout: str | None = None
         self.errors = 0
         self.dropped = 0
         self.last_error: str | None = None
@@ -98,6 +108,7 @@ class BackgroundLineWriter:
         with self._state_lock:
             if not self._closed:
                 if self._queue.qsize() < self._max_queue:
+                    self._queued += 1
                     self._queue.put(text)
                     return
                 self._drop("queue full")
@@ -134,6 +145,7 @@ class BackgroundLineWriter:
 
         True when the thread finished within ``timeout``.  Idempotent.  A
         file the writer owns is closed only once the thread has finished.
+        On a timeout, the lines not written yet count as dropped.
         """
 
         with self._state_lock:
@@ -142,6 +154,8 @@ class BackgroundLineWriter:
                 self._queue.put(_STOP)
         if threading.current_thread() is not self._thread:
             self._thread.join(timeout)
+            if self._thread.is_alive():
+                self._count_unwritten(timeout)
         done = not self._thread.is_alive()
         if done and self._close_file:
             with self._io_lock:
@@ -152,6 +166,41 @@ class BackgroundLineWriter:
                     self._failed(error)
                 self._report_once()
         return done
+
+    def _count_unwritten(self, timeout: float) -> None:
+        with self._state_lock:
+            if self._close_timed_out:
+                return
+            self._close_timed_out = True
+            left = self._queued - self._finished
+            if not left:
+                return
+            self._forfeited = left
+            self.dropped += left
+            self.errors += left
+            self._error_before_timeout = self.last_error
+            self.last_error = f"close timed out with {left} line(s) not written"
+            # This is the report of these; the thread must not add its own.
+            self._reported = True
+        try:
+            print(
+                f"{self.name}: close timed out after {timeout:g} s; "
+                f"{left} line(s) not written",
+                file=self._stderr if self._stderr is not None else sys.stderr,
+                flush=True,
+            )
+        except Exception:
+            pass
+
+    def _line_finished(self) -> None:
+        with self._state_lock:
+            self._finished += 1
+            if self._forfeited:  # it got out after all
+                self._forfeited -= 1
+                self.dropped -= 1
+                self.errors -= 1
+                if not self._forfeited:
+                    self.last_error = self._error_before_timeout
 
     @property
     def closed(self) -> bool:
@@ -186,6 +235,7 @@ class BackgroundLineWriter:
                         item.event.set()
                     else:
                         dirty = self._write(item) or dirty
+                        self._line_finished()
                         if dirty and (empty() or clock() - last_flush >= self._flush_every_s):
                             self._flush()
                             dirty = False
