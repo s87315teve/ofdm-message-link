@@ -358,6 +358,10 @@ class SegmentDecodePool:
     def _start_workers(self) -> None:
         try:
             futures = [self._executor.submit(_worker_is_ready) for _ in range(self._workers)]
+            # All of them now.  The executor would start one on a later submit,
+            # unseen by the watch below, and it would hold the result pipe open.
+            while len(self._executor._processes) < self._workers:
+                self._executor._spawn_process()
             # Before waiting: a worker can die in a write during startup too.
             threading.Thread(
                 target=_break_pool_if_stuck,

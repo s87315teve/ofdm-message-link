@@ -258,7 +258,46 @@ def scenario_worker_cut_off_during_startup():
     assert time.monotonic() - started < 15.0
 
 
+def _die_writing_after(delay_s):
+    time.sleep(delay_s)
+    results = [item for item in gc.get_objects()
+               if isinstance(item, multiprocessing.queues.SimpleQueue)]
+    results[0]._wlock.acquire()
+    _write_part_of_a_message(results[0]._writer)
+    _die()
+
+
+def _sleep_for(delay_s):
+    time.sleep(delay_s)
+
+
+def scenario_a_worker_the_executor_would_start_late():
+    """Only one worker started with the pool; the other would come with a later submit."""
+
+    from concurrent.futures.process import ProcessPoolExecutor
+    from stream_fixtures import MEASUREMENT, profile
+
+    from ofdm_link.runtime.segment_decode_pool import SegmentDecodePool
+
+    adjust = ProcessPoolExecutor._adjust_process_count
+
+    def only_the_first(executor):
+        if not executor._processes:
+            adjust(executor)
+
+    ProcessPoolExecutor._adjust_process_count = only_the_first
+    pool = SegmentDecodePool(profile(MEASUREMENT).config, workers=2)
+    ProcessPoolExecutor._adjust_process_count = adjust
+    dying = pool._executor.submit(_die_writing_after, 0.3)
+    for _ in range(3):
+        pool._executor.submit(_sleep_for, 2.0)
+    assert dying.exception(timeout=15.0) is not None
+    pool.close()
+    # The script exits normally: a manager thread still stuck would hang it here.
+
+
 SCENARIOS = {
+    "a_worker_the_executor_would_start_late": scenario_a_worker_the_executor_would_start_late,
     "stop_with_a_hung_worker": scenario_stop_with_a_hung_worker,
     "worker_cut_off_during_startup": scenario_worker_cut_off_during_startup,
     "event_cut_off": scenario_event_cut_off,
@@ -351,6 +390,10 @@ def test_stop_is_bounded_with_a_hung_decode_worker(run):
 
 def test_a_worker_killed_in_a_write_during_startup_fails_the_pool(run):
     run("worker_cut_off_during_startup")
+
+
+def test_a_worker_started_late_cannot_hold_the_result_pipe_open(run):
+    run("a_worker_the_executor_would_start_late")
 
 
 def test_decode_workers_exit_when_the_pool_owner_is_killed(run, tmp_path):
