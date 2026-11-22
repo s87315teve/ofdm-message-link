@@ -567,16 +567,32 @@ class SegmentDecodePool:
             return
         self._closed = True
         self._shut_down()
+        self.give_up()
+
+    def give_up(self) -> int:
+        """Stop waiting: keep what has finished, with a failure for what has not.
+
+        Every in-flight segment gets its one result, in stream order, for the
+        next :meth:`collect`.  Returns how many had not finished.
+        """
+
+        unfinished = 0
         while self._pending:
             future, count = self._pending.popleft()
-            try:
-                results = future.result(timeout=0.0)
-            except Exception as error:  # broken, cancelled, or never finished
+            if future.done():
+                try:
+                    results = future.result(timeout=0.0)
+                except Exception as error:  # broken, cancelled, or its own failure
+                    results = (failed_result(error),) * count
+            else:
+                unfinished += count
+                error = TimeoutError("still decoding when the pool stopped")
                 results = (failed_result(error),) * count
             self._taken.extend(results)
             self._in_flight -= count
             self._completed += count
             self._worker_errors += sum(1 for result in results if result.error is not None)
+        return unfinished
 
     def _shut_down(self) -> None:
         """Bounded even with a hung worker, which a plain shutdown would wait for."""

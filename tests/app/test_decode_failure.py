@@ -244,14 +244,18 @@ def test_a_result_that_lands_after_close_emptied_the_queue_is_kept():
 def test_a_stop_that_times_out_delivers_what_finished_before_it_reports():
     from types import SimpleNamespace
 
-    message = SimpleNamespace(message=SimpleNamespace(payload=b"decoded"))
+    first = SimpleNamespace(message=SimpleNamespace(payload=b"in order"))
+    second = SimpleNamespace(message=SimpleNamespace(payload=b"behind the unfinished one"))
 
     class Receiver:
         def flush(self, _timeout):
             raise TimeoutError
 
         def collect(self):
-            return (message,)
+            return (first,)
+
+        def give_up_decoding(self):
+            return (second,), 1
 
     class BrokenReport:
         def emit(self, _text):
@@ -260,9 +264,49 @@ def test_a_stop_that_times_out_delivers_what_finished_before_it_reports():
     bridge = _Bridge()
     bridge.failed = BrokenReport()
     worker = ReceiveWorker(Receiver(), bridge)
-    worker._finish_decoding()  # a report that fails does not end the receive thread
-    assert bridge.message.values == [message]
+    worker._finish_decoding(final=True)  # a report that fails does not end the thread
+    assert bridge.message.values == [first, second]
     assert worker._finished.is_set()
+
+
+def _annotate_mcs8_is_slow(delay_s: float, burst):
+    if burst.mcs_index == 8:
+        time.sleep(delay_s)
+    return burst_quality(burst)
+
+
+def test_stop_delivers_the_bursts_that_finished_behind_one_that_did_not():
+    link = profile(MEASUREMENT)
+    stream, payloads = v5_stream(link, seed=107, bursts=6, mcs_indices=(8, 12, 16, 12, 16, 12))
+    receiver = _receiver(link, functools.partial(_annotate_mcs8_is_slow, 6.0))
+    bridge = _Bridge()
+    worker = ReceiveWorker(receiver, bridge)
+    worker.start()
+    worker.attach(_Stream(_chunks(stream)))
+    _wait_for(lambda: receiver.stats.samples_consumed >= stream.size)
+    time.sleep(0.5)  # the other worker has decoded everything behind the slow burst
+    started = time.monotonic()
+    worker.stop()
+    assert time.monotonic() - started < 6.0
+    assert [m.message.payload for m in bridge.message.values] == payloads[1:]
+    assert bridge.failed.values == ["1 burst(s) still decoding at stop were dropped"]
+    assert worker.decode_failure is None
+
+
+def test_a_detach_that_times_out_keeps_the_unfinished_bursts_for_later():
+    link = profile(MEASUREMENT)
+    stream, payloads = v5_stream(link, seed=109, bursts=6, mcs_indices=(8, 12, 16, 12, 16, 12))
+    receiver = _receiver(link, functools.partial(_annotate_mcs8_is_slow, 2.0))
+    bridge = _Bridge()
+    worker = ReceiveWorker(receiver, bridge)
+    worker.start()
+    worker.attach(_Stream(_chunks(stream)))
+    _wait_for(lambda: receiver.stats.samples_consumed >= stream.size)
+    worker.detach()  # 1.5 s, less than the slow burst: nothing is given up yet
+    assert bridge.failed.values == []
+    worker.stop()  # by now it has finished
+    assert [m.message.payload for m in bridge.message.values] == payloads
+    assert bridge.failed.values == []
 
 
 def test_a_drain_timeout_bounds_the_whole_wait():

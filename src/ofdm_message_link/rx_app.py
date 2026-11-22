@@ -281,7 +281,7 @@ class ReceiveWorker:
                     self._notify_observer(source, chunk, snrs)
                 except Exception as error:  # surfaced in the window, never silent
                     self._bridge.failed.emit(f"observer {type(error).__name__}: {error}")
-        self._finish_decoding()
+        self._finish_decoding(final=True)
         try:
             flush()
         except Exception as error:
@@ -299,8 +299,13 @@ class ReceiveWorker:
         except Exception as failure:
             self._event_flush_failed(failure)
 
-    def _finish_decoding(self) -> None:
-        """On the receive thread: deliver the bursts still being decoded, bounded."""
+    def _finish_decoding(self, *, final: bool = False) -> None:
+        """On the receive thread: deliver the bursts still being decoded, bounded.
+
+        What has not finished in time stays in flight for the next session,
+        unless this is the ``final`` call: then the bursts that did finish go
+        out, in stream order, past the ones that did not.
+        """
 
         self._finish_wanted.clear()
         flush = getattr(self._receiver, "flush", None)
@@ -309,12 +314,15 @@ class ReceiveWorker:
                 try:
                     self._deliver(flush(_FINISH_DECODING_S))
                 except TimeoutError:
-                    # What did finish goes out first: the report may fail.
                     self._deliver(self._receiver.collect())
-                    self._bridge.failed.emit(
-                        f"decode workers did not finish within {_FINISH_DECODING_S:g} s; "
-                        "bursts still in flight may be lost"
-                    )
+                    if final:
+                        # What did finish goes out first: the report may fail.
+                        delivered, unfinished = self._receiver.give_up_decoding()
+                        self._deliver(delivered)
+                        if unfinished:
+                            self._bridge.failed.emit(
+                                f"{unfinished} burst(s) still decoding at stop were dropped"
+                            )
         except DecodePoolClosed as error:
             self._deliver_guarded(error.delivered)
         except DecodePoolError as error:

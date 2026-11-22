@@ -1046,6 +1046,14 @@ class MessageReceiver:
             return ()
         return self._take_from_pool(self._pool.collect)
 
+    def give_up_decoding(self) -> tuple[tuple[ReceivedMessage, ...], int]:
+        """The messages of what has finished, and how many bursts had not."""
+
+        if self._pool is None:
+            return (), 0
+        unfinished = self._pool.give_up()
+        return self._take_from_pool(self._pool.collect), unfinished
+
     def interrupt_decoding(self) -> None:
         """From another thread: end a feed that is waiting on the decode workers."""
 
