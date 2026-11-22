@@ -391,6 +391,41 @@ def test_the_events_a_child_sends_as_it_stops_all_reach_the_parent():
     assert got == list(range(200))
 
 
+def _child_sends_a_few_as_it_stops(events, control, replies):
+    sink = engine._EventSink(events, samples_per_second=10.0)
+    replies.put(("ok", "up"))
+    while control.get()[0] != "stop":
+        pass
+    for number in range(24):  # all of it fits in the pipe, so the child can exit
+        sink.put("final", number)
+        if number % 4 == 3:
+            sink.flush_events()
+
+
+def test_events_a_stalled_pump_cannot_deliver_are_counted(capsys):
+    got = []
+
+    def dispatch(kind, value):
+        if kind == "final":
+            if not got:
+                time.sleep(1.6)  # longer than stop's join of the pump
+            got.append(value)
+
+    process = engine._EngineProcess(_child_sends_a_few_as_it_stops, (), dispatch)
+    process.start()
+    pump = process._pump
+    assert process._replies.get(timeout=60) == ("ok", "up")
+    started = time.monotonic()
+    process.stop()
+    assert time.monotonic() - started < 3.0  # stop did not wait for the listener
+    pump.join(5.0)
+    assert not pump.is_alive()
+    lost = process.events_lost_at_stop
+    assert lost > 0 and len(got) + lost == 24
+    assert got == list(range(len(got)))
+    assert f"{lost} event(s)" in capsys.readouterr().err
+
+
 def _child_serves_until_stopped(events, control, replies):
     sink = engine._EventSink(events, samples_per_second=10.0)
 

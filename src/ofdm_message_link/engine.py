@@ -337,6 +337,8 @@ class _EngineProcess:
         self._stop_requested = threading.Event()
         # Set once the child is gone: the pump then reads the pipe to its end.
         self._stopping = threading.Event()
+        # Events still in the pipe when stop() gave up on a stalled pump.
+        self.events_lost_at_stop = 0
         self._lock = threading.Lock()
 
     @property
@@ -425,10 +427,30 @@ class _EngineProcess:
         self._stopping.set()
         if self._pump is not None:
             self._pump.join(1.0)
+            if self._pump.is_alive():
+                self._count_unread_events()
             self._pump = None
         for channel in (self._events, self._control, self._replies):
             channel.close()
             channel.join_thread()
+
+    def _count_unread_events(self) -> None:
+        """A listener holds the pump past stop's join: say what it will not deliver.
+
+        The child is gone, so this reads at most one pipe's worth and never
+        waits.  The pump's next read then finds the queue closed and it exits.
+        """
+
+        if self._process.is_alive():
+            return
+        while True:
+            try:
+                self.events_lost_at_stop += len(self._events.get(timeout=0.0))
+            except (queue.Empty, EOFError, OSError, ValueError):
+                break
+        if self.events_lost_at_stop:
+            print(f"[engine-events] stop: {self.events_lost_at_stop} event(s) not delivered "
+                  "(a listener held the pump)", file=sys.stderr, flush=True)
 
 
 class _TransportView:
