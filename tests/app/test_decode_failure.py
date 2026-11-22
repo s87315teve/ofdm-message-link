@@ -374,6 +374,24 @@ def test_resetting_the_stream_keeps_absolute_offsets():
     assert decoder._pending_acquisition is None and decoder._required_sample_count is None
 
 
+def test_a_worker_that_died_with_nothing_in_flight_is_reported_at_stop():
+    link = profile(MEASUREMENT)
+    stream, payloads = v5_stream(link, seed=113, bursts=3, mcs_indices=_MCS)
+    receiver = MessageReceiver(link, decode_workers=2)
+    bridge = _Bridge()
+    worker = ReceiveWorker(receiver, bridge)
+    worker.start()
+    worker.attach(_Streaming(_chunks(stream)))  # later feeds collect the results
+    _wait_for(lambda: len(bridge.message.values) == len(payloads))
+    executor = receiver._pool._executor
+    os.kill(next(iter(executor._processes)), signal.SIGKILL)
+    _wait_for(lambda: executor._broken, timeout=10.0)
+    worker.stop()
+    assert worker.decode_failure == "a segment decode worker died"
+    assert bridge.failed.values == ["decoding stopped: a segment decode worker died"]
+    assert [m.message.payload for m in bridge.message.values] == payloads
+
+
 def test_a_drain_timeout_bounds_the_whole_wait():
     from test_decode_pool_errors import _numbered, _queued
 

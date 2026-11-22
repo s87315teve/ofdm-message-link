@@ -463,6 +463,10 @@ class SegmentDecodePool:
         while self._pending:
             left = None if deadline is None else max(0.0, deadline - time.monotonic())
             self._taken.extend(self._take_oldest(timeout=left))
+        # A worker that died with nothing in flight has no future to say so.
+        if not self._closed and getattr(self._executor, "_broken", False):
+            self._close_keeping_results()
+            raise self._failure("a segment decode worker died")
         return self._hand_over()
 
     def _take_done(self) -> None:
