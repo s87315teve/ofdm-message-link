@@ -160,7 +160,7 @@
 來源，例如 `[acceleration] cpu_cores 1 from app default; decode_workers 4 from app default`；`rx_app` 與 `node_app`
 後面再接 `; rx_min_feed_samples 8192 from app default; rx_max_merge_wait_ms 2 from app default`。
 
-**從 v2.0–v2.1.2 複製來的設定檔要注意（v2.1.2 之後）：** 那幾版的 `default.yaml` 寫 `decode_workers: 1`、`cpu_cores: 4`，
+**從 v2.0–v2.1.2 複製來的設定檔要注意（v2.2.0 起）：** 那幾版的 `default.yaml` 寫 `decode_workers: 1`、`cpu_cores: 4`，
 但程式從來不讀。現在這兩個 key 會生效，所以這樣的設定檔會真的用 1 個 decode worker（inline decode）與 4 個 NumPy thread。
 要維持以前的行為，把兩行刪掉或改成 `null`。例如在 overlay 裡寫：
 
