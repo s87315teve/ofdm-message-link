@@ -81,6 +81,9 @@ class DecodePoolError(RuntimeError):
 class DecodePoolClosed(DecodePoolError):
     """The pool's owner closed it (a stop); no failure of the pool or a worker."""
 
+    # Segments that were still in flight and got no decode.
+    unfinished: int = 0
+
 
 def _safe_context() -> multiprocessing.context.BaseContext:
     """Return a start method that never forks this multi-threaded process."""
@@ -311,6 +314,8 @@ class SegmentDecodePool:
 
     # Set by close() and interrupt(): what ends a wait from then on is our doing.
     _closing = False
+    _unfinished_at_close = 0
+    _manager: threading.Thread | None = None
 
     def __init__(
         self,
@@ -367,10 +372,11 @@ class SegmentDecodePool:
             # unseen by the watch below, and it would hold the result pipe open.
             while len(self._executor._processes) < self._workers:
                 self._executor._spawn_process()
+            self._manager = self._executor._executor_manager_thread
             # Before waiting: a worker can die in a write during startup too.
             threading.Thread(
                 target=_break_pool_if_stuck,
-                args=(self._executor._executor_manager_thread,),
+                args=(self._manager,),
                 name="decode-pool-watch",
                 daemon=True,
             ).start()
@@ -481,7 +487,9 @@ class SegmentDecodePool:
         """The error for a pool that stopped: not a failure if the owner stopped it."""
 
         if self._closing:
-            return DecodePoolClosed("segment decode pool is closed")
+            closed = DecodePoolClosed("segment decode pool is closed")
+            closed.unfinished, self._unfinished_at_close = self._unfinished_at_close, 0
+            return closed
         return DecodePoolError(message)
 
     def _take_oldest(self, timeout: float | None) -> tuple[SegmentDecodeResult, ...]:
@@ -580,7 +588,7 @@ class SegmentDecodePool:
             return
         self._closed = True
         self._shut_down()
-        self.give_up()
+        self._unfinished_at_close = self.give_up()
 
     def give_up(self) -> int:
         """Stop waiting: keep what has finished, with a failure for what has not.
@@ -595,7 +603,10 @@ class SegmentDecodePool:
             if future.done():
                 try:
                     results = future.result(timeout=0.0)
-                except Exception as error:  # broken, cancelled, or its own failure
+                except (BrokenExecutor, CancelledError) as error:
+                    unfinished += count
+                    results = (failed_result(error),) * count
+                except Exception as error:  # the task's own failure
                     results = (failed_result(error),) * count
             else:
                 unfinished += count
@@ -610,7 +621,9 @@ class SegmentDecodePool:
     def _shut_down(self) -> None:
         """Bounded even with a hung worker, which a plain shutdown would wait for."""
 
-        manager = getattr(self._executor, "_executor_manager_thread", None)
+        # Held here, not read from the executor: shutdown clears it there, and
+        # a second caller must wait for the same thread.
+        manager = self._manager
         self._executor.shutdown(wait=False, cancel_futures=True)
         if manager is None:
             return

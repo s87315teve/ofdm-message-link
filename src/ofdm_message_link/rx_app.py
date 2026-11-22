@@ -249,7 +249,7 @@ class ReceiveWorker:
                 else:
                     delivered = self._receiver.feed(chunk)
             except DecodePoolClosed as error:  # stop() ended the wait: no failure
-                self._deliver_guarded(error.delivered)
+                self._closed_by_stop(error)
                 break
             except DecodePoolError as error:
                 self._decoding_failed(error)
@@ -298,9 +298,13 @@ class ReceiveWorker:
                 self._egress.forward(message.message.payload)
             self._bridge.message.emit(message)
 
-    def _deliver_guarded(self, delivered) -> None:
+    def _closed_by_stop(self, error: DecodePoolClosed) -> None:
         try:
-            self._deliver(delivered)
+            self._deliver(error.delivered)
+            if error.unfinished:
+                self._bridge.failed.emit(
+                    f"{error.unfinished} burst(s) still decoding at stop were dropped"
+                )
         except Exception as failure:
             self._event_flush_failed(failure)
 
@@ -329,7 +333,7 @@ class ReceiveWorker:
                                 f"{unfinished} burst(s) still decoding at stop were dropped"
                             )
         except DecodePoolClosed as error:
-            self._deliver_guarded(error.delivered)
+            self._closed_by_stop(error)
         except DecodePoolError as error:
             self._decoding_failed(error)
         except Exception as error:  # surfaced in the window, never silent

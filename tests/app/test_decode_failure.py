@@ -197,6 +197,28 @@ def test_a_stop_under_a_feed_waiting_on_a_slow_worker_reports_no_failure():
     assert bridge.failed.values == []
 
 
+def test_a_stop_that_kills_a_hung_decode_says_how_many_bursts_it_dropped():
+    link = profile(MEASUREMENT)
+    stream, _ = v5_stream(link, seed=5, bursts=8, mcs_indices=_MCS)
+    receiver = MessageReceiver(link, decode_workers=2)
+    receiver._pool.close()
+    receiver._pool = SegmentDecodePool(link.config, workers=2, max_in_flight=2, max_batch=1,
+                                       annotate=functools.partial(_annotate_slowly, 30.0))
+    bridge = _Bridge()
+    worker = ReceiveWorker(receiver, bridge)
+    worker.start()
+    worker.attach(_QueueSource([stream]))
+    thread = worker._thread
+    time.sleep(0.5)  # in back-pressure, behind two decodes that will not finish
+    started = time.monotonic()
+    worker.stop()
+    assert time.monotonic() - started < 8.0
+    thread.join(5.0)
+    assert not thread.is_alive()
+    assert worker.decode_failure is None  # stop killed them: no worker failed
+    assert bridge.failed.values == ["2 burst(s) still decoding at stop were dropped"]
+
+
 def test_a_real_worker_death_is_not_taken_for_a_close():
     from test_decode_pool_errors import _Finished, _queued, _WorkerDied
 
