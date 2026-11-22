@@ -437,13 +437,13 @@ class SegmentDecodePool:
             try:
                 future = self._executor.submit(_run_in_worker, batch[cursor : cursor + take])
             except BrokenExecutor as error:
-                self._close_keeping_results()
-                raise self._failure("a segment decode worker died") from error
+                raise self._close_after_failure("a segment decode worker died") from error
             except Exception as error:
                 # The executor refuses work (it is shutting down): these
                 # segments would silently get no result, so stop here.
-                self._close_keeping_results()
-                raise self._failure("the segment decode pool refused work") from error
+                raise self._close_after_failure(
+                    "the segment decode pool refused work"
+                ) from error
             self._pending.append((future, take))
             self._in_flight += take
             self._submitted += take
@@ -470,9 +470,8 @@ class SegmentDecodePool:
             left = None if deadline is None else max(0.0, deadline - time.monotonic())
             self._taken.extend(self._take_oldest(timeout=left))
         # A worker that died with nothing in flight has no future to say so.
-        if not self._closed and getattr(self._executor, "_broken", False):
-            self._close_keeping_results()
-            raise self._failure("a segment decode worker died")
+        if not self._closed and self._worker_died():
+            raise self._close_after_failure("a segment decode worker died")
         return self._hand_over()
 
     def _take_done(self) -> None:
@@ -492,6 +491,35 @@ class SegmentDecodePool:
             return closed
         return DecodePoolError(message)
 
+    def _close_after_failure(self, message: str) -> DecodePoolError:
+        """Close, keeping results; the error to raise.
+
+        Whose doing it was is settled first: closing takes seconds, and a stop
+        that interrupts meanwhile must not turn a real death into a clean stop.
+        """
+
+        ours = self._closing
+        self._close_keeping_results()
+        return self._failure(message) if ours else DecodePoolError(message)
+
+    def _worker_died(self) -> bool:
+        """Whether a worker has exited, even before the executor can tell.
+
+        Its manager thread may be stuck on a result cut off by the death.  Only
+        a stop makes a worker exit otherwise, and :meth:`_failure` tells those
+        apart.
+        """
+
+        if getattr(self._executor, "_broken", False):
+            return True
+        if self._manager is None:
+            return False
+        # The Process objects stay referenced, so their sentinels stay open.
+        workers = list(self._manager.processes.values())
+        return bool(workers) and bool(
+            multiprocessing.connection.wait([worker.sentinel for worker in workers], 0)
+        )
+
     def _take_oldest(self, timeout: float | None) -> tuple[SegmentDecodeResult, ...]:
         try:
             future, count = self._pending[0]
@@ -500,8 +528,7 @@ class SegmentDecodePool:
         try:
             results = future.result(timeout=timeout)
         except (BrokenExecutor, CancelledError) as error:
-            self._close_keeping_results()
-            raise self._failure("a segment decode worker died") from error
+            raise self._close_after_failure("a segment decode worker died") from error
         except BaseException as error:
             if not _raised_by_task(future, error):
                 # The wait timed out (the task is still decoding, or finished
@@ -594,9 +621,12 @@ class SegmentDecodePool:
         """Stop waiting: keep what has finished, with a failure for what has not.
 
         Every in-flight segment gets its one result, in stream order, for the
-        next :meth:`collect`.  Returns how many had not finished.
+        next :meth:`collect`.  Returns how many had not finished.  A dead
+        worker is not a timeout: this raises, with those results kept.
         """
 
+        if not self._closed and self._worker_died():
+            raise self._close_after_failure("a segment decode worker died")
         unfinished = 0
         while self._pending:
             future, count = self._pending.popleft()

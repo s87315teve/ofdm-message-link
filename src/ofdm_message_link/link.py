@@ -1056,7 +1056,11 @@ class MessageReceiver:
 
         if self._pool is None:
             return (), 0
-        unfinished = self._pool.give_up()
+        try:
+            unfinished = self._pool.give_up()
+        except DecodePoolError as error:
+            error.delivered = self._accept_results(self._pool.collect())
+            raise
         return self._take_from_pool(self._pool.collect), unfinished
 
     def interrupt_decoding(self) -> None:

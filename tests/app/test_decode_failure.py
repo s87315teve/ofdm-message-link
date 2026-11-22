@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import functools
+import gc
+import multiprocessing.queues
 import os
 import signal
+import struct
 import threading
 import time
 
@@ -412,6 +415,65 @@ def test_a_worker_that_died_with_nothing_in_flight_is_reported_at_stop():
     assert worker.decode_failure == "a segment decode worker died"
     assert bridge.failed.values == ["decoding stopped: a segment decode worker died"]
     assert [m.message.payload for m in bridge.message.values] == payloads
+
+
+def _annotate_dies_writing_the_result(delay_s: float, burst):
+    """MCS 12: after the delay, part of a result message, then SIGKILL."""
+
+    if burst.mcs_index == _KILLER_MCS:
+        time.sleep(delay_s)
+        results = [item for item in gc.get_objects()
+                   if isinstance(item, multiprocessing.queues.SimpleQueue)]
+        results[0]._wlock.acquire()
+        os.write(results[0]._writer.fileno(), struct.pack("!i", 100_000) + b"x" * 10)
+        os.kill(os.getpid(), signal.SIGKILL)
+    return burst_quality(burst)
+
+
+def test_a_worker_killed_in_a_write_during_the_final_flush_is_a_worker_death():
+    """The executor cannot see it yet: its manager is stuck reading the cut-off result."""
+
+    link = profile(MEASUREMENT)
+    stream, payloads = v5_stream(link, seed=83, bursts=6, mcs_indices=_MCS)
+    receiver = _receiver(link, functools.partial(_annotate_dies_writing_the_result, 0.9))
+    bridge = _Bridge()
+    worker = ReceiveWorker(receiver, bridge)
+    worker.start()
+    worker.attach(_QueueSource([stream]))
+    _wait_for(lambda: receiver.stats.samples_consumed >= stream.size)
+    worker.stop()
+    assert worker.decode_failure == "a segment decode worker died"
+    assert bridge.failed.values == ["decoding stopped: a segment decode worker died"]
+    got = [message.message.payload for message in bridge.message.values]
+    positions = [payloads.index(payload) for payload in got]
+    assert positions[:1] == [0] and positions == sorted(set(positions))  # decoded ones delivered
+    assert all(_MCS[position % 3] != _KILLER_MCS for position in positions)
+
+
+def test_a_worker_stopped_by_our_own_interrupt_is_not_a_death():
+    from test_decode_pool_errors import _Finished, _queued
+
+    pool = _queued(_Finished(0))
+    pool._closing = True
+    pool._worker_died = lambda: True
+    with pytest.raises(DecodePoolClosed):
+        pool.give_up()
+
+
+def test_a_death_seen_before_stop_interrupts_stays_a_death():
+    """Closing takes seconds; an interrupt arriving meanwhile must not relabel it."""
+
+    from test_decode_pool_errors import _Finished, _queued, _WorkerDied
+
+    pool = _queued(_Finished(0), _WorkerDied(1))
+
+    def shut_down_while_stop_interrupts():
+        pool._closing = True
+
+    pool._shut_down = shut_down_while_stop_interrupts
+    with pytest.raises(DecodePoolError, match="died") as caught:
+        pool.drain(timeout=0.01)
+    assert not isinstance(caught.value, DecodePoolClosed)
 
 
 def test_a_drain_timeout_bounds_the_whole_wait():
