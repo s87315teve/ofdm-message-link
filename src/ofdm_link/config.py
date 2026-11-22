@@ -154,10 +154,11 @@ class AggregationConfigSection:
     The 8 ms default keeps a burst at 10 MS/s within the 80 000 samples the
     receiver's timing correction covers at 50 ppm (4 samples), and
     validation refuses a cap beyond that at the configured sample rate.
-    ``min_burst_interval_ms`` caps the burst rate (4 ms: at most 250/s) by
-    holding a burst back until that long after the previous one started
-    (start to start), filling it
-    meanwhile; it adds latency only when bursts are back to back.  0 disables.
+    ``min_burst_interval_ms`` holds a burst back until that long after the
+    previous one started (start to start), filling it meanwhile, but only
+    while the pending data fits in one burst: a larger backlog goes out at
+    once, so it does not cap the burst rate.  It adds latency only when bursts
+    are back to back.  0 disables.
     ``max_psdu_bytes`` may not exceed the receiver's ``phy.rx.max_psdu_bytes``.
     """
 

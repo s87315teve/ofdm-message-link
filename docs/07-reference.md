@@ -40,7 +40,7 @@
 | `--aggregation {on,off}` | `on`：radio 可以接下一個 burst 時，把 queue 裡的 datagram 放進同一個 burst（在下面的上限內）。`off`：一個 burst 一個 datagram，供 A/B 量測。預設取 `mac.aggregation.enabled`（`on`） |
 | `--aggregation-max-subframes N` | 一個 burst 最多幾個 datagram，1–64，預設取設定檔（32） |
 | `--aggregation-max-wait-ms MS` | 還有空間的 burst 最多等 MS 毫秒（從最早的 message 到達算起），讓更多 datagram 一起走。0–1000，預設 0：不等，負載低時不增加延遲 |
-| `--min-burst-interval-ms MS` | 兩個 burst 開始交給 radio 的時間至少隔多久（start 到 start：比間隔長的 burst 後面不會多等），0–50，預設取設定檔（4 ms，最多每秒 250 個 burst）；等的時候繼續收 datagram，讓下一個 burst 帶比較多。閒置之後的第一個 burst 不多等，滿的 burst 不會被留。0 關閉。實際等待是它與 `--aggregation-max-wait-ms` 較大的那個。PC 送往 Jetson 時用 25（[`tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml)，7.10 節） |
+| `--min-burst-interval-ms MS` | 待送資料裝得進一個 burst 時，下一個 burst 等到上一個開始交給 radio 之後 MS 毫秒才送（start 到 start：比間隔長的 burst 後面不會多等），0–50，預設取設定檔（4 ms）；等的時候繼續收 datagram，讓這個 burst 帶比較多。待送資料超過一個 burst 時立刻送出、不等，所以這不是 burst rate 的上限。閒置之後的第一個 burst 不多等，滿的 burst 不會被留。0 關閉。實際等待是它與 `--aggregation-max-wait-ms` 較大的那個。PC 送往 Jetson 時用 25（[`tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml)，7.10 節） |
 | `--max-burst-airtime-ms MS` | 聚合後的 burst 最長多久（含 guard），大於 0、最大 100，預設取設定檔（8 ms）。不論設多少，聚合也會在 80 000 samples 停止；超過上限的單一 datagram 仍然單獨送出 |
 | `--enable-rf` / `--acknowledgement` | RF 發射授權，`--transport uhd` 與 `--transport pluto` 必要。Acknowledgement 的文字是 `I acknowledge that this process will transmit RF`，必須一字不差 |
 
@@ -649,11 +649,10 @@ PC→Jetson 延遲中位數變短（239 → 148 ms）。200/s 時 transport 收�
 **PC 送往 Jetson 時的 burst 間隔（`--min-burst-interval-ms`，預設不變）。** Jetson 每收一個 burst 都有固定成本，所以送往
 Jetson 的那一端可以把 burst 變少、變滿：[`configs/profiles/jetson_rx_feed.yaml`](../configs/profiles/jetson_rx_feed.yaml)
 是 Jetson 接收端的設定，[`configs/profiles/tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml) 是對面 PC 發送端的設定，
-只把 `mac.aggregation.min_burst_interval_ms` 從 4 改成 25：一個 burst 開始之後 25 ms 內不送下一個，等的時候繼續裝
-datagram。`max_wait_ms` 維持預設的 0。只用在發送端（單向的 `tx_app`，或雙向時 PC 的 `node_app`），一樣接在 profile 後面
+只把 `mac.aggregation.min_burst_interval_ms` 從 4 改成 25：待送資料裝得進一個 burst 時，等到上一個 burst 開始之後 25 ms
+才送，等的時候繼續裝 datagram；待送資料超過一個 burst 時立刻送出、不等，所以這不是 burst rate 的上限。`max_wait_ms` 維持預設的 0。只用在發送端（單向的 `tx_app`，或雙向時 PC 的 `node_app`），一樣接在 profile 後面
 （例如 `--overlay configs/profiles/duplex_fdd_2420_2460.yaml --overlay configs/profiles/tx_to_jetson.yaml`）；接收端不讀
-`mac.aggregation`，兩台 PC 之間不用加。實際的週期是 25 ms 加上一次編碼的時間（PC 上約 2–3 ms），所以 PC 每秒最多約 36
-個 burst（burst 一個接一個時）。
+`mac.aggregation`，兩台 PC 之間不用加。
 
 量測（2026-11-19，`efd3a76`）：條件同上一段，Jetson 用 65536／15 ms、4 個 decode worker、`--realtime`，每點 60 秒、每組
 3 次（20/s 2 次），單向 PC→Jetson 2460 MHz，雙向 Jetson TX 2420／PC TX 2460 MHz。對照組是量測 harness 原本的 PC TX 設定，

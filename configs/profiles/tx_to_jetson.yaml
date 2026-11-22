@@ -1,10 +1,12 @@
 # Add-on overlay for a PC transmitting to a Jetson receiver: fewer, fuller
-# bursts.  It holds each burst until 25 ms after the previous one started
-# (program default 4 ms) and fills it meanwhile, so the Jetson pays its
-# per-burst receive cost less often.  Use it on the transmitting PC only: its
-# tx_app, or its node_app in a duplex link.  mac.aggregation is read only by
-# the transmitter, so on the Jetson it does nothing (the Jetson takes
-# jetson_rx_feed.yaml).  Like that file it is not a profile on its own: list
+# bursts.  While the pending data fits in one burst, it holds that burst until
+# 25 ms after the previous one started (program default 4 ms) and fills it
+# meanwhile, so the Jetson pays its per-burst receive cost less often.  With
+# more than one burst pending, bursts go out at once: this is not a rate cap.
+# Use it on the transmitting PC only: its tx_app, or its node_app in a duplex
+# link.  Do not use it on a Jetson node, because it would change that node's
+# TX interval too (the Jetson takes jetson_rx_feed.yaml).
+# Like that file it is not a profile on its own: list
 # the profile explicitly and pass this one AFTER it, e.g.
 #   tx_app   --transport uhd --overlay configs/profiles/ota_2p45ghz.yaml \
 #            --overlay configs/profiles/tx_to_jetson.yaml ...

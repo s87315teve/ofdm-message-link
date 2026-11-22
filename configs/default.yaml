@@ -112,7 +112,8 @@ mac:
     # receiver's per-burst cost and nears the Pluto's push limit (0.413 ms +
     # 0.194 us/sample).  Measured on two PlutoSDRs, 300 B at MCS 14: 0.53 Mb/s
     # uncapped, 5.92 Mb/s with ~14 subframes per burst.  Costs up to this much
-    # latency, and only when bursts are back to back.  4 ms = at most 250/s.
+    # latency, and only when bursts are back to back.  It applies only while
+    # the pending data fits in one burst: a larger backlog goes out at once.
     min_burst_interval_ms: 4.0
 
 radio:
