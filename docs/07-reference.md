@@ -562,7 +562,7 @@ process 默默分流。
 | `{"cmd":"stats"}` / `{"cmd":"stop"}` | 最近一行 stats／停止 |
 
 Headless 收到 SIGTERM／SIGINT、`stop` 或 `--duration` 到時：先停 TX（attenuator 回到最小輸出），再停 RX，
-刪除 ready file，exit 0；radio 啟動失敗或 control port 已被佔用時 exit 2，engine 子 process 中途結束時 exit 3，decode worker 死掉、解碼已停止時 exit 4。
+刪除 ready file，exit 0；radio 啟動失敗或 control port 已被佔用時 exit 2，engine 子 process 中途結束、或在停止時當掉時 exit 3，decode worker 死掉、解碼已停止時 exit 4。
 
 LA 演算法（預設演算法 `olla` 的參數、ladder）與怎麼寫自己的模組見
 [3.4 節](03-your-own-app.md#34-寫你自己的-link-adaptation-模組)；設計、自干擾與實機量測見
