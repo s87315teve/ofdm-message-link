@@ -438,7 +438,7 @@ TX gain。
 - 第一輪的兩個弱點：300 B 比 baseline 差（TX 一個 datagram 一個 burst，burst 率停在每秒 222–300 個，RX 每個 burst 的成本使它 overflow），64QAM 在約 210–230 datagram/s 就 RX overflow。
 - **修正 1：RX 的 acquisition 成本。** 空 stream 加 DC 0.003，接收執行緒從 556% 降到 24% 個 core；v5 MCS 14 300 B 每秒 500 個短 burst，RTF 從 0.85 升到 1.21。**目標 1.5 沒有完全達到。**
   （`experiments/tx_v5/results/rx_rate/summary.txt`）
-- **修正 2：TX 最小 burst 間隔。** `mac.aggregation.min_burst_interval_ms` 預設 4 ms（最多每秒 250 個 burst；`--min-burst-interval-ms`）。理由：Pluto 推送 0.413 ms + 0.194 µs/sample，加上 RX 每個 burst 的成本。
+- **修正 2：TX 最小 burst 間隔。** `mac.aggregation.min_burst_interval_ms` 預設 4 ms（待送資料裝得進一個 burst 時才等待，不是硬性速率上限；`--min-burst-interval-ms`）。理由：Pluto 推送 0.413 ms + 0.194 µs/sample，加上 RX 每個 burst 的成本。
   代價是負載高時延遲多一點（見下）。
   **事後修正（`f3f84fc`）：** 最初從前一個 burst 結束才算 4 ms，每個長 burst 後多 4 ms 空中閒置（MCS 8：8 ms burst + 4 ms，airtime 約 0.67，`node_app` 的 M2 發現）；
   現在改成從 start 算（修完的重量見下）。

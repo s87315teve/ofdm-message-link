@@ -511,12 +511,12 @@ def add_aggregation_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="MS",
         help=(
-            "burst-rate cap: hold a burst until MS after the previous one started "
-            "to go to the radio (start to start, so a burst longer than MS is "
-            "followed at once), packing more datagrams into it meanwhile (default 4, "
-            "at most 250 bursts/s). Adds at most MS of latency, and only when "
-            "bursts are back to back; a datagram after an idle period leaves at "
-            "once, and a full burst is never held. 0 disables the cap"
+            "minimum burst spacing while the pending data fits in one burst: hold "
+            "it until MS after the previous burst started to go to the radio (start "
+            "to start), packing more datagrams into it meanwhile (default 4). Not a "
+            "hard rate cap: with more than one burst of data queued, the next burst "
+            "goes at once. Adds at most MS of latency; a datagram after an idle "
+            "period leaves at once, and a full burst is never held. 0 disables it"
         ),
     )
     group.add_argument(

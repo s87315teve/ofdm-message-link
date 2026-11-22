@@ -265,12 +265,14 @@ class TransmitWorker:
     once, at high load bursts fill up and the per-burst preamble, SIG and
     guard cost is shared.  ``max_wait_s > 0`` trades latency for fuller
     bursts by holding a burst that still has room for up to that long after
-    its oldest message was submitted.  ``min_burst_interval_s > 0`` caps the
-    burst rate: a burst is held until that long after the previous one
-    started to be handed to the radio (start to start, so a burst longer than
-    the interval is followed at once), collecting more datagrams meanwhile (a
-    lone datagram after an idle period still goes at once, a full burst is
-    never held).
+    its oldest message was submitted.  ``min_burst_interval_s > 0`` spaces
+    bursts while the pending data fits in one burst: that burst is held until
+    that long after the previous one started to be handed to the radio (start
+    to start, so a burst longer than the interval is followed at once),
+    collecting more datagrams meanwhile.  It is not a hard rate cap: with more
+    than one burst of data queued the next burst goes at once.  A lone
+    datagram after an idle period still goes at once, and a full burst is
+    never held.
 
     A ``policy`` (:class:`BurstPolicy`, used by ``node_app``) picks the
     format of each data burst, puts its CONTROL payloads first in the burst,

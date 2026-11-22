@@ -419,7 +419,7 @@ def test_a_burst_kept_across_a_detach_is_sent_once_with_attempt_2(profile):
             worker.detach()  # the radio goes away while the burst waits for room
             return False
 
-    for index in range(3):
+    for _index in range(3):
         assert worker.submit("t", b"y" * 50)
     worker.attach(Detaching())
     worker.start()
@@ -444,7 +444,7 @@ def test_a_retrying_sink_that_gives_up_logs_the_burst_with_its_attempts(profile)
         MessageTransmitter(profile, mcs_entry=mcs_entry(8)), bridge,
         aggregation=AggregationLimits(max_subframes=4),
         events=lambda kind, value: log.append((kind, value)))
-    for index in range(8):
+    for _index in range(8):
         assert worker.submit("t", b"z" * 60)
     worker.attach(sink)
     worker.start()

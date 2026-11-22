@@ -688,7 +688,7 @@ def test_bursts_across_n_decode_with_exact_offsets_and_device_time(
     assert 0 <= data[0].off - places[0] < 64
     anchors = sorted(tags.items())
     for event in data:
-        anchor_off, anchor_sec = max((a for a in anchors if a[0] <= event.off))
+        anchor_off, anchor_sec = max(a for a in anchors if a[0] <= event.off)
         assert event.dev_t == pytest.approx(anchor_sec + (event.off - anchor_off) / rate,
                                             abs=1e-12)
     overflows = [o for batch in batches for o in batch["overflows"]]

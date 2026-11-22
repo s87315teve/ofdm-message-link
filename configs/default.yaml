@@ -105,7 +105,7 @@ mac:
     # At most 80 000 samples (8 ms at 10 MS/s, 16 ms at 5): the longest burst
     # whose drift at 50 ppm the receiver's timing correction covers.
     max_burst_airtime_ms: 8.0
-    # Burst-rate cap: hold a burst until this long after the previous one
+    # Minimum burst spacing: hold a burst until this long after the previous one
     # started to go to the radio (start to start: a burst longer than this is
     # followed at once) and fill it meanwhile (0 disables).  Short datagrams
     # otherwise go out one per burst at 230-300 bursts/s, which overflows the

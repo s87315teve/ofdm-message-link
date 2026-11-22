@@ -451,7 +451,7 @@ def test_which_sinks_retry():
     assert getattr(pluto.PlutoSampleSink, "retry_failed_send", False) is False
     # The duty-cap wrapper is what its wrapped sink is.
     assert DutyCappedSink(UdpSampleSink(), 0.5, 5e6).retry_failed_send is True
-    assert getattr(DutyCappedSink(_NoRetrySink(), 0.5, 5e6), "retry_failed_send") is False
+    assert DutyCappedSink(_NoRetrySink(), 0.5, 5e6).retry_failed_send is False
     with pytest.raises(AttributeError):
         DutyCappedSink(object(), 0.5, 5e6).retry_failed_send  # noqa: B018
 

@@ -176,7 +176,7 @@ acceleration:
 |---|---|---|
 | `enabled` | `true` | `false`：一個 burst 一個 datagram |
 | `max_wait_ms` | 0.0 | 還有空間的 burst 最多等多久 |
-| `min_burst_interval_ms` | 4.0 | 兩個 burst 的開始時間至少隔多久（start 到 start，0–50，0 關閉）。短 datagram 時避免每個 datagram 一個 burst：Pluto 推送一次要 0.413 ms + 0.194 µs/sample，RX 每個 burst 也有成本。`AggregationLimits` 本身的預設是 0，直接呼叫的程式碼行為不變。PC 送往 Jetson 時用 25（[`tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml)） |
+| `min_burst_interval_ms` | 4.0 | 待送資料裝得進一個 burst 時，這個 burst 要等到上一個 burst 開始之後多久才送（start 到 start，0–50，0 關閉）。這不是硬性的速率上限：queue 裡超過一個 burst 的資料時，下一個 burst 立刻送。短 datagram 時避免每個 datagram 一個 burst：Pluto 推送一次要 0.413 ms + 0.194 µs/sample，RX 每個 burst 也有成本。`AggregationLimits` 本身的預設是 0，直接呼叫的程式碼行為不變。PC 送往 Jetson 時用 25（[`tx_to_jetson.yaml`](../configs/profiles/tx_to_jetson.yaml)） |
 | `max_subframes` | 32（v2.0 起；之前 16） | 一個 burst 最多幾個 datagram |
 | `max_psdu_bytes` | 16384（v2.0 起；之前 8192） | 一個 burst 的 PSDU 最多幾個 byte；不能超過 `phy.rx.max_psdu_bytes`（16384），否則設定檔會被拒絕。B210 的最大吞吐測試（2026-11-11）在 10 MS/s MCS 17 用 16384／32 撐住 24.0 Mb/s，8192 時是 20.7 Mb/s |
 | `max_burst_airtime_ms` | 8.0 | 聚合後的 burst 最長多久。換算成 sample 不能超過 80 000（5 MS/s 是 16 ms、10 MS/s 是 8 ms、15.36 MS/s 是 5.21 ms、20 MS/s 是 4 ms），否則設定檔會被拒絕 |
