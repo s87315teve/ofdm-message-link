@@ -648,6 +648,20 @@ class StreamingBurstDecoder:
             if failure.v5:
                 self._psdu_fcs_failures += 1
 
+    def reset_stream(self) -> None:
+        """The sample stream was cut: forget the burst it ended inside.
+
+        Otherwise the next stream's first samples would be taken for the rest
+        of that burst.  Offsets stay absolute and the counters are kept.
+        """
+
+        self._discard(self._buffer.size)
+        self._unscanned = False
+        self._pending_acquisition = None
+        self._required_sample_count = None
+        self._next_candidate_start = None
+        self._header_validated = False
+
     def _enter_mode(self, mode: str) -> None:
         if self._mode is None:
             self._mode = mode

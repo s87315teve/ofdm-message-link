@@ -333,6 +333,10 @@ class ReceiveWorker:
             except Exception as failure:
                 self._event_flush_failed(failure)
         finally:
+            # A detach: a new radio's samples do not continue this stream.
+            end_of_stream = getattr(self._receiver, "end_of_stream", None)
+            if not final and end_of_stream is not None:
+                end_of_stream()
             self._finished.set()
 
     def _decoding_failed(self, error: DecodePoolError) -> None:

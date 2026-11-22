@@ -1046,6 +1046,11 @@ class MessageReceiver:
             return ()
         return self._take_from_pool(self._pool.collect)
 
+    def end_of_stream(self) -> None:
+        """The radio stopped: the next samples do not continue this stream."""
+
+        self._decoder.reset_stream()
+
     def give_up_decoding(self) -> tuple[tuple[ReceivedMessage, ...], int]:
         """The messages of what has finished, and how many bursts had not."""
 

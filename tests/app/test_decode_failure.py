@@ -309,6 +309,42 @@ def test_a_detach_that_times_out_keeps_the_unfinished_bursts_for_later():
     assert bridge.failed.values == []
 
 
+@pytest.mark.parametrize("decode_workers", [1, 2], ids=["inline", "pool"])
+def test_a_session_cut_mid_burst_does_not_cost_the_next_its_first_burst(decode_workers):
+    link = profile(MEASUREMENT)
+    first, first_payloads = v5_stream(link, seed=11, bursts=6, mcs_indices=_MCS)
+    second, second_payloads = v5_stream(link, seed=12, bursts=6, mcs_indices=(9, 14, 17))
+    first = first[: first.size - 1500]  # the radio stopped inside the last burst
+    receiver = MessageReceiver(link, decode_workers=decode_workers)
+    bridge = _Bridge()
+    worker = ReceiveWorker(receiver, bridge)
+    worker.start()
+    try:
+        worker.attach(_Stream(_chunks(first)))
+        _wait_for(lambda: receiver.stats.samples_consumed >= first.size)
+        worker.detach()
+        worker.attach(_Stream(_chunks(second)))
+        _wait_for(lambda: receiver.stats.samples_consumed >= first.size + second.size)
+        worker.detach()
+    finally:
+        worker.stop()
+    got = [message.message.payload for message in bridge.message.values]
+    assert got == first_payloads[:-1] + second_payloads
+
+
+def test_resetting_the_stream_keeps_absolute_offsets():
+    link = profile(MEASUREMENT)
+    stream, _ = v5_stream(link, seed=13, bursts=2, mcs_indices=(8,))
+    receiver = MessageReceiver(link)
+    receiver.feed(stream[: stream.size - 1500])
+    decoder = receiver._decoder
+    position = decoder._buffer_start + decoder.buffered_sample_count
+    receiver.end_of_stream()
+    assert decoder.buffered_sample_count == 0
+    assert decoder._buffer_start == position == receiver.stats.samples_consumed
+    assert decoder._pending_acquisition is None and decoder._required_sample_count is None
+
+
 def test_a_drain_timeout_bounds_the_whole_wait():
     from test_decode_pool_errors import _numbered, _queued
 
