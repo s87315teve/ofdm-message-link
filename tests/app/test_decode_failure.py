@@ -386,6 +386,60 @@ def test_a_session_cut_mid_burst_does_not_cost_the_next_its_first_burst(decode_w
     assert got == first_payloads[:-1] + second_payloads
 
 
+def test_a_reattach_after_a_timed_out_detach_still_resets_the_stream(monkeypatch):
+    """The reset comes between the old session's last feed and the new one's first."""
+
+    from ofdm_message_link import rx_app
+
+    monkeypatch.setattr(rx_app, "_FINISH_WAIT_S", 0.05)
+
+    class Receiver:
+        stats = None
+
+        def __init__(self):
+            self.log = []
+            self.feeding = False
+            self.overlapped = False
+            self.release = threading.Event()
+            self.in_first_feed = threading.Event()
+
+        def feed(self, samples, **_kwargs):
+            self.feeding = True
+            session = int(samples[0].real)
+            self.log.append(f"feed {session}")
+            if session == 1:
+                self.in_first_feed.set()
+                self.release.wait(10.0)  # stuck on a worker past the detach's wait
+            self.feeding = False
+            return ()
+
+        def flush(self, _timeout):
+            self.overlapped |= self.feeding
+            return ()
+
+        def end_of_stream(self):
+            self.overlapped |= self.feeding
+            self.log.append("reset")
+
+        def drain_observations(self):
+            return ()
+
+    receiver = Receiver()
+    worker = ReceiveWorker(receiver, _Bridge(), min_feed_samples=0)
+    worker.start()
+    worker.attach(_Stream([np.full(64, 1.0, np.complex64)]))
+    assert receiver.in_first_feed.wait(5.0)
+    worker.detach()
+    assert worker._finish_timed_out
+    worker.attach(_Stream([np.full(64, 2.0, np.complex64)]))
+    time.sleep(0.05)
+    receiver.release.set()
+    _wait_for(lambda: "feed 2" in receiver.log, timeout=5.0)
+    worker.stop()
+    assert receiver.log[:3] == ["feed 1", "reset", "feed 2"]
+    assert not receiver.overlapped
+
+
 def test_resetting_the_stream_keeps_absolute_offsets():
     link = profile(MEASUREMENT)
     stream, _ = v5_stream(link, seed=13, bursts=2, mcs_indices=(8,))

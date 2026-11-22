@@ -224,10 +224,12 @@ class ReceiveWorker:
                 flush()
             except Exception as error:
                 self._event_flush_failed(error)
+            # Here, on this thread, between two feeds: a detach that timed out
+            # is finished before the first feed of a new session.
+            if self._finish_wanted.is_set():
+                self._finish_decoding()
             source = self.source
             if source is None:
-                if self._finish_wanted.is_set():
-                    self._finish_decoding()
                 self._attached.wait(0.1)
                 self._attached.clear()
                 continue
