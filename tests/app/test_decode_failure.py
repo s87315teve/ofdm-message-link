@@ -169,6 +169,30 @@ def test_detach_delivers_the_bursts_still_being_decoded():
         worker.stop()
 
 
+def test_a_stop_that_times_out_delivers_what_finished_before_it_reports():
+    from types import SimpleNamespace
+
+    message = SimpleNamespace(message=SimpleNamespace(payload=b"decoded"))
+
+    class Receiver:
+        def flush(self, _timeout):
+            raise TimeoutError
+
+        def collect(self):
+            return (message,)
+
+    class BrokenReport:
+        def emit(self, _text):
+            raise RuntimeError("the window is gone")
+
+    bridge = _Bridge()
+    bridge.failed = BrokenReport()
+    worker = ReceiveWorker(Receiver(), bridge)
+    worker._finish_decoding()  # a report that fails does not end the receive thread
+    assert bridge.message.values == [message]
+    assert worker._finished.is_set()
+
+
 def test_a_drain_timeout_bounds_the_whole_wait():
     from test_decode_pool_errors import _numbered, _queued
 

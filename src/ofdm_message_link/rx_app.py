@@ -296,18 +296,21 @@ class ReceiveWorker:
         try:
             if flush is not None and self._decode_failure is None:
                 try:
-                    delivered = flush(_FINISH_DECODING_S)
+                    self._deliver(flush(_FINISH_DECODING_S))
                 except TimeoutError:
-                    delivered = self._receiver.collect()
+                    # What did finish goes out first: the report may fail.
+                    self._deliver(self._receiver.collect())
                     self._bridge.failed.emit(
                         f"decode workers did not finish within {_FINISH_DECODING_S:g} s; "
                         "bursts still in flight may be lost"
                     )
-                self._deliver(delivered)
         except DecodePoolError as error:
             self._decoding_failed(error)
         except Exception as error:  # surfaced in the window, never silent
-            self._bridge.failed.emit(f"{type(error).__name__}: {error}")
+            try:
+                self._bridge.failed.emit(f"{type(error).__name__}: {error}")
+            except Exception as failure:
+                self._event_flush_failed(failure)
         finally:
             self._finished.set()
 
