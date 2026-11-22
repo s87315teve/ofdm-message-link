@@ -197,13 +197,42 @@ def test_a_stop_under_a_feed_waiting_on_a_slow_worker_reports_no_failure():
     assert bridge.failed.values == []
 
 
-def test_a_real_worker_death_is_still_reported_after_a_close_race_fix():
+def test_a_real_worker_death_is_not_taken_for_a_close():
     from test_decode_pool_errors import _Finished, _queued, _WorkerDied
 
     pool = _queued(_Finished(0), _WorkerDied(1))
     with pytest.raises(DecodePoolError, match="died") as caught:
         pool.drain(timeout=0.01)
     assert not isinstance(caught.value, DecodePoolClosed)
+
+
+def test_a_detach_that_timed_out_does_not_cut_a_later_stop_short():
+    """A later session is healthy: its stop waits for its bursts, and interrupts nothing."""
+
+    class Receiver:
+        stats = None
+        interrupted = False
+
+        def feed(self, _samples, **_kwargs):
+            return ()
+
+        def drain_observations(self):
+            return ()
+
+        def flush(self, _timeout):
+            time.sleep(0.4)  # longer than a stop that thinks the thread is stuck waits
+            return ()
+
+        def interrupt_decoding(self):
+            Receiver.interrupted = True
+
+    worker = ReceiveWorker(Receiver(), _Bridge(), min_feed_samples=0)
+    worker.start()
+    worker._finish_timed_out = True  # an earlier detach gave up waiting
+    worker.attach(_Stream([np.ones(64, np.complex64)]))
+    time.sleep(0.05)
+    worker.stop()
+    assert not Receiver.interrupted
 
 
 def test_a_wait_ended_by_close_is_not_a_dead_worker():

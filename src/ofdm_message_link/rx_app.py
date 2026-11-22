@@ -184,6 +184,7 @@ class ReceiveWorker:
         if callable(configure):
             configure(ReceiveFeed(self._min_feed_samples, self._max_merge_wait_s))
         source.start()
+        self._finish_timed_out = False
         with self._lock:
             self._source = source
         # The radio is already streaming; a worker still asleep in its idle
@@ -341,6 +342,7 @@ class ReceiveWorker:
             end_of_stream = getattr(self._receiver, "end_of_stream", None)
             if not final and end_of_stream is not None:
                 end_of_stream()
+            self._finish_timed_out = False
             self._finished.set()
 
     def _decoding_failed(self, error: DecodePoolError) -> None:
