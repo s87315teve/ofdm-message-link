@@ -421,3 +421,12 @@ def test_the_watch_thread_does_not_keep_a_dropped_pool_alive():
 
 if __name__ == "__main__":
     SCENARIOS[sys.argv[1]](*sys.argv[2:])
+
+
+def test_a_command_posted_after_stop_is_refused_not_raised():
+    from ofdm_message_link.engine import _EngineProcess
+
+    engine = _EngineProcess.__new__(_EngineProcess)
+    engine._control = multiprocessing.get_context("spawn").Queue(1)
+    engine._control.close()
+    assert engine.post(("mcs", None)) is False

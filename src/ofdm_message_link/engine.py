@@ -384,7 +384,7 @@ class _EngineProcess:
         try:
             self._control.put_nowait(command)
             return True
-        except queue.Full:
+        except (queue.Full, ValueError):  # ValueError: stop() closed the queue
             return False
 
     def request(self, command: tuple, timeout: float) -> tuple:
