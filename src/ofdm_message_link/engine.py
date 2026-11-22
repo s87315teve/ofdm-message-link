@@ -87,6 +87,8 @@ class _BatchQueue(multiprocessing.queues.Queue):
 
     def __init__(self, maxsize: int, *, ctx) -> None:
         super().__init__(maxsize, ctx=ctx)
+        # A parent that is gone ends the feeder quietly (see _run_child).
+        self._ignore_epipe = True
         self.on_lost: Callable[[int, list, BaseException], None] | None = None
 
     def __setstate__(self, state) -> None:
@@ -282,6 +284,23 @@ class _EventSink:
         self.put("symbols", (values, replace(context, payload_symbols=values)))
 
 
+def _run_child(target: Callable[..., None], *arguments) -> None:
+    """Keep only the child's end of each pipe, then run the engine.
+
+    A pipe tells a reader its writer died (end of file), or a writer its
+    reader died (EPIPE), only once no other process holds that end.  With
+    both ends open on both sides, a process killed partway through a write
+    left the other blocked for the rest of a message that would never come.
+    :meth:`_EngineProcess.start` closes the parent's unused ends.
+    """
+
+    events, control, replies = arguments[-3:]
+    events._queue._reader.close()
+    control._writer.close()
+    replies._reader.close()
+    target(*arguments)
+
+
 class _EngineProcess:
     """Parent-side lifecycle of one engine child and its event pump."""
 
@@ -290,13 +309,16 @@ class _EngineProcess:
         self._events = _EventQueue(context, _EVENT_DEPTH)
         self._control = context.Queue(maxsize=_CONTROL_DEPTH)
         self._replies = context.Queue()
+        # A peer that is gone ends a feeder quietly, without a traceback.
+        self._control._ignore_epipe = True
+        self._replies._ignore_epipe = True
         self._process = context.Process(
-            target=target,
-            args=(*arguments, self._events, self._control, self._replies),
+            target=_run_child,
+            args=(target, *arguments, self._events, self._control, self._replies),
             name="ofdm-message-engine",
             # Not daemonic: the receive engine owns its own decode worker
             # processes, which a daemonic process may not start.  atexit and
-            # the child's parent-PID check stand in for daemon cleanup.
+            # end of file on the control pipe stand in for daemon cleanup.
             daemon=False,
         )
         self._dispatch = dispatch
@@ -310,6 +332,10 @@ class _EngineProcess:
 
     def start(self) -> None:
         self._process.start()
+        # The child has its own copies now (see _run_child).
+        self._events._queue._writer.close()
+        self._control._reader.close()
+        self._replies._writer.close()
         # Registered after multiprocessing's own exit handler, so it runs first
         # and the join that handler does on non-daemonic children cannot hang.
         atexit.register(self.stop)
@@ -326,6 +352,9 @@ class _EngineProcess:
                     return
                 continue
             except (EOFError, OSError):
+                # No writer is left, possibly partway through a batch.
+                if not self._stopping.is_set():
+                    self._dispatch("failed", "radio engine process exited")
                 return
             # One queue item is a batch; its events go on in their order.
             for kind, value in batch:
@@ -349,6 +378,8 @@ class _EngineProcess:
             while True:
                 try:
                     return self._replies.get(timeout=0.2)
+                except (EOFError, OSError):
+                    raise TransportError("radio engine process exited") from None
                 except queue.Empty:
                     if not self._process.is_alive():
                         raise TransportError("radio engine process exited") from None
@@ -500,6 +531,11 @@ def _serve(
             command = control.get(timeout=0.05)
         except queue.Empty:
             command = None
+        except (EOFError, OSError):
+            # The parent is gone, possibly partway through a command.  The
+            # parent-PID check cannot see this: under forkserver the PID is
+            # the server's, which outlives the parent.
+            break
         if command is not None:
             kind = command[0]
             if kind == "stop":

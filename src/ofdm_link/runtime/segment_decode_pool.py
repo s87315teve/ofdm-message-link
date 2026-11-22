@@ -35,8 +35,11 @@ an executor that refuses new work closes the pool with :class:`DecodePoolError`.
 from __future__ import annotations
 
 import multiprocessing
+import multiprocessing.connection
 import os
 import signal
+import threading
+import time
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import BrokenExecutor, Future, ProcessPoolExecutor
@@ -82,6 +85,8 @@ _MAX_WORKERS = 64
 # spreads over several workers.
 DEFAULT_MAX_BATCH = 4
 _READY_TIMEOUT_S = 120.0
+# How long the executor gets to notice a worker's exit before it counts as stuck.
+_STUCK_MANAGER_GRACE_S = 1.0
 
 Annotate = Callable[[AnyDecodedBurst], Any]
 
@@ -132,6 +137,62 @@ class SegmentDecodePoolSnapshot:
 _WORKER: dict[str, Any] = {}
 
 
+def _exit_with_owner() -> None:
+    """End this worker when the process that owns the pool dies.
+
+    A worker waits on the task pipe, which it and its siblings also hold open
+    for writing, so a killed owner would never show up there as end of file.
+    The thread sleeps in the kernel and costs the decode nothing.
+    """
+
+    owner = multiprocessing.parent_process()
+    if owner is None:
+        return
+
+    def watch() -> None:
+        owner.join()
+        os._exit(1)
+
+    threading.Thread(target=watch, name="decode-owner-watch", daemon=True).start()
+
+
+def _break_pool_if_stuck(manager: threading.Thread) -> None:
+    """Break the pool when a worker died partway through writing a result.
+
+    The executor's manager thread then sits in ``recv`` for the rest of a
+    message nobody will write: the siblings and this process hold the result
+    pipe open, so no end of file comes, and every future, ``shutdown`` and the
+    interpreter's exit wait on that thread.  Closing every write end turns the
+    wait into the error the executor already handles as a broken pool.
+
+    This thread sleeps on the workers' exit sentinels, waking once a second to
+    pick up any worker started later.  A worker that exits normally (only at
+    shutdown) is removed by the manager thread within the grace period.  It
+    holds the manager thread, not the executor, so a pool nobody holds is
+    still collected and shuts down.
+    """
+
+    while manager.is_alive() and manager.processes:
+        workers = dict(manager.processes)
+        exited = multiprocessing.connection.wait(
+            [process.sentinel for process in workers.values()], 1.0
+        )
+        if not exited:
+            continue
+        gone = {pid for pid, process in workers.items() if process.sentinel in exited}
+        deadline = time.monotonic() + _STUCK_MANAGER_GRACE_S
+        while time.monotonic() < deadline:
+            if not manager.is_alive() or gone.isdisjoint(manager.processes):
+                break
+            time.sleep(0.02)
+        else:
+            for pid, process in workers.items():
+                if pid not in gone:  # a dead worker's PID may already be reused
+                    process.kill()
+            manager.result_queue._writer.close()
+            return
+
+
 def _initialize_worker(
     config: LinkConfig, annotate: Annotate | None, give_up_after: int = 0
 ) -> None:
@@ -141,6 +202,7 @@ def _initialize_worker(
     # the worker and break the pool, mid-stream.  (A Ctrl-C between the
     # worker's start and this line still reaches it, as it always did.)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    _exit_with_owner()
 
     from ofdm_link.phy.turbo import set_hopeless_block_give_up
 
@@ -291,6 +353,12 @@ class SegmentDecodePool:
         if not all(ready):
             self.close()
             raise DecodePoolError("a segment decode worker did not finish initializing")
+        threading.Thread(
+            target=_break_pool_if_stuck,
+            args=(self._executor._executor_manager_thread,),
+            name="decode-pool-watch",
+            daemon=True,
+        ).start()
 
     @property
     def workers(self) -> int:
