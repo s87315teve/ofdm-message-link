@@ -55,10 +55,21 @@ def run_window(
     if application is None:
         raise RuntimeError("a QApplication must exist before run_window()")
 
-    def _interrupt(signum: int, frame: object) -> None:
-        del signum, frame
+    closing = False
+
+    def _close_and_quit() -> None:
         window.close()
         application.quit()
+
+    def _interrupt(signum: int, frame: object) -> None:
+        # Not from here: this runs between two bytecodes of whatever the main
+        # thread was doing, maybe inside a lock that closing the window takes
+        # (a log writer's).  The event loop runs it once that frame is done.
+        nonlocal closing
+        del signum, frame
+        if not closing:
+            closing = True
+            QtCore.QTimer.singleShot(0, _close_and_quit)
 
     signal.signal(signal.SIGINT, _interrupt)
     signal.signal(signal.SIGTERM, _interrupt)

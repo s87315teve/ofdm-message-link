@@ -114,3 +114,45 @@ def test_window_shows_cards_and_steers_the_worker(application, tmp_path):
         window.close()
     assert "detach" in worker.calls and "stop" in worker.calls
     assert not (tmp_path / "ready").exists()
+
+
+def test_ctrl_c_closes_the_window_from_the_event_loop(application, monkeypatch):
+    """The handler runs between two bytecodes of the main thread, maybe inside a lock.
+
+    Closing there called ``BackgroundLineWriter.close`` while the interrupted
+    frame could hold the writer's non-reentrant lock: a deadlock.
+    """
+
+    import signal
+
+    from PyQt5 import QtCore
+
+    from ofdm_message_link import qt_runtime
+
+    handlers = {}
+    monkeypatch.setattr(qt_runtime.signal, "signal",
+                        lambda number, handler: handlers.__setitem__(number, handler))
+    closes = []
+
+    class Window(QtWidgets.QWidget):
+        def closeEvent(self, event):  # noqa: N802 (Qt override)
+            closes.append(True)
+            super().closeEvent(event)
+
+    closed_inside_the_handler = []
+
+    def press_ctrl_c_twice():
+        handlers[signal.SIGINT](signal.SIGINT, None)
+        handlers[signal.SIGINT](signal.SIGINT, None)
+        closed_inside_the_handler.append(len(closes))
+
+    window = Window()
+    QtCore.QTimer.singleShot(0, press_ctrl_c_twice)
+    guard = QtCore.QTimer(window)
+    guard.setSingleShot(True)
+    guard.timeout.connect(application.quit)
+    guard.start(5000)
+    assert qt_runtime.run_window(window, application) == 0
+    guard.stop()
+    assert closed_inside_the_handler == [0]
+    assert closes == [True]
