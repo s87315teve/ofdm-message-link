@@ -277,3 +277,48 @@ def test_a_close_that_times_out_with_nothing_queued_reports_nothing():
     assert writer.close(5.0) is True
     assert writer.dropped == 0 and writer.errors == 0
     assert stderr.getvalue() == ""
+
+
+class _FailingDisk:
+    """Each write waits for ``gate``, then fails unless its line is in ``good``."""
+
+    def __init__(self, good=()):
+        self.gate = threading.Event()
+        self.good = set(good)
+        self.text = []
+
+    def write(self, text):
+        self.gate.wait(5.0)
+        if text not in self.good:
+            raise OSError(5, "Input/output error")
+        self.text.append(text)
+
+    def flush(self):
+        pass
+
+
+def test_lines_that_fail_after_a_timed_out_close_stay_counted_as_dropped():
+    disk = _FailingDisk()
+    writer = BackgroundLineWriter(disk, stderr=io.StringIO())
+    for number in range(3):
+        writer.put(f"{number}\n")
+    assert writer.close(timeout=0.05) is False
+    disk.gate.set()
+    assert writer.close(5.0) is True
+    assert disk.text == []
+    # Each lost line counts once, and the real cause is what stays on record.
+    assert writer.dropped == 3 and writer.errors == 3
+    assert "Input/output error" in writer.last_error
+
+
+def test_only_the_lines_really_written_come_off_the_count():
+    disk = _FailingDisk(good=("0\n", "2\n"))
+    writer = BackgroundLineWriter(disk, stderr=io.StringIO())
+    for number in range(3):
+        writer.put(f"{number}\n")
+    assert writer.close(timeout=0.05) is False
+    disk.gate.set()
+    assert writer.close(5.0) is True
+    assert disk.text == ["0\n", "2\n"]
+    assert writer.dropped == 1 and writer.errors == 1
+    assert "Input/output error" in writer.last_error

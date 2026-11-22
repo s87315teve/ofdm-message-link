@@ -18,7 +18,7 @@ still writing the queue out.  After the thread has finished, a line is
 written on the caller's thread.  A :meth:`close` that times out counts every
 line not yet written as dropped and says so once on stderr, because the
 process usually exits next and they are lost.  The thread keeps writing
-meanwhile, and each line it still gets out comes off the count.
+meanwhile, and each line it really writes comes off the count.
 
 It stands in for a text file that only gets ``write``/``flush``/``close``:
 ``write`` queues and ``flush`` returns at once (the thread flushes).  Under
@@ -93,6 +93,7 @@ class BackgroundLineWriter:
         self._close_timed_out = False
         # Counted as dropped by a close that timed out, and not written yet.
         self._forfeited = 0
+        self._forfeit_failed = False
         self._error_before_timeout: str | None = None
         self.errors = 0
         self.dropped = 0
@@ -192,15 +193,20 @@ class BackgroundLineWriter:
         except Exception:
             pass
 
-    def _line_finished(self) -> None:
+    def _line_finished(self, written: bool) -> None:
         with self._state_lock:
             self._finished += 1
-            if self._forfeited:  # it got out after all
-                self._forfeited -= 1
+            if not self._forfeited:
+                return
+            self._forfeited -= 1
+            # One error per line: a write that failed has just counted its own.
+            self.errors -= 1
+            if written:
                 self.dropped -= 1
-                self.errors -= 1
-                if not self._forfeited:
-                    self.last_error = self._error_before_timeout
+            else:
+                self._forfeit_failed = True
+            if not self._forfeited and not self._forfeit_failed:
+                self.last_error = self._error_before_timeout
 
     @property
     def closed(self) -> bool:
@@ -234,8 +240,9 @@ class BackgroundLineWriter:
                             last_flush = clock()
                         item.event.set()
                     else:
-                        dirty = self._write(item) or dirty
-                        self._line_finished()
+                        written = self._write(item)
+                        dirty = written or dirty
+                        self._line_finished(written)
                         if dirty and (empty() or clock() - last_flush >= self._flush_every_s):
                             self._flush()
                             dirty = False
