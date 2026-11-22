@@ -436,8 +436,9 @@ class HeadlessNode:
         if code == 0 and getattr(self.worker, "crashed_in_stop", False):
             print("node_app: the radio engine process crashed while stopping", file=self.out)
             return EXIT_ENGINE_DIED
-        # worker.stop() has joined the pump, so a worker that died just before
-        # or during the stop is known by now.
+        # worker.stop() has joined the pump, or handed over the failures a
+        # stalled one could not deliver (_run), so a worker that died just
+        # before or during the stop is known by now.
         failure = self.monitor.decode_failure
         if code == 0 and failure is not None:
             print(f"node_app: {DECODING_STOPPED}{failure}", file=self.out)
@@ -497,6 +498,10 @@ class HeadlessNode:
             except Exception as error:
                 print(f"node_app: detach: {error}", file=self.out)
             self.worker.stop()
+            for text in getattr(self.worker, "undelivered_failures", ()):
+                self.monitor.on_event("failed", text)
+                if self.events is not None:
+                    self.events.on_event("failed", text)
             if self.monitor.decode_failure is not None:
                 try:
                     self._log_line(self.clock())  # the logs say why it stopped

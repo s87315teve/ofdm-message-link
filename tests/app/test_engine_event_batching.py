@@ -517,6 +517,67 @@ def test_a_headless_node_exits_3_when_its_engine_crashes_during_stop(target, nam
         assert "crashed while stopping" in out.getvalue()
 
 
+_DECODE_FAILED = "decoding stopped: a segment decode worker died"
+
+
+def _node_child_fails_decoding_in_one_batch(_p, _s, _u, _d, _a, _c, events, control, replies):
+    _serve_until_stopped(control, replies)
+    events.put_batch([("level", 0.0), ("failed", _DECODE_FAILED)])
+
+
+def _node_child_fails_decoding_in_a_later_batch(_p, _s, _u, _d, _a, _c, events, control, replies):
+    _serve_until_stopped(control, replies)
+    events.put_batch([("level", 0.0)])
+    time.sleep(0.05)
+    events.put_batch([("failed", _DECODE_FAILED)])
+
+
+@pytest.mark.parametrize("target", [_node_child_fails_decoding_in_one_batch,
+                                    _node_child_fails_decoding_in_a_later_batch],
+                         ids=["same-batch", "later-batch"])
+def test_a_stalled_pump_does_not_lose_the_decode_failure(target):
+    import io
+
+    from ofdm_message_link import node_app
+    from ofdm_message_link.node_engine import ProcessNodeWorker
+
+    class Events:
+        def __init__(self):
+            self.failed = []
+
+        def on_event(self, kind, value):
+            if kind == "failed":
+                self.failed.append(value)
+
+        def status(self, _line):
+            pass
+
+        def stop(self):
+            pass
+
+    monitor = node_app.NodeMonitor(1, "fdd", 5e6)
+    log = Events()
+    pumps = []
+
+    def listener(kind, value):
+        if kind == "level":
+            pumps.append(threading.current_thread())
+            time.sleep(1.6)  # longer than stop's join of the pump
+        monitor.on_event(kind, value)
+        log.on_event(kind, value)
+
+    worker = ProcessNodeWorker(None, None, listener, target=target)
+    out = io.StringIO()
+    node = node_app.HeadlessNode(worker, monitor, _endpoint, duration_s=0.3, out=out, events=log)
+    assert node.run() == node_app.EXIT_DECODE_FAILED
+    assert monitor.decode_failure == "a segment decode worker died"
+    pumps[0].join(5.0)
+    assert not pumps[0].is_alive()
+    # Handed over once: the pump, when it wakes, does not deliver it again.
+    assert list(monitor.failures) == [_DECODE_FAILED]
+    assert log.failed == [_DECODE_FAILED]
+
+
 def _child_sends_a_few_as_it_stops(events, control, replies):
     sink = engine._EventSink(events, samples_per_second=10.0)
     replies.put(("ok", "up"))

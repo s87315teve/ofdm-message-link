@@ -340,6 +340,10 @@ class _EngineProcess:
         self._stopping = threading.Event()
         # Events still in the pipe when stop() gave up on a stalled pump.
         self.events_lost_at_stop = 0
+        # The ``failed`` values among those, for whoever must still act on them.
+        self.undelivered_failures: list[str] = []
+        # What the pump has not dispatched of its current batch.
+        self._batch_rest = iter(())
         # The child ended by itself with an error, not by our terminate().
         self.crashed_in_stop = False
         self._exit_reported = False
@@ -378,8 +382,10 @@ class _EngineProcess:
             except (EOFError, OSError, ValueError):
                 # No writer is left, possibly partway through a batch.
                 break
-            # One queue item is a batch; its events go on in their order.
-            for kind, value in batch:
+            # One queue item is a batch; its events go on in their order.  Through
+            # a shared iterator, so stop() can take what a stalled listener holds up.
+            self._batch_rest = iter(batch)
+            for kind, value in self._batch_rest:
                 self._dispatch(kind, value)
         if not self._stop_requested.is_set():
             self._exit_reported = True
@@ -459,6 +465,7 @@ class _EngineProcess:
         text = "radio engine process exited"
         try:
             if pump_stalled:  # the listener is busy: do not wait for it here
+                self.undelivered_failures.append(text)
                 print(f"[engine-events] stop: {text}", file=sys.stderr, flush=True)
             else:
                 self._dispatch("failed", text)
@@ -469,19 +476,27 @@ class _EngineProcess:
         """A listener holds the pump past stop's join: say what it will not deliver.
 
         The child is gone, so this reads at most one pipe's worth and never
-        waits.  The pump's next read then finds the queue closed and it exits.
+        waits.  It also takes the rest of the batch the pump is in, so each
+        event is either dispatched or counted here.  The pump's next read then
+        finds the queue closed and it exits.
         """
 
         if self._process.is_alive():
             return
+        unread = list(self._batch_rest)
         while True:
             try:
-                self.events_lost_at_stop += len(self._events.get(timeout=0.0))
+                unread.extend(self._events.get(timeout=0.0))
             except (queue.Empty, EOFError, OSError, ValueError):
                 break
-        if self.events_lost_at_stop:
-            print(f"[engine-events] stop: {self.events_lost_at_stop} event(s) not delivered "
+        self.events_lost_at_stop = len(unread)
+        self.undelivered_failures = [str(value) for kind, value in unread if kind == "failed"]
+        if unread:
+            print(f"[engine-events] stop: {len(unread)} event(s) not delivered "
                   "(a listener held the pump)", file=sys.stderr, flush=True)
+        for text in self.undelivered_failures:
+            print(f"[engine-events] stop: undelivered failure: {text}",
+                  file=sys.stderr, flush=True)
 
 
 class _TransportView:

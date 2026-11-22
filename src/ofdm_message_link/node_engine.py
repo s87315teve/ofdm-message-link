@@ -835,6 +835,12 @@ class ProcessNodeWorker:
         return self._engine.crashed_in_stop
 
     @property
+    def undelivered_failures(self) -> list[str]:
+        """``failed`` events a stalled listener kept the pump from delivering at stop."""
+
+        return self._engine.undelivered_failures
+
+    @property
     def attached(self) -> str | None:
         return self._attached
 
