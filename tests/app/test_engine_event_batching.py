@@ -352,8 +352,8 @@ def test_the_parent_gets_every_event_in_order_through_the_real_queue():
         assert process.request(("detach",), 30.0) == ("ok", "")
     finally:
         process.stop()
-    # The pump reports the child's exit after stop, as it always has.
-    got = [event for event in got if event != ("failed", "radio engine process exited")]
+    # A stop we asked for is not a failure: nothing but the child's events.
+    assert ("failed", "radio engine process exited") not in got
     numbers = [number for _, number in got]
     # Every event, once, in the order the child put them: the numbers count up.
     assert numbers == list(range(len(numbers)))
@@ -389,6 +389,51 @@ def test_the_events_a_child_sends_as_it_stops_all_reach_the_parent():
     assert process._replies.get(timeout=60) == ("ok", "up")
     process.stop()
     assert got == list(range(200))
+
+
+def _child_serves_until_stopped(events, control, replies):
+    sink = engine._EventSink(events, samples_per_second=10.0)
+
+    class Worker:
+        lag_monitor = None
+
+    engine._serve(Worker(), control, replies, lambda: sink.put("stats", 0),
+                  switch_interval_s=0.005, flush=sink.flush_events)
+    sink.flush_events()
+
+
+def _wait_for_stats(got):
+    deadline = time.monotonic() + 30.0
+    while not any(kind == "stats" for kind, _ in got) and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+
+@pytest.mark.parametrize("trial", range(5))
+def test_a_clean_stop_is_not_reported_as_a_failure(trial):
+    got = []
+    process = engine._EngineProcess(_child_serves_until_stopped, (),
+                                    lambda kind, value: got.append((kind, value)))
+    process.start()
+    _wait_for_stats(got)
+    process.stop()
+    assert not [value for kind, value in got if kind == "failed"]
+
+
+def test_a_child_that_crashes_is_still_reported():
+    import os
+    import signal
+
+    got = []
+    process = engine._EngineProcess(_child_serves_until_stopped, (),
+                                    lambda kind, value: got.append((kind, value)))
+    process.start()
+    _wait_for_stats(got)
+    os.kill(process.pid, signal.SIGKILL)
+    deadline = time.monotonic() + 10.0
+    while not any(kind == "failed" for kind, _ in got) and time.monotonic() < deadline:
+        time.sleep(0.005)
+    process.stop()
+    assert ("failed", "radio engine process exited") in got
 
 
 def test_a_message_signal_strips_the_constellation_before_batching():

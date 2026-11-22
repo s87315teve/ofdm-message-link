@@ -333,6 +333,9 @@ class _EngineProcess:
         )
         self._dispatch = dispatch
         self._pump: threading.Thread | None = None
+        # Set when stop() starts, so the child's exit is not reported as a crash.
+        self._stop_requested = threading.Event()
+        # Set once the child is gone: the pump then reads the pipe to its end.
         self._stopping = threading.Event()
         self._lock = threading.Lock()
 
@@ -372,7 +375,7 @@ class _EngineProcess:
             # One queue item is a batch; its events go on in their order.
             for kind, value in batch:
                 self._dispatch(kind, value)
-        if not self._stopping.is_set():
+        if not self._stop_requested.is_set():
             self._dispatch("failed", "radio engine process exited")
 
     def post(self, command: tuple) -> bool:
@@ -406,6 +409,7 @@ class _EngineProcess:
     def stop(self) -> None:
         if self._process.pid is None or self._stopping.is_set():
             return
+        self._stop_requested.set()
         if self._process.is_alive():
             try:
                 self._control.put(("stop",), timeout=1.0)
