@@ -35,7 +35,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ofdm_link.phy.mcs_table import McsTableEntry, McsTableError, describe_mcs_entry, mcs_entry
 from ofdm_link.phy.streaming import peak_amplitude
-from ofdm_link.runtime.segment_decode_pool import DecodePoolError
+from ofdm_link.runtime.segment_decode_pool import DecodePoolClosed, DecodePoolError
 
 from . import dashboard_widgets as widgets
 from . import log_limits, options, qt_runtime
@@ -137,6 +137,8 @@ class ReceiveWorker:
         self._decode_failure: str | None = None
         self._finish_wanted = threading.Event()
         self._finished = threading.Event()
+        # A detach already waited its full time for this thread.
+        self._finish_timed_out = False
 
     @property
     def stats(self):
@@ -205,7 +207,7 @@ class ReceiveWorker:
         self._finished.clear()
         self._finish_wanted.set()
         self._attached.set()
-        self._finished.wait(_FINISH_WAIT_S)
+        self._finish_timed_out = not self._finished.wait(_FINISH_WAIT_S)
 
     def _run(self) -> None:
         # An engine child's bridge batches its events (engine._EventSink):
@@ -241,6 +243,9 @@ class ReceiveWorker:
                     delivered = self._receiver.feed(chunk, assume_finite=True)
                 else:
                     delivered = self._receiver.feed(chunk)
+            except DecodePoolClosed as error:  # stop() ended the wait: no failure
+                self._deliver_guarded(error.delivered)
+                break
             except DecodePoolError as error:
                 self._decoding_failed(error)
                 self._discard_samples(flush)
@@ -288,6 +293,12 @@ class ReceiveWorker:
                 self._egress.forward(message.message.payload)
             self._bridge.message.emit(message)
 
+    def _deliver_guarded(self, delivered) -> None:
+        try:
+            self._deliver(delivered)
+        except Exception as failure:
+            self._event_flush_failed(failure)
+
     def _finish_decoding(self) -> None:
         """On the receive thread: deliver the bursts still being decoded, bounded."""
 
@@ -304,6 +315,8 @@ class ReceiveWorker:
                         f"decode workers did not finish within {_FINISH_DECODING_S:g} s; "
                         "bursts still in flight may be lost"
                     )
+        except DecodePoolClosed as error:
+            self._deliver_guarded(error.delivered)
         except DecodePoolError as error:
             self._decoding_failed(error)
         except Exception as error:  # surfaced in the window, never silent
@@ -456,7 +469,14 @@ class ReceiveWorker:
         self._stop.set()
         self._attached.set()
         if self._thread is not None:
-            self._thread.join(timeout=_FINISH_WAIT_S)
+            self._thread.join(timeout=0.1 if self._finish_timed_out else _FINISH_WAIT_S)
+            if self._thread.is_alive():
+                # Still in a feed, waiting on a worker: stopping the workers
+                # ends that wait, and the thread leaves on its own.
+                interrupt = getattr(self._receiver, "interrupt_decoding", None)
+                if interrupt is not None:
+                    interrupt()
+                self._thread.join(timeout=1.0)
             self._thread = None
         self.detach()
         if self._egress is not None:

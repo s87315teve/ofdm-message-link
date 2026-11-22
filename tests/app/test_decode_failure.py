@@ -13,7 +13,11 @@ import pytest
 from stream_fixtures import MEASUREMENT, profile, v5_stream
 from test_rx_chunk_merge import _Bridge, _QueueSource
 
-from ofdm_link.runtime.segment_decode_pool import DecodePoolError, SegmentDecodePool
+from ofdm_link.runtime.segment_decode_pool import (
+    DecodePoolClosed,
+    DecodePoolError,
+    SegmentDecodePool,
+)
 from ofdm_message_link.burst_events import EventLogWriter, read_events
 from ofdm_message_link.link import MessageReceiver, burst_quality
 from ofdm_message_link.rx_app import ReceiveWorker
@@ -167,6 +171,74 @@ def test_detach_delivers_the_bursts_still_being_decoded():
         assert [m.message.payload for m in bridge.message.values] == payloads
     finally:
         worker.stop()
+
+
+def test_a_stop_under_a_feed_waiting_on_a_slow_worker_reports_no_failure():
+    """Stop ends the wait; neither that nor the slow worker it stops is a failure."""
+
+    link = profile(MEASUREMENT)
+    stream, _ = v5_stream(link, seed=5, bursts=8, mcs_indices=_MCS)
+    receiver = MessageReceiver(link, decode_workers=2)
+    receiver._pool.close()
+    receiver._pool = SegmentDecodePool(link.config, workers=2, max_in_flight=2, max_batch=1,
+                                       annotate=functools.partial(_annotate_slowly, 3.0))
+    bridge = _Bridge()
+    worker = ReceiveWorker(receiver, bridge)
+    worker.start()
+    worker.attach(_QueueSource([stream]))
+    thread = worker._thread
+    time.sleep(0.5)  # in back-pressure, behind two decodes of 3 s
+    started = time.monotonic()
+    worker.stop()
+    assert time.monotonic() - started < 8.0
+    thread.join(5.0)
+    assert not thread.is_alive()
+    assert worker.decode_failure is None
+    assert bridge.failed.values == []
+
+
+def test_a_real_worker_death_is_still_reported_after_a_close_race_fix():
+    from test_decode_pool_errors import _Finished, _queued, _WorkerDied
+
+    pool = _queued(_Finished(0), _WorkerDied(1))
+    with pytest.raises(DecodePoolError, match="died") as caught:
+        pool.drain(timeout=0.01)
+    assert not isinstance(caught.value, DecodePoolClosed)
+
+
+def test_a_wait_ended_by_close_is_not_a_dead_worker():
+    from concurrent.futures import CancelledError
+    from concurrent.futures.process import BrokenProcessPool
+
+    from test_decode_pool_errors import _Finished, _queued
+
+    class Raises(_Finished):
+        def __init__(self, error):
+            super().__init__(0)
+            self.error = error
+
+        def result(self, timeout=None):
+            raise self.error
+
+    for error in (BrokenProcessPool("killed by close"), CancelledError()):
+        pool = _queued(Raises(error))
+        pool._closing = True
+        with pytest.raises(DecodePoolClosed):
+            pool.drain(timeout=0.01)
+
+
+def test_a_result_that_lands_after_close_emptied_the_queue_is_kept():
+    from test_decode_pool_errors import _Finished, _numbers, _queued
+
+    class ClosedDuringTheWait(_Finished):
+        def result(self, timeout=None):
+            pool.close()
+            return super().result()
+
+    pool = _queued(ClosedDuringTheWait(7))
+    with pytest.raises(DecodePoolClosed):
+        pool.drain()
+    assert _numbers(pool.collect()) == [7]
 
 
 def test_a_stop_that_times_out_delivers_what_finished_before_it_reports():

@@ -1046,6 +1046,12 @@ class MessageReceiver:
             return ()
         return self._take_from_pool(self._pool.collect)
 
+    def interrupt_decoding(self) -> None:
+        """From another thread: end a feed that is waiting on the decode workers."""
+
+        if self._pool is not None:
+            self._pool.interrupt()
+
     def _take_from_pool(self, take) -> tuple[ReceivedMessage, ...]:
         try:
             results = take()

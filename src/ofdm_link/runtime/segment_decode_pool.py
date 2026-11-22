@@ -45,7 +45,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from concurrent.futures import BrokenExecutor, Future, ProcessPoolExecutor
+from concurrent.futures import BrokenExecutor, CancelledError, Future, ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,6 +71,10 @@ class DecodePoolError(RuntimeError):
 
     # The messages decoded before the failure (set by MessageReceiver).
     delivered: tuple = ()
+
+
+class DecodePoolClosed(DecodePoolError):
+    """The pool's owner closed it (a stop); no failure of the pool or a worker."""
 
 
 def _safe_context() -> multiprocessing.context.BaseContext:
@@ -300,6 +304,9 @@ def _raised_by_task(future: Future, error: BaseException) -> bool:
 class SegmentDecodePool:
     """A bounded, order-preserving process pool for burst payload decoding."""
 
+    # Set by close() and interrupt(): what ends a wait from then on is our doing.
+    _closing = False
+
     def __init__(
         self,
         config: LinkConfig,
@@ -393,7 +400,7 @@ class SegmentDecodePool:
         """
 
         if self._closed:
-            raise DecodePoolError("segment decode pool is closed")
+            raise self._failure("segment decode pool is closed")
         batch = tuple(segments)
         if not all(isinstance(segment, BurstSegment) for segment in batch):
             raise TypeError("segments must be BurstSegments")
@@ -416,12 +423,12 @@ class SegmentDecodePool:
                 future = self._executor.submit(_run_in_worker, batch[cursor : cursor + take])
             except BrokenExecutor as error:
                 self._close_keeping_results()
-                raise DecodePoolError("a segment decode worker died") from error
+                raise self._failure("a segment decode worker died") from error
             except Exception as error:
                 # The executor refuses work (it is shutting down): these
                 # segments would silently get no result, so stop here.
                 self._close_keeping_results()
-                raise DecodePoolError("the segment decode pool refused work") from error
+                raise self._failure("the segment decode pool refused work") from error
             self._pending.append((future, take))
             self._in_flight += take
             self._submitted += take
@@ -457,13 +464,23 @@ class SegmentDecodePool:
         ready, self._taken = tuple(self._taken), []
         return ready
 
+    def _failure(self, message: str) -> DecodePoolError:
+        """The error for a pool that stopped: not a failure if the owner stopped it."""
+
+        if self._closing:
+            return DecodePoolClosed("segment decode pool is closed")
+        return DecodePoolError(message)
+
     def _take_oldest(self, timeout: float | None) -> tuple[SegmentDecodeResult, ...]:
-        future, count = self._pending[0]
+        try:
+            future, count = self._pending[0]
+        except IndexError:  # close(), on another thread, emptied the queue
+            raise self._failure("segment decode pool is closed") from None
         try:
             results = future.result(timeout=timeout)
-        except BrokenExecutor as error:
+        except (BrokenExecutor, CancelledError) as error:
             self._close_keeping_results()
-            raise DecodePoolError("a segment decode worker died") from error
+            raise self._failure("a segment decode worker died") from error
         except BaseException as error:
             if not _raised_by_task(future, error):
                 # The wait timed out (the task is still decoding, or finished
@@ -476,7 +493,11 @@ class SegmentDecodePool:
             # the results already taken in this call, still reach the caller
             # in order.
             results = (failed_result(error),) * count
-        self._pending.popleft()
+        try:
+            self._pending.popleft()
+        except IndexError:  # close() emptied the queue during the wait
+            self._taken.extend(results)
+            raise self._failure("segment decode pool is closed") from None
         self._in_flight -= count
         self._completed += count
         self._worker_errors += sum(1 for result in results if result.error is not None)
@@ -518,10 +539,22 @@ class SegmentDecodePool:
 
         if self._closed:
             return
+        self._closing = True
         self._closed = True
         self._pending.clear()
         self._in_flight = 0
         self._shut_down()
+
+    def interrupt(self) -> None:
+        """From another thread: end the owner's wait on the workers.
+
+        The workers stop (bounded, as in :meth:`close`), and the owner's call
+        raises :class:`DecodePoolClosed` with the queue still its own to empty.
+        """
+
+        if not self._closed:
+            self._closing = True
+            self._shut_down()
 
     def _close_keeping_results(self) -> None:
         """Close after a fatal error, with one result for each in-flight segment.
@@ -549,13 +582,12 @@ class SegmentDecodePool:
         """Bounded even with a hung worker, which a plain shutdown would wait for."""
 
         manager = getattr(self._executor, "_executor_manager_thread", None)
-        workers = dict(getattr(self._executor, "_processes", None) or {})
         self._executor.shutdown(wait=False, cancel_futures=True)
         if manager is None:
             return
         manager.join(_CLOSE_WAIT_S)
         if manager.is_alive():
-            for process in workers.values():
+            for process in list(manager.processes.values()):
                 # Not one already gone: its PID may have been reused.
                 if not multiprocessing.connection.wait([process.sentinel], 0):
                     process.kill()
