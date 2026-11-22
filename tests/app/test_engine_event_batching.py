@@ -364,6 +364,33 @@ def test_the_parent_gets_every_event_in_order_through_the_real_queue():
     assert got[-1][0] == "final"
 
 
+def _child_sends_as_it_stops(events, control, replies):
+    sink = engine._EventSink(events, samples_per_second=10.0)
+    replies.put(("ok", "up"))
+    while control.get()[0] != "stop":
+        pass
+    for number in range(200):
+        sink.put("final", (number, bytes(2000)))
+        if number % 8 == 7:
+            sink.flush_events()
+    sink.flush_events()
+
+
+def test_the_events_a_child_sends_as_it_stops_all_reach_the_parent():
+    got = []
+
+    def dispatch(kind, value):
+        if kind == "final":
+            time.sleep(0.0002)  # a listener that takes a moment
+            got.append(value[0])
+
+    process = engine._EngineProcess(_child_sends_as_it_stops, (), dispatch)
+    process.start()
+    assert process._replies.get(timeout=60) == ("ok", "up")
+    process.stop()
+    assert got == list(range(200))
+
+
 def test_a_message_signal_strips_the_constellation_before_batching():
     from dataclasses import dataclass
 

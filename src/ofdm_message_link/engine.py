@@ -348,22 +348,27 @@ class _EngineProcess:
         self._pump.start()
 
     def _run_pump(self) -> None:
-        while not self._stopping.is_set():
+        child_gone = False
+        while True:
+            # Once the child has exited, what it wrote is all in the pipe:
+            # read it to the end without waiting.  stop() bounds this with its
+            # join, then closes the queue (the ValueError below).
+            draining = child_gone or self._stopping.is_set()
             try:
-                batch = self._events.get(timeout=0.1)
+                batch = self._events.get(timeout=0.0 if draining else 0.1)
             except queue.Empty:
-                if not self._process.is_alive():
-                    self._dispatch("failed", "radio engine process exited")
-                    return
+                if draining:
+                    break
+                child_gone = not self._process.is_alive()
                 continue
-            except (EOFError, OSError):
+            except (EOFError, OSError, ValueError):
                 # No writer is left, possibly partway through a batch.
-                if not self._stopping.is_set():
-                    self._dispatch("failed", "radio engine process exited")
-                return
+                break
             # One queue item is a batch; its events go on in their order.
             for kind, value in batch:
                 self._dispatch(kind, value)
+        if not self._stopping.is_set():
+            self._dispatch("failed", "radio engine process exited")
 
     def post(self, command: tuple) -> bool:
         try:
