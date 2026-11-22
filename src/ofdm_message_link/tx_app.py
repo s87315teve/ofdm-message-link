@@ -22,6 +22,7 @@ import functools
 import json
 import queue
 import socket
+import sys
 import threading
 import time
 from collections import deque
@@ -338,6 +339,7 @@ class TransmitWorker:
         self.policy_errors = 0
         self._policy_failed = False  # the idle worker backs off after a failure
         self._error_reports: dict[str, tuple[float, int]] = {}
+        self._event_flush_reported = False
         self._last_burst_at: float | None = None
         # Send attempts that raised; bursts (and their datagrams) dropped
         # after a raising send; the current failure streak of a retrying sink.
@@ -419,7 +421,10 @@ class TransmitWorker:
         # ``continue`` ended it.
         flush = getattr(self._bridge, "flush_events", None) or (lambda: None)
         while not self._stop.is_set():
-            flush()
+            try:
+                flush()
+            except Exception as error:
+                self._event_flush_failed(error)
             sink = self.sink
             if sink is None:
                 # Hold the queue rather than draining it into nothing.  Time
@@ -490,7 +495,26 @@ class TransmitWorker:
                 self._stop.wait(_ERROR_BACKOFF_S)
             unsent = None
             self._held_messages = sum(piece.is_last for piece in pending)
-        flush()
+        try:
+            flush()
+        except Exception as error:
+            self._event_flush_failed(error)
+
+    def _event_flush_failed(self, error: Exception) -> None:
+        """Events that cannot be sent must not end the transmit thread.
+
+        Reported as an event, at most once per second, and the first time on
+        stderr too: the event may travel the very channel that is failing.
+        """
+
+        text = f"event flush failed: {type(error).__name__}: {error}"
+        if not self._event_flush_reported:
+            self._event_flush_reported = True
+            print(f"[tx] {text}", file=sys.stderr, flush=True)
+        try:
+            self._report_error("event_flush", text)
+        except Exception:
+            pass
 
     def _send_failed(
         self, sink, unsent: _Encoded, error: Exception, attempted_at: float

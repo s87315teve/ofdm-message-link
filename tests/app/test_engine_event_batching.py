@@ -434,6 +434,100 @@ def test_the_transmit_worker_flushes_after_each_burst():
     assert [record.message_count for record in sent] == [1, 1, 1]
 
 
+# ------------------------------------------------ a flush that raises
+
+
+class _FailsOnce(_Channel):
+    """``put_batch`` raises the first time, as a closed queue does."""
+
+    def __init__(self):
+        super().__init__()
+        self.raised = 0
+
+    def put_batch(self, batch):
+        if not self.raised:
+            self.raised = 1
+            raise ValueError("Queue is closed")
+        return super().put_batch(batch)
+
+
+def test_a_batch_whose_send_raises_is_counted_as_dropped():
+    channel = _FailsOnce()
+    sink = _sink(channel)
+    sink.put("message", 1)
+    sink.put("message", 2)
+    with pytest.raises(ValueError):
+        sink.flush_events()
+    assert sink.dropped == 2
+
+
+def test_a_failing_event_flush_does_not_end_the_transmit_thread(capsys):
+    from stream_fixtures import MEASUREMENT, profile
+
+    from ofdm_message_link.link import MessageTransmitter
+    from ofdm_message_link.tx_app import TransmitWorker
+
+    channel = _FailsOnce()
+    sink = _sink(channel)
+    worker = TransmitWorker(MessageTransmitter(profile(MEASUREMENT)), sink, sink)
+    sink.put("mark", "makes the first flush send, and raise")
+    worker.start()
+    worker.attach(_AcceptingRadio())
+    try:
+        assert worker.submit("test", b"x" * 40)
+        deadline = time.monotonic() + 10.0
+        while (not any(kind == "sent" for kind, _ in channel.events())
+               and time.monotonic() < deadline):
+            time.sleep(0.005)
+        assert worker._thread.is_alive()
+    finally:
+        worker.stop()
+    events = channel.events()
+    assert any(kind == "sent" for kind, _ in events)
+    assert any(kind == "failed" and "event flush failed" in value for kind, value in events)
+    assert "event flush failed" in capsys.readouterr().err
+
+
+class _Idle:
+    stats = None
+
+    def __init__(self):
+        self.feeds = 0
+
+    def feed(self, samples, **_kwargs):
+        self.feeds += 1
+        return ()
+
+    def drain_observations(self):
+        return ()
+
+
+class _Chunks(_OneChunk):
+    def recv(self, timeout):
+        time.sleep(0.001)
+        return np.ones(64, np.complex64)
+
+
+def test_a_failing_event_flush_does_not_end_the_receive_thread(capsys):
+    channel = _FailsOnce()
+    sink = _sink(channel)
+    receiver = _Idle()
+    sink.put("mark", "makes the first flush send, and raise")
+    worker = ReceiveWorker(receiver, sink, sink, min_feed_samples=0)
+    worker.start()
+    worker.attach(_Chunks())
+    try:
+        deadline = time.monotonic() + 5.0
+        while receiver.feeds < 5 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert worker._thread.is_alive() and receiver.feeds >= 5
+    finally:
+        worker.stop()
+    failed = [value for kind, value in channel.events() if kind == "failed"]
+    assert len(failed) == 1 and "event flush failed" in failed[0]
+    assert "event flush failed" in capsys.readouterr().err
+
+
 # ------------------------------------- no lock shared between processes
 
 

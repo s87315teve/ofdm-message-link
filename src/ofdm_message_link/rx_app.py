@@ -23,6 +23,7 @@ import argparse
 import functools
 import json
 import socket
+import sys
 import threading
 import time
 from collections import Counter, deque
@@ -125,6 +126,7 @@ class ReceiveWorker:
         self._attached = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_level = 0.0
+        self._event_flush_reported = False
 
     @property
     def stats(self):
@@ -183,7 +185,10 @@ class ReceiveWorker:
         # ends the previous iteration, whichever ``continue`` ended it.
         flush = getattr(self._bridge, "flush_events", None) or (lambda: None)
         while not self._stop.is_set():
-            flush()
+            try:
+                flush()
+            except Exception as error:
+                self._event_flush_failed(error)
             source = self.source
             if source is None:
                 self._attached.wait(0.1)
@@ -237,7 +242,27 @@ class ReceiveWorker:
                     self._notify_observer(source, chunk, snrs)
                 except Exception as error:  # surfaced in the window, never silent
                     self._bridge.failed.emit(f"observer {type(error).__name__}: {error}")
-        flush()
+        try:
+            flush()
+        except Exception as error:
+            self._event_flush_failed(error)
+
+    def _event_flush_failed(self, error: Exception) -> None:
+        """Events that cannot be sent must not end the receive thread.
+
+        Reported once, as an event and on stderr: the event may travel the
+        very channel that is failing.
+        """
+
+        if self._event_flush_reported:
+            return
+        self._event_flush_reported = True
+        text = f"event flush failed: {type(error).__name__}: {error}"
+        print(f"[rx] {text}", file=sys.stderr, flush=True)
+        try:
+            self._bridge.failed.emit(text)
+        except Exception:
+            pass
 
     def _next_chunk(self, source):
         """One transport chunk, merged with the ones queued behind it up to a minimum size.

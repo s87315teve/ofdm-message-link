@@ -265,7 +265,12 @@ class _EventSink:
     def _send_locked(self) -> None:
         # Under the lock, so batches leave in the order their events came.
         batch, self._buffer = self._buffer, []
-        if not self._events.put_batch(batch):
+        try:
+            accepted = self._events.put_batch(batch)
+        except Exception:
+            self._dropped += len(batch)
+            raise
+        if not accepted:
             self._dropped += len(batch)
 
     # PlotBuffers surface -------------------------------------------------
