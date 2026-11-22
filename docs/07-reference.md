@@ -724,8 +724,11 @@ payload 失敗（`unclassified_decode_failures`，和 inline decoder 解不出�
 送不回來（例如不能 pickle）時，那個 task 的每個 segment 都這樣算。worker 死掉（`BrokenExecutor`）或 pool 不再接受工作時，pool 關閉並丟出
 `DecodePoolError`。以前一個這樣的例外會一直卡在 pool 的最前面，之後每次 feed 都重丟一次，後面的 burst 全部遺失。
 worker 死掉時，已經解完的 burst 仍照順序交出；接收端只回報一次（`failed` 事件、stats 的 `rx.decode_failure`），之後不再解碼，
-無視窗的 `node_app` 以 exit 4 結束，視窗持續顯示錯誤，要重新啟動才會再收。detach 與 stop 時最多等 1.5 s 把解碼中的 burst
-交出去；worker 卡住時 pool 會在限定時間內把它砍掉，所以停止一定會結束。
+無視窗的 `node_app` 以 exit 4 結束（worker 剛好在停止前或停止中死掉時也一樣），視窗持續顯示錯誤，要重新啟動才會再收。
+一個 task 的結果是整批一起送回來的，所以死掉的 worker 手上那一批裡已經解完的 burst（最多 `max_batch - 1` 個）會跟著遺失。
+detach 與 stop 時最多等 1.5 s 把解碼中的 burst 交出去。detach 等不到的 burst 留著，之後照順序交出；最後的 stop 才放棄還沒解完
+的 burst，排在它們後面已經解完的仍照順序交出，並回報放棄了幾個。worker 卡住時 pool 會在限定時間內把它砍掉，所以停止一定會結束，
+這種由停止造成的結束不算 worker 故障。
 等待結果逾時（`flush(timeout)`）不算失敗：那個 task 留在最前面，晚一點照常交出結果，即使它剛好在逾時之後才解完。
 Decode worker 忽略 SIGINT：終端機的 Ctrl-C 會送到整個 process group，worker 何時停由擁有它的 receiver（`close()`）決定，
 不會在串流中途變成某個 task 的 `KeyboardInterrupt` 或讓 pool 壞掉。

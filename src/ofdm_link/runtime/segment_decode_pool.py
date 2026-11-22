@@ -32,7 +32,9 @@ and later segments keep flowing.  Only a dead worker (``BrokenExecutor``) or
 an executor that refuses new work closes the pool with :class:`DecodePoolError`.
 What had finished by then is kept, in order, with a failure in place of each
 segment that had not, and the next :meth:`~SegmentDecodePool.collect` or
-:meth:`~SegmentDecodePool.drain` returns it.
+:meth:`~SegmentDecodePool.drain` returns it.  A task's results come back
+together, so the bursts a dead worker had already decoded in its current
+batch (at most ``max_batch - 1``) are lost with it.
 """
 
 from __future__ import annotations
