@@ -31,6 +31,7 @@ by one, in order, so a parent-side timestamp is at most one flush later.
 from __future__ import annotations
 
 import atexit
+import multiprocessing.connection
 import multiprocessing.queues
 import os
 import queue
@@ -339,6 +340,9 @@ class _EngineProcess:
         self._stopping = threading.Event()
         # Events still in the pipe when stop() gave up on a stalled pump.
         self.events_lost_at_stop = 0
+        # The child ended by itself with an error, not by our terminate().
+        self.crashed_in_stop = False
+        self._exit_reported = False
         self._lock = threading.Lock()
 
     @property
@@ -369,7 +373,7 @@ class _EngineProcess:
             except queue.Empty:
                 if draining:
                     break
-                child_gone = not self._process.is_alive()
+                child_gone = self._child_exited()
                 continue
             except (EOFError, OSError, ValueError):
                 # No writer is left, possibly partway through a batch.
@@ -378,7 +382,17 @@ class _EngineProcess:
             for kind, value in batch:
                 self._dispatch(kind, value)
         if not self._stop_requested.is_set():
+            self._exit_reported = True
             self._dispatch("failed", "radio engine process exited")
+
+    def _child_exited(self) -> bool:
+        """Without reading its exit status, which is stop()'s alone to read.
+
+        Under forkserver the status is read once from a pipe: of two threads
+        reading it, the loser records 255, and a clean exit looks like a crash.
+        """
+
+        return bool(multiprocessing.connection.wait([self._process.sentinel], 0))
 
     def post(self, command: tuple) -> bool:
         try:
@@ -391,7 +405,7 @@ class _EngineProcess:
         """Send one lifecycle command and wait for the child's reply."""
 
         with self._lock:
-            if not self._process.is_alive():
+            if self._process.pid is None or self._child_exited():
                 raise TransportError("radio engine process is not running")
             self._control.put(command, timeout=timeout)
             deadline = time.monotonic() + timeout
@@ -401,7 +415,7 @@ class _EngineProcess:
                 except (EOFError, OSError):
                     raise TransportError("radio engine process exited") from None
                 except queue.Empty:
-                    if not self._process.is_alive():
+                    if self._child_exited():
                         raise TransportError("radio engine process exited") from None
                     if time.monotonic() >= deadline:
                         raise TransportError(
@@ -418,6 +432,8 @@ class _EngineProcess:
             except (queue.Full, OSError, ValueError):
                 pass
             self._process.join(_STOP_TIMEOUT_S)
+        # Before any terminate() below, whose result is no crash of the child.
+        self.crashed_in_stop = self._process.exitcode not in (None, 0, -signal.SIGTERM)
         if self._process.is_alive():
             self._process.terminate()
             self._process.join(2.0)
@@ -425,14 +441,29 @@ class _EngineProcess:
             self._process.kill()
             self._process.join(2.0)
         self._stopping.set()
+        pump_stalled = False
         if self._pump is not None:
             self._pump.join(1.0)
-            if self._pump.is_alive():
+            pump_stalled = self._pump.is_alive()
+            if pump_stalled:
                 self._count_unread_events()
             self._pump = None
+        if self.crashed_in_stop and not self._exit_reported:
+            self._report_crash_in_stop(pump_stalled)
         for channel in (self._events, self._control, self._replies):
             channel.close()
             channel.join_thread()
+
+    def _report_crash_in_stop(self, pump_stalled: bool) -> None:
+        self._exit_reported = True
+        text = "radio engine process exited"
+        try:
+            if pump_stalled:  # the listener is busy: do not wait for it here
+                print(f"[engine-events] stop: {text}", file=sys.stderr, flush=True)
+            else:
+                self._dispatch("failed", text)
+        except Exception as error:  # a window already torn down, say
+            print(f"[engine-events] stop: {text} ({error})", file=sys.stderr, flush=True)
 
     def _count_unread_events(self) -> None:
         """A listener holds the pump past stop's join: say what it will not deliver.

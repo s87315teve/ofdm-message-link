@@ -433,6 +433,9 @@ class HeadlessNode:
 
     def run(self) -> int:
         code = self._run()
+        if code == 0 and getattr(self.worker, "crashed_in_stop", False):
+            print("node_app: the radio engine process crashed while stopping", file=self.out)
+            return EXIT_ENGINE_DIED
         # worker.stop() has joined the pump, so a worker that died just before
         # or during the stop is known by now.
         failure = self.monitor.decode_failure

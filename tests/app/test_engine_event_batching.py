@@ -9,7 +9,9 @@ pump hands the events on one by one.  Drops are counted in events.
 from __future__ import annotations
 
 import itertools
+import os
 import queue
+import signal
 import sys
 import threading
 import time
@@ -391,6 +393,130 @@ def test_the_events_a_child_sends_as_it_stops_all_reach_the_parent():
     assert got == list(range(200))
 
 
+class _IdleWorker:
+    lag_monitor = None
+
+    def attach(self, _endpoint):
+        pass
+
+    def detach(self):
+        pass
+
+
+def _serve_until_stopped(control, replies):
+    engine._serve(_IdleWorker(), control, replies, lambda: None, switch_interval_s=0.005)
+
+
+def _child_crashes_while_stopping(events, control, replies):
+    _serve_until_stopped(control, replies)
+    os._exit(3)
+
+
+def _child_ignores_stop_and_sigterm(events, control, replies):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    time.sleep(60.0)
+
+
+def _child_ignores_stop(events, control, replies):
+    time.sleep(60.0)
+
+
+def test_a_child_that_crashes_during_stop_is_reported_once():
+    got = []
+    process = engine._EngineProcess(_child_crashes_while_stopping, (),
+                                    lambda kind, value: got.append((kind, value)))
+    process.start()
+    time.sleep(0.3)
+    process.stop()
+    assert process.crashed_in_stop
+    assert got.count(("failed", "radio engine process exited")) == 1
+
+
+def test_a_crash_the_pump_already_reported_is_not_reported_again():
+    got = []
+    process = engine._EngineProcess(_child_serves_until_stopped, (),
+                                    lambda kind, value: got.append((kind, value)))
+    process.start()
+    _wait_for_stats(got)
+    os.kill(process.pid, signal.SIGKILL)
+    deadline = time.monotonic() + 10.0
+    while not any(kind == "failed" for kind, _ in got) and time.monotonic() < deadline:
+        time.sleep(0.005)
+    process.stop()
+    assert got.count(("failed", "radio engine process exited")) == 1
+
+
+@pytest.mark.parametrize("target", [_child_ignores_stop, _child_ignores_stop_and_sigterm],
+                         ids=["terminated", "killed"])
+def test_a_child_we_had_to_end_is_not_called_a_crash(monkeypatch, target):
+    monkeypatch.setattr(engine, "_STOP_TIMEOUT_S", 0.5)
+    got = []
+    process = engine._EngineProcess(target, (), lambda kind, value: got.append((kind, value)))
+    process.start()
+    time.sleep(0.5)  # past its signal setup
+    process.stop()
+    assert process._process.exitcode in (-signal.SIGTERM, -signal.SIGKILL)
+    assert not process.crashed_in_stop
+    assert not [value for kind, value in got if kind == "failed"]
+
+
+def test_only_stop_reads_the_childs_exit_status():
+    """Two threads reading it race: the loser records 255, and a clean stop looks like a crash."""
+
+    got = []
+    process = engine._EngineProcess(_child_serves_until_stopped, (),
+                                    lambda kind, value: got.append((kind, value)))
+    process.start()
+    _wait_for_stats(got)
+    real_get = process._events.get
+
+    def always_empty(timeout):
+        time.sleep(0.01)
+        raise queue.Empty
+
+    process._events.get = always_empty  # the pump's path that looks at the child
+    pump = process._pump
+    process._control.put(("stop",))
+    pump.join(10.0)
+    assert not pump.is_alive()
+    assert process._process._popen.returncode is None
+    process._events.get = real_get
+    process.stop()
+    assert process._process.exitcode == 0 and not process.crashed_in_stop
+
+
+def _node_child_clean(_p, _s, _u, _d, _a, _c, events, control, replies):
+    _serve_until_stopped(control, replies)
+
+
+def _node_child_crashes_while_stopping(_p, _s, _u, _d, _a, _c, events, control, replies):
+    _serve_until_stopped(control, replies)
+    os._exit(3)
+
+
+@pytest.mark.parametrize(("target", "name"), [(_node_child_clean, None),
+                                              (_node_child_crashes_while_stopping,
+                                               "EXIT_ENGINE_DIED")],
+                         ids=["clean", "crash"])
+def test_a_headless_node_exits_3_when_its_engine_crashes_during_stop(target, name):
+    import io
+
+    from ofdm_message_link import node_app
+    from ofdm_message_link.node_engine import ProcessNodeWorker
+
+    monitor = node_app.NodeMonitor(1, "fdd", 5e6)
+    worker = ProcessNodeWorker(None, None, monitor.on_event, target=target)
+    out = io.StringIO()
+    node = node_app.HeadlessNode(worker, monitor, _endpoint, duration_s=0.4, out=out)
+    code = node.run()
+    if name is None:
+        assert code == 0 and not monitor.failures
+    else:
+        assert code == getattr(node_app, name)
+        assert list(monitor.failures) == ["radio engine process exited"]
+        assert "crashed while stopping" in out.getvalue()
+
+
 def _child_sends_a_few_as_it_stops(events, control, replies):
     sink = engine._EventSink(events, samples_per_second=10.0)
     replies.put(("ok", "up"))
@@ -455,9 +581,6 @@ def test_a_clean_stop_is_not_reported_as_a_failure(trial):
 
 
 def test_a_child_that_crashes_is_still_reported():
-    import os
-    import signal
-
     got = []
     process = engine._EngineProcess(_child_serves_until_stopped, (),
                                     lambda kind, value: got.append((kind, value)))

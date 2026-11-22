@@ -826,8 +826,13 @@ class ProcessNodeWorker:
     def alive(self) -> bool:
         """False once the engine child has exited (crashed or stopped)."""
 
-        process = self._engine._process
-        return process.pid is not None and process.is_alive()
+        return self._engine.pid is not None and not self._engine._child_exited()
+
+    @property
+    def crashed_in_stop(self) -> bool:
+        """The child ended by itself with an error while it was being stopped."""
+
+        return self._engine.crashed_in_stop
 
     @property
     def attached(self) -> str | None:
