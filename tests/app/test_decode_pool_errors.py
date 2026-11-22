@@ -11,13 +11,19 @@ from __future__ import annotations
 import functools
 import os
 import threading
+from concurrent.futures.process import BrokenProcessPool
 
 import numpy as np
 import pytest
 from stream_fixtures import MEASUREMENT, profile, v5_stream
 
-from ofdm_link.phy.streaming import PayloadFailure
-from ofdm_link.runtime.segment_decode_pool import DecodePoolError, SegmentDecodePool
+from ofdm_link.phy.streaming import BurstSegment, PayloadFailure
+from ofdm_link.runtime.overload import OFF as OVERLOAD_OFF
+from ofdm_link.runtime.segment_decode_pool import (
+    DecodePoolError,
+    SegmentDecodePool,
+    SegmentDecodeResult,
+)
 from ofdm_message_link.link import MessageReceiver
 
 # v5_stream cycles these; the bursts at MCS 12 are the ones made to fail.
@@ -223,6 +229,7 @@ class _BarePool(SegmentDecodePool):
         self._completed = 0
         self._worker_errors = 0
         self._closed = False
+        self._taken = []
 
 
 class _FinishesJustAfterTheTimeout:
@@ -269,6 +276,138 @@ def test_a_timeout_the_task_raised_itself_fails_its_segments_and_moves_on():
     results = pool._take_oldest(timeout=0.5)
     assert [result.error for result in results] == ["TimeoutError: the task's own timeout"] * 2
     assert not pool._pending and pool._in_flight == 0 and pool._worker_errors == 2
+
+
+# ---------------------------------- results taken before a wait fails
+
+
+def _numbered(number):
+    return SegmentDecodeResult(burst=None, failure=None, annotation=number)
+
+
+class _Finished:
+    def __init__(self, number):
+        self.number = number
+
+    def result(self, timeout=None):
+        return (_numbered(self.number),)
+
+    def done(self):
+        return True
+
+    def exception(self, timeout=None):
+        return None
+
+
+class _DecodingUntilReleased(_Finished):
+    """Times out until ``released``; then a finished task like any other."""
+
+    released = False
+
+    def result(self, timeout=None):
+        if not self.released:
+            raise TimeoutError()
+        return super().result()
+
+    def done(self):
+        return self.released
+
+
+class _WorkerDied(_Finished):
+    def result(self, timeout=None):
+        raise BrokenProcessPool("a worker died")
+
+
+class _Executor:
+    def shutdown(self, **_kwargs):
+        pass
+
+
+def _queued(*futures):
+    pool = _BarePool(futures[0], 1)
+    pool._pending.extend((future, 1) for future in futures[1:])
+    pool._in_flight = len(futures)
+    pool._max_in_flight = 8
+    pool._max_batch = 4
+    pool._backpressure_waits = 0
+    pool._submitted = len(futures)
+    pool._overload = OVERLOAD_OFF
+    pool._executor = _Executor()
+    return pool
+
+
+def _numbers(results):
+    return [result.annotation for result in results]
+
+
+def test_a_drain_that_times_out_keeps_the_results_it_already_took():
+    late = _DecodingUntilReleased(2)
+    pool = _queued(_Finished(0), _Finished(1), late, _Finished(3))
+    with pytest.raises(TimeoutError):
+        pool.drain(timeout=0.01)
+    late.released = True
+    assert _numbers(pool.drain(timeout=0.01)) == [0, 1, 2, 3]
+    assert pool.drain() == ()
+
+
+@pytest.mark.parametrize("next_call", ["collect", "submit_many"])
+def test_results_kept_by_a_timed_out_drain_come_first_from_the_next_call(next_call):
+    late = _DecodingUntilReleased(1)
+    pool = _queued(_Finished(0), late)
+    with pytest.raises(TimeoutError):
+        pool.drain(timeout=0.01)
+    # Still decoding: what was kept is returned, once, and the task stays.
+    got = pool.collect() if next_call == "collect" else pool.submit_many(())
+    assert _numbers(got) == [0]
+    late.released = True
+    assert _numbers(pool.collect()) == [1]
+
+
+def test_a_worker_death_during_a_drain_keeps_the_results_before_it():
+    pool = _queued(_Finished(0), _Finished(1), _WorkerDied(2))
+    with pytest.raises(DecodePoolError, match="died"):
+        pool.drain(timeout=0.01)
+    assert _numbers(pool.drain(timeout=0.01)) == [0, 1]
+
+
+def test_a_worker_death_under_backpressure_keeps_the_results_before_it():
+    pool = _queued(_Finished(0), _WorkerDied(1))
+    pool._max_in_flight = 1  # so the wait goes on to the task that died
+    segment = object.__new__(BurstSegment)
+    with pytest.raises(DecodePoolError, match="died"):
+        pool.submit_many((segment,))
+    assert _numbers(pool.collect()) == [0]
+
+
+def _annotate_slowly(slow_mcs: int, burst):
+    """Runs in the worker: a burst at this MCS is still decoding at the timeout."""
+
+    import time
+
+    from ofdm_message_link.link import burst_quality
+
+    if burst.mcs_index == slow_mcs:
+        time.sleep(0.4)
+    return burst_quality(burst)
+
+
+def test_a_receiver_flush_that_times_out_loses_no_message():
+    link = profile(MEASUREMENT)
+    stream, payloads = v5_stream(link, seed=79, bursts=9, mcs_indices=_MCS)
+    receiver = _receiver(link, functools.partial(_annotate_slowly, _BAD_MCS), max_batch=1)
+    timeouts = 0
+    try:
+        delivered = list(receiver.feed(stream))
+        while True:
+            try:
+                delivered.extend(receiver.flush(0.05))
+                break
+            except TimeoutError:
+                timeouts += 1
+    finally:
+        receiver.close()
+    assert timeouts > 0
+    assert [message.message.payload for message in delivered] == payloads
 
 
 # ------------------------------------------------------------ Ctrl-C

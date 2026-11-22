@@ -259,6 +259,10 @@ class SegmentDecodePool:
         self._max_batch = max_batch
         # One entry per task, with the number of segments it carries.
         self._pending: deque[tuple[Future[tuple[SegmentDecodeResult, ...]], int]] = deque()
+        # Taken from their futures, not yet returned.  They live here, not in
+        # a local, so a wait that raises (a timeout, a dead worker) leaves
+        # them for the next call, ahead of anything newer.
+        self._taken: list[SegmentDecodeResult] = []
         self._in_flight = 0
         self._submitted = 0
         self._completed = 0
@@ -315,19 +319,18 @@ class SegmentDecodePool:
         batch = tuple(segments)
         if not all(isinstance(segment, BurstSegment) for segment in batch):
             raise TypeError("segments must be BurstSegments")
-        ready: list[SegmentDecodeResult] = []
         cursor = 0
         while cursor < len(batch):
             if self._overload.drop_when_full:
                 # Opt-in: take what is already done, then drop what still
                 # does not fit instead of making the owner wait.
-                ready.extend(self.collect())
+                self._take_done()
                 if self._in_flight >= self._max_in_flight:
                     self._dropped_full += len(batch) - cursor
                     break
             while self._in_flight >= self._max_in_flight:
                 self._backpressure_waits += 1
-                ready.extend(self._take_oldest(timeout=None))
+                self._taken.extend(self._take_oldest(timeout=None))
             take = min(
                 self._max_batch, len(batch) - cursor, self._max_in_flight - self._in_flight
             )
@@ -345,24 +348,34 @@ class SegmentDecodePool:
             self._in_flight += take
             self._submitted += take
             cursor += take
-        ready.extend(self.collect())
-        return tuple(ready)
+        self._take_done()
+        return self._hand_over()
 
     def collect(self) -> tuple[SegmentDecodeResult, ...]:
         """Return every result whose predecessors are all done, in order."""
 
-        ready: list[SegmentDecodeResult] = []
-        while self._pending and self._pending[0][0].done():
-            ready.extend(self._take_oldest(timeout=0.0))
-        return tuple(ready)
+        self._take_done()
+        return self._hand_over()
 
     def drain(self, timeout: float | None = None) -> tuple[SegmentDecodeResult, ...]:
-        """Wait for every in-flight segment and return all results in order."""
+        """Wait for every in-flight segment and return all results in order.
 
-        ready: list[SegmentDecodeResult] = []
+        ``timeout`` bounds the wait for each task.  When it expires this
+        raises ``TimeoutError``; nothing is lost, and the next call returns
+        the results taken so far, then the rest, in order.
+        """
+
         while self._pending:
-            ready.extend(self._take_oldest(timeout=timeout))
-        return tuple(ready)
+            self._taken.extend(self._take_oldest(timeout=timeout))
+        return self._hand_over()
+
+    def _take_done(self) -> None:
+        while self._pending and self._pending[0][0].done():
+            self._taken.extend(self._take_oldest(timeout=0.0))
+
+    def _hand_over(self) -> tuple[SegmentDecodeResult, ...]:
+        ready, self._taken = tuple(self._taken), []
+        return ready
 
     def _take_oldest(self, timeout: float | None) -> tuple[SegmentDecodeResult, ...]:
         future, count = self._pending[0]
