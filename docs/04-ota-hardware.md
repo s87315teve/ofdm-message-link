@@ -37,7 +37,8 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
 - 這個頻段和 Wi-Fi、Bluetooth 共用，所以用 antenna 時會有干擾，constellation 不會像 cable 那麼乾淨。
 - **這個預設值只有短時間的 OTA 實測**：Pluto 對 Pluto（[實測紀錄 8.5](08-measurements.md#85-adalm-pluto--adalm-pluto245-ghz預設-profile)、
   [8.7](08-measurements.md#87-改進-rx-之後pluto--pluto245-ghz)、[8.8](08-measurements.md#88-wire-v5pluto--pluto245-ghz)）
-  與 N210 發、Pluto 收（[8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)）。B210／2901
+  與 N210 發、Pluto 收（[8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)），都是 v1.0 發布前與 v2.0 開發期量的，
+  v2.3.0 沒有重測。B210／2901
   沒有在這個頻率量過。其他實測用的是另外兩個選用的 profile（1.2 GHz 與 3.8 GHz）；
   那兩個頻段都不是 ISM 頻段，只有在你確定可以使用時才用。
 
@@ -47,9 +48,10 @@ PHY、GUI 與量測完全不變，只有 sample transport 換掉。
 ## 4.2 USRP（B210、NI USRP-2901、N210）
 
 Sample rate 可以選 5、10、15.36、20 MS/s，程式不依 USRP 的型號限制。15.36 MS/s（LTE 的速率）需要 30.72 MHz 的 master clock，
-是 B2xx 家族的設定；測過 B210 與 NI USRP-2901，而且只量過單向。Master clock 固定的裝置（例如 N210 的 100 MHz）做不出剛好
+是 B2xx 家族的設定；測過 B210 與 NI USRP-2901，而且只量過單向（v2.0.0，v2.3.0 沒有重測）。Master clock 固定的裝置（例如 N210 的 100 MHz）做不出剛好
 15.36 MS/s，UHD 讀回的速率不同時程式會印警告。用法與量到的數字見
-[7.4 節](07-reference.md#74-analog-bandwidth-與-ofdm-signal-寬度)與 [8.10 節](08-measurements.md#810-1536-mss-單向ni-usrp-2901--b21024402460-mhz)。
+[7.4 節](07-reference.md#74-analog-bandwidth-與-ofdm-signal-寬度)與 [8.10 節](08-measurements.md#810-1536-mss-單向ni-usrp-2901--b21024402460-mhz)。v2.3.0 實測用的是 PC 上的 NI USRP-2901 與
+Jetson Xavier NX 上的 B210，見 [8.11 節](08-measurements.md#811-v230-實測pc-與-jetson-xavier-nx)。
 
 ### 一次性設定
 
@@ -148,7 +150,7 @@ B210／2901 回報的 subdev spec 是 `A:A A:B`，依 channel 順序對應 front
 | Front end | 只有一個 daughterboard slot，顯示為 `Slot A (ch 0)` |
 | Antenna | 顯示成 front panel 名稱：`TX/RX (RF1)`、`RX2 (RF2)`。**TX 只能用 RF1** |
 | Frequency／gain | 由 daughterboard 決定，GUI 讀回實際範圍。例如 CBX 是 1.2–6 GHz、TX gain 0–31.5 dB、RX gain 0–38 dB。超出範圍時 Start 前就會被拒絕 |
-| 當接收端 | 2.45 GHz 時靈敏度明顯比 Pluto 差：同一個擺放下 Pluto 用最大輸出發射，N210 只收到約 4 dB 的 SNR，解不出來（見[實測紀錄 8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)）。N210 建議放在發送端 |
+| 當接收端 | 2.45 GHz 時靈敏度明顯比 Pluto 差：同一個擺放下 Pluto 用最大輸出發射，N210 只收到約 4 dB 的 SNR，解不出來（見[實測紀錄 8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)；v1.0 發布前量的，v2.3.0 沒有重測）。N210 建議放在發送端 |
 | Analog bandwidth | CBX 固定 40 MHz；實際 bandwidth 由 N210 的 digital filtering 決定 |
 
 **Frequency 一定要確認有調到。** UHD 遇到超出範圍的 frequency 不會報錯，只會默默改成最近的邊界：
@@ -224,7 +226,7 @@ python -m ofdm_message_link.tx_app \
 | 調頻時的 carrier | TX 第一次調到新 frequency 時，量到約 33 ms、接近滿輸出的未調變 carrier，**不受 gain 設定控制**（研判是 AD936x 的 TX calibration）。**這是用 cable 加 attenuator 的另一個理由** |
 
 **④ 建議起點：TX −5 dB／RX 15 dB**（預設的 2.45 GHz、兩台放在同一張桌上、各接原廠 antenna；
-同樣的擺放在 1.2 GHz 只需要 TX −15 dB）。**這只是起點，不是保證**：2.4 GHz 和 Wi-Fi、Bluetooth
+同樣的擺放在 1.2 GHz 只需要 TX −15 dB；v1.0 發布前量的，v2.3.0 沒有重測）。**這只是起點，不是保證**：2.4 GHz 和 Wi-Fi、Bluetooth
 共用，同一個擺放在不同時間量到的 SNR 差了 1–2 dB。照這個順序調：
 
 1. 從 TX −5 dB 開始，看接收端的 `SNR (2 s)` 與 `Loss (10 s)`。
@@ -237,7 +239,7 @@ python -m ofdm_message_link.tx_app \
 
 Pluto 和 USRP 可以各在一端（每個 process 自己選 `--transport`）。實測過 N210 發、Pluto 收可以傳
 影像；反過來 Pluto 發、N210 收在同樣的擺放下收不到，見
-[實測紀錄 8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)。一鍵腳本的 `--transport`
+[實測紀錄 8.6](08-measurements.md#86-n210-與-adalm-pluto-交叉245-ghz)（v1.0 發布前量的，v2.3.0 沒有重測）。一鍵腳本的 `--transport`
 是兩端共用的，兩端不同廠牌時要照[第 3 篇](03-your-own-app.md#先用模擬跑不需要-sdr)的做法分開啟動。
 
 ## 4.4 為什麼 burst 要做 peak normalization

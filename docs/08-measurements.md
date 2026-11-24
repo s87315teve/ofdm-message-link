@@ -10,7 +10,10 @@
 > 預設的 2.45 GHz profile 只有 8.5 的 Pluto 對 Pluto、與 8.6 的 N210 對 Pluto 短時間量測。
 >
 > 8.9 的雙向 FDD 用 2420／2460 MHz，在 2.4 GHz ISM 頻段內，但分別落在 Wi-Fi channel 1 與 11。8.10 的 15.36 MS/s
-> 單向量測用 2440／2460 MHz。
+> 單向量測用 2440／2460 MHz，8.11 用 2420／2460 MHz。
+>
+> **哪些是 v2.3.0 量的。** 只有 8.11（現在使用的 PC + NI USRP-2901 與 Jetson Xavier NX + B210）。8.1–8.10 的硬體
+> 現在沒有在用，v2.3.0 沒有重測；每一組最後在哪一版量過、量到什麼，整理在 8.11 最後的表。
 >
 > **SNR 的定義在 8.7 改了。** 8.1–8.6 的 SNR（`SNR (2 s)`、`effective SNR`）是由 EVM 推算的舊定義：
 > 只算解出來的 burst，而且比真實 SNR 低 3–5 dB。8.7 之後的 SNR 由每個 burst 的 preamble 在資料 carrier
@@ -780,7 +783,58 @@ step 之後 1.06% → 1.11%（沒變）。剩下的約 77 個是 feedback 來回
   記錄了之後的確認實驗。
 - 沒有量的：`node_app` 雙向、超過 300 秒、其他擺放位置、其他 USRP。
 
-## 8.11 沒有實測過的東西
+## 8.11 v2.3.0 實測：PC 與 Jetson Xavier NX
+
+**實測**，2026-11-24，程式 `16b3094`（v2.3.0 的程式，之後只改了文件與版本號），兩台主機相同。原始資料在本機
+`runs/jetson_b210_20261118/sweeps/`；`runs/` 不進版控，所以數字記在這裡。這是現在使用的硬體；開發期間在另一台
+Xavier NX 上做的設定比較（2026-11-19）見 [7.10 節](07-reference.md#710-效能開關與-native-模組)。
+
+| 項目 | 設定 |
+|---|---|
+| PC | Intel Core Ultra 7 265K（20 核）+ NI USRP-2901（`30FE782`），USB 3 |
+| Jetson | Jetson Xavier NX 16 GB（JetPack 5.1.2）+ B210（`3150380`），USB 3 |
+| 連接 | 同一張桌，各接天線；兩端 TX gain 89.75 dB、RX gain 20 dB；968-byte datagram |
+| 情境 | **Jetson 收**：PC `tx_app` → Jetson `rx_app`，2460 MHz、5 MS/s、MCS 12。**雙向**：兩個 `node_app`，Jetson TX 2420／PC TX 2460 MHz、5 MS/s、MCS 12。**Jetson 發**：Jetson `tx_app` → PC `rx_app`，2420 MHz、10 MS/s、MCS 17 |
+| Jetson 這端 | 收的時候用 `jetson_rx_feed.yaml` 的值（65536 samples／15 ms）、4 個 decode worker；三個 app 都加 `--realtime`（2 核那欄除外，見下） |
+| PC 這端 | 送往 Jetson 時 burst 間隔 25 ms（同 `tx_to_jetson.yaml`），其他條件和 7.10 節那組量測相同 |
+| 判定 | 每點 60 秒、只跑一次。PC→Jetson 遺失 ≤ 0.5 %、Jetson→PC ≤ 0.1 % 算通過 |
+
+Jetson 的四種 CPU 設定：平常的 MODE_20W_6CORE（6 核 1.42 GHz，沒有跑 `jetson_clocks`）、同一個模式加 `jetson_clocks`、
+MODE_20W_4CORE（4 核 1.42 GHz）與 MODE_20W_2CORE（2 核 1.9 GHz），後兩個都加 `jetson_clocks`。
+
+| 情境 | 6 核（平常） | 6 核 + `jetson_clocks` | 4 核 | 2 核（沒有 `--realtime`） |
+|---|---|---|---|---|
+| Jetson 收：通過的最高速率 | 200/s，1.55 Mb/s（300/s 掉 1.87 %） | 300/s，2.32 Mb/s | 沒有（200/s 掉 16.3 %） | 沒有（200/s 掉 47.9 %） |
+| 雙向：Jetson→PC 通過的最高速率 | 150/s（量到的最高點） | 150/s | 150/s | 150/s |
+| 雙向：PC→Jetson 通過的最高速率 | 25/s（50/s 掉 6.07 %） | 50/s | 沒有（25/s 掉 6.27 %） | 沒有（25/s 掉 28.7 %） |
+| Jetson 發：最高送達 | 8.0 Mb/s（1000/s 通過） | 8.5 Mb/s（1000/s 通過） | 8.0 Mb/s（1000/s 通過） | 7.7 Mb/s（1000/s 通過） |
+
+- **Jetson 收資料要 6 個核。** 4 核與 2 核時連量的最低點都不通過，CPU 全滿。2 核時程式不准用 `--realtime`（可用 CPU
+  少於 4 個就拒絕，見 [7.10 節](07-reference.md#710-效能開關與-native-模組)），所以那欄沒有加；另外在 6 核 + `jetson_clocks`
+  拿掉 `--realtime` 對照，通過點不變（收 300/s、雙向 PC→Jetson 50/s），所以 2 核不行是因為核心少，不是因為沒有 `--realtime`。
+- **`jetson_clocks` 的差別還不能下定論。** 它讓兩個收的情境各多通過一級，但每點只量一次；同一個點重複量，遺失可以差到
+  兩三倍（2026-11-22 在第一台 Xavier NX 上用同樣的程式，收 300/s 量 3 次是 2.19–5.96 %）。
+- **Jetson 發的上限約 8 Mb/s，和核心數、時脈都沒有關係。** 整台 Jetson 只用約 2.3 核；2 核 1.9 GHz 時發送的主 thread 用得比較少，
+  上限卻沒有提高。超過的部分是 Jetson 發送端自己的 queue 滿了丟掉的，PC 收端沒有 overflow。看起來不是 CPU 不夠，原因還沒找到。
+- **PC 這端不是瓶頸：** 所有的點 PC 收端都沒有 overflow，Jetson 發到 8.5 Mb/s 時 PC 的 `rx_app` 約用 2 核。
+- **長時間：** 2026-11-22 在第一台 Xavier NX（同一台 B210、同樣的程式與設定，6 核平常模式）跑雙向 50/25 連續 3 小時：
+  Jetson→PC 遺失 0.004 %（540 000 個掉 23 個）、PC→Jetson 0.004 %（270 000 個掉 11 個）。
+- 沒有量的：Jetson 收 200/s 以下的點（4 核、2 核的通過點在哪裡不知道）、重複量、其他 MCS 與 sample rate、
+  其他擺放位置、PC 對 PC（現在只有一台 USRP 接在 PC 上）。
+
+### 沒有在 v2.3.0 重測的硬體
+
+下面這些組合現在沒有在用，v2.3.0 沒有重測。表上是最後一次實測的版本與當時量到的結果；之後的版本有沒有改變它們，不知道。
+
+| 硬體 | 最後實測 | 當時量到 |
+|---|---|---|
+| NI USRP-2901 與 B210 接在同一台 PC，雙向 `node_app` | v2.0.1（2026-11-12） | 10 MS/s、MCS 16，每個方向 1600/s 遺失 0.03 %／0.02 %（11.52 Mb/s），每點 300 秒（[`experiments/duplex_fdd/README.md`](../experiments/duplex_fdd/README.md) 4.8） |
+| 同上，15.36 MS/s 單向 | v2.0.0（2026-11-11 驗收） | MCS 17 約 35.5 Mb/s、遺失低於 0.5 %，但 300 秒的穩定度判定 FAIL；A→B 有時一啟動就壞（8.10） |
+| B210 → NI USRP-2901，3.8 GHz | v1.0 發布前（2026-10-04 以前） | 5 MS/s 單向與影像 demo；MCS 4 每秒 400 個 burst 無遺失（8.1、8.2） |
+| USRP N210 | v1.0 發布前（2026-10-05 以前） | 當發送端可以：N210 → 2901 在 1.2 GHz 影像 180 秒遺失 0.56 %（8.3），N210 → Pluto 在 2.45 GHz 影像 60 秒遺失 0.41 %（8.6）。當接收端在 2.45 GHz 收不到 Pluto（SNR 約 4 dB，8.6） |
+| ADALM-Pluto | v2.0 開發期（2026-11-01，之後併入 v2.0 的分支） | 單向 wire v5（8.8）、雙向 `node_app` 2420／2460 MHz 與 link adaptation、雙向影像（8.9）；更早的 1.2／2.45 GHz 單向見 8.4、8.5 |
+
+## 8.12 沒有實測過的東西
 
 誠實列出來，免得被誤認為已經驗證：
 
